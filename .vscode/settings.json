@@ -1,0 +1,13 @@
+{
+    "python.formatting.provider": "black",
+    "editor.formatOnSave": true,
+    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": true,
+    "python.linting.enabled": true,
+    "python.linting.flake8Args": [
+      "--exclude=*/*migrations/*, testproject/testproject/settings/*, __init__.py, apps.py",
+      "--ignore=E203, E266, E501, W503",
+      "--max-complexity=18",
+      "--max-line-length=88"
+    ]
+  }
