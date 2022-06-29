@@ -5,8 +5,15 @@ name = "pypi"
 
 [packages]
 django = ">=4.0,<4.1"
-graphene = ">=3.0,<4.0"
-graphene-django = "*"
+django-extensions = "*"
+django-health-check = "*"
+django-model-utils = "*"
+django-storages = "*"
+graphene-django = ">=2.15,<2.16"
+graphene-django-extras = "==0.4.9"
+gunicorn = "*"
+psycopg2-binary = "*"
+uvicorn = {extras = ["standard"], version = "*"}
 
 [dev-packages]
 black = "*"
