@@ -5,19 +5,22 @@ name = "pypi"
 
 [packages]
 django = ">=4.0,<4.1"
+django-colorfield = "*"
 django-extensions = "*"
 django-health-check = "*"
+django-location-field = "*"
 django-model-utils = "*"
 django-storages = "*"
-graphene-django = ">=2.15,<2.16"
-graphene-django-extras = "==0.4.9"
 gunicorn = "*"
 psycopg2-binary = "*"
+strawberry-graphql = "*"
 uvicorn = {extras = ["standard"], version = "*"}
 
 [dev-packages]
 black = "*"
 flake8 = "*"
+mypi = "*"
+strawberry-graphql = {extras = ["debug-server"], version = "*"}
 
 [requires]
 python_version = "3.10"

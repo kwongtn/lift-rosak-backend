@@ -18,14 +18,14 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 from django.views.decorators.csrf import csrf_exempt
-from graphene_django.views import GraphQLView
+from strawberry.django.views import GraphQLView
 
 from .schema import schema
 
 urlpatterns = (
     [
         path("health-check/", include("health_check.urls")),
-        path(settings.ADMIN_PATH, admin.site.urls),
+        path("admin/", admin.site.urls),
         path(
             "graphql/",
             csrf_exempt(
@@ -35,7 +35,7 @@ urlpatterns = (
                 )
             ),
         ),
-        path("oauth2/v1/", include("oauth2.urls", namespace="oauth2_v1")),
+        # path("oauth2/v1/", include("oauth2.urls", namespace="oauth2_v1")),
     ]
     # These are served in debug mode only
     + static("media/", document_root=settings.MEDIA_ROOT)

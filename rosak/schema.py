@@ -1,26 +1,25 @@
-import graphene
+import strawberry
 
 
-class Query(
-    graphene.ObjectType,
-):
-    pass
+@strawberry.type
+class Query:
+    @strawberry.field
+    def hello(self) -> str:
+        return "Hello World"
 
 
-class Mutation(
-    graphene.ObjectType,
-):
-    pass
+# @strawberry.type
+# class Mutation:
+#     pass
 
 
-class Subscription(
-    graphene.ObjectType,
-):
-    pass
+# @strawberry.type
+# class Subscription:
+#     pass
 
 
-schema = graphene.Schema(
+schema = strawberry.Schema(
     query=Query,
-    mutation=Mutation,
-    subscription=Subscription,
+    # mutation=Mutation,
+    # subscription=Subscription,
 )
