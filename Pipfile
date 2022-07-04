@@ -5,6 +5,7 @@ name = "pypi"
 
 [packages]
 django = ">=4.0,<4.1"
+django-choices-field = "*"
 django-colorfield = "*"
 django-extensions = "*"
 django-health-check = "*"
@@ -13,7 +14,9 @@ django-model-utils = "*"
 django-storages = "*"
 gunicorn = "*"
 psycopg2-binary = "*"
+strawberry-django-plus = "*"
 strawberry-graphql = "*"
+strawberry-graphql-django = "*"
 uvicorn = {extras = ["standard"], version = "*"}
 
 [dev-packages]
