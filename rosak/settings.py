@@ -40,6 +40,9 @@ INSTALLED_APPS = [
     "location_field.apps.DefaultConfig",
     "colorfield",
     "strawberry.django",
+    "django.contrib.gis",
+    "operation",
+    "common",
 ]
 
 MIDDLEWARE = [
@@ -80,7 +83,7 @@ WSGI_APPLICATION = "rosak.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
+        "ENGINE": "django.contrib.gis.db.backends.postgis",
         "HOST": os.environ.get("DATABASE_HOST"),
         "NAME": os.environ.get("DATABASE_NAME"),
         "USER": os.environ.get("DATABASE_USER"),

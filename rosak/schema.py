@@ -1,8 +1,12 @@
 import strawberry
 
+from operation.schema.schema import OperationScalars
+
 
 @strawberry.type
-class Query:
+class Query(
+    OperationScalars,
+):
     @strawberry.field
     def hello(self) -> str:
         return "Hello World"
