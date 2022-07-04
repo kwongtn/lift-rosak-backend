@@ -2,7 +2,7 @@ version: "3"
 
 services:
   db:
-    image: postgres:14
+    image: postgis/postgis:14-3.2-alpine
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
     ports:
@@ -10,7 +10,7 @@ services:
     restart: always
 
   web:
-    image: nginx:latest
+    image: nginx:alpine
     env_file:
       - secrets.dev.env
     ports:
