@@ -2,7 +2,7 @@ import strawberry
 import strawberry_django
 
 from operation import models
-from operation.enums import AssetType
+from operation.schema.enums import AssetType
 
 
 @strawberry_django.filters.filter(models.Line)
@@ -29,4 +29,13 @@ class LineFilter:
 class AssetFilter:
     id: strawberry.ID
     officialid: str
-    asset_type: "AssetType"
+    asset_type: AssetType
+
+    def filter_id(self, queryset):
+        return queryset.filter(id=self.id)
+
+    def filter_officialid(self, queryset):
+        return queryset.filter(officialid=self.officialid)
+
+    def filter_asset_type(self, queryset):
+        return queryset.filter(asset_type=self.asset_type)
