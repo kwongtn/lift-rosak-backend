@@ -1,4 +1,5 @@
 import strawberry
+from strawberry_django_plus.optimizer import DjangoOptimizerExtension
 
 from operation.schema.schema import OperationScalars
 
@@ -26,4 +27,7 @@ schema = strawberry.Schema(
     query=Query,
     # mutation=Mutation,
     # subscription=Subscription,
+    extensions=[
+        DjangoOptimizerExtension,
+    ],
 )

@@ -29,4 +29,4 @@ class LineFilter:
 class AssetFilter:
     id: strawberry.ID
     officialid: str
-    asset_type: AssetType.choices
+    asset_type: "AssetType"
