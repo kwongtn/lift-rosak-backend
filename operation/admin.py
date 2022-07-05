@@ -1,14 +1,12 @@
+from django import forms
 from django.contrib.gis import admin
 
-# from generic.views import GeometricForm
+from generic.views import GeometricForm
 from operation.models import Asset, AssetMedia, Line, Station, StationLine, StationMedia
-
-# Register your models here.
 
 
 class AssetMediaStackedInline(admin.StackedInline):
     model = AssetMedia
-    # classes = ["collapse"]
 
 
 class AssetAdmin(admin.ModelAdmin):
@@ -37,11 +35,18 @@ class LineAdmin(admin.ModelAdmin):
     ]
 
 
+class StationForm(GeometricForm):
+    field_name = "location"
+    GeometricForm.Meta.model = Station
+    GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
+
+
 class StationAdmin(admin.ModelAdmin):
     inlines = [
         StationLineStackedInline,
         StationMediaStackedInline,
     ]
+    form = StationForm
 
 
 admin.site.register(Line, LineAdmin)
