@@ -70,7 +70,7 @@ class StationLine(TimeStampedModel):
 
 class Asset(TimeStampedModel):
     officialid = models.TextField()
-    stations = models.ForeignKey(
+    station = models.ForeignKey(
         to="operation.Station",
         on_delete=models.PROTECT,
     )
