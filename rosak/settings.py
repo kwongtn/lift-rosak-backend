@@ -43,6 +43,8 @@ INSTALLED_APPS = [
     "django.contrib.gis",
     "operation",
     "common",
+    "reporting",
+    "generic",
 ]
 
 MIDDLEWARE = [
