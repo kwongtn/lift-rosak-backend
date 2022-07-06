@@ -1,7 +1,7 @@
 import strawberry
 from strawberry_django_plus.optimizer import DjangoOptimizerExtension
 
-from operation.schema.schema import OperationScalars
+from operation.schema.schema import OperationMutations, OperationScalars
 
 
 @strawberry.type
@@ -13,9 +13,11 @@ class Query(
         return "Hello World"
 
 
-# @strawberry.type
-# class Mutation:
-#     pass
+@strawberry.type
+class Mutation(
+    OperationMutations,
+):
+    pass
 
 
 # @strawberry.type
@@ -25,7 +27,7 @@ class Query(
 
 schema = strawberry.Schema(
     query=Query,
-    # mutation=Mutation,
+    mutation=Mutation,
     # subscription=Subscription,
     extensions=[
         DjangoOptimizerExtension,
