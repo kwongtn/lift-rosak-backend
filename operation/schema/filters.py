@@ -32,6 +32,7 @@ class AssetFilter:
     id: strawberry.ID
     officialid: str
     asset_type: AssetType
+    station_id: strawberry.ID
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)
@@ -41,6 +42,9 @@ class AssetFilter:
 
     def filter_asset_type(self, queryset):
         return queryset.filter(asset_type=self.asset_type)
+
+    def filter_station_id(self, queryset):
+        return queryset.filter(station_id=self.station_id)
 
 
 @strawberry_django.filters.filter(models.Station)
