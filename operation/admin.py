@@ -11,6 +11,19 @@ class AssetMediaStackedInline(admin.StackedInline):
 
 class AssetAdmin(admin.ModelAdmin):
     inlines = [AssetMediaStackedInline]
+    list_display = [
+        "id",
+        "station",
+        "short_description",
+        "asset_type",
+    ]
+    list_filter = [
+        "asset_type",
+    ]
+    search_fields = [
+        "short_description",
+        "long_description",
+    ]
 
 
 class StationStackedInline(admin.StackedInline):
@@ -33,6 +46,17 @@ class LineAdmin(admin.ModelAdmin):
     inlines = [
         StationLineStackedInline,
     ]
+    list_display = [
+        "id",
+        "code",
+        "display_name",
+        "display_color",
+    ]
+    search_fields = [
+        "code",
+        "display_name",
+        "display_color",
+    ]
 
 
 class StationForm(GeometricForm):
@@ -47,6 +71,16 @@ class StationAdmin(admin.ModelAdmin):
         StationMediaStackedInline,
     ]
     form = StationForm
+    list_display = [
+        "id",
+        "display_name",
+        "internal_representation",
+        "location",
+    ]
+    search_fields = [
+        "display_name",
+        "internal_representation",
+    ]
 
 
 admin.site.register(Line, LineAdmin)
