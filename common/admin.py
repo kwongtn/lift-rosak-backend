@@ -1,3 +1,11 @@
-# from django.contrib import admin
+from django.contrib import admin
 
-# Register your models here.
+from common.models import Media, User
+
+
+class MediaStackedInline(admin.StackedInline):
+    model = Media
+
+
+admin.site.register(Media, admin.ModelAdmin)
+admin.site.register(User, admin.ModelAdmin)

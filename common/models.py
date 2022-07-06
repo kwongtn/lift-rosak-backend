@@ -6,7 +6,10 @@ from model_utils.models import SoftDeletableModel, TimeStampedModel, UUIDModel
 
 class Media(TimeStampedModel, UUIDModel, SoftDeletableModel):
     file = models.FileField()
-    uploader = models.ForeignKey(to="common.User")
+    uploader = models.ForeignKey(
+        to="common.User",
+        on_delete=models.PROTECT,
+    )
 
 
 class User(TimeStampedModel):
