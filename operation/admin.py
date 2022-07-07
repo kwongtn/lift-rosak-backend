@@ -5,6 +5,10 @@ from generic.views import GeometricForm
 from operation.models import Asset, AssetMedia, Line, Station, StationLine, StationMedia
 
 
+class AssetStackedInline(admin.StackedInline):
+    model = Asset
+
+
 class AssetMediaStackedInline(admin.StackedInline):
     model = AssetMedia
 
