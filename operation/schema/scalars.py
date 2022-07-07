@@ -4,6 +4,7 @@ import strawberry
 import strawberry.django
 from strawberry import auto
 
+from generic.schema.scalars import GeoPoint
 from operation import models
 
 
@@ -11,7 +12,7 @@ from operation import models
 class Station:
     id: auto
     display_name: str
-    location: str
+    location: "GeoPoint"
     lines: List["Line"]
     assets: List["Asset"]
 
