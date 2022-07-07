@@ -1,6 +1,7 @@
 import strawberry
 from strawberry_django_plus.optimizer import DjangoOptimizerExtension
 
+from common.schema.schema import CommonMutations, CommonScalars
 from operation.schema.schema import OperationMutations, OperationScalars
 from reporting.schema.schema import ReportingMutations, ReportingScalars
 
@@ -9,6 +10,7 @@ from reporting.schema.schema import ReportingMutations, ReportingScalars
 class Query(
     OperationScalars,
     ReportingScalars,
+    CommonScalars,
 ):
     @strawberry.field
     def hello(self) -> str:
@@ -16,10 +18,7 @@ class Query(
 
 
 @strawberry.type
-class Mutation(
-    OperationMutations,
-    ReportingMutations,
-):
+class Mutation(OperationMutations, ReportingMutations, CommonMutations):
     pass
 
 
