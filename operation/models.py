@@ -2,7 +2,7 @@ from colorfield.fields import ColorField
 from django.contrib.gis.db import models
 from model_utils.models import TimeStampedModel
 
-from operation.enums import AssetType
+from operation.enums import AssetStatus, AssetType
 
 # Create your models here.
 
@@ -101,6 +101,10 @@ class Asset(TimeStampedModel):
     medias = models.ManyToManyField(
         to="common.Media",
         through="operation.AssetMedia",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=AssetStatus.choices,
     )
 
 
