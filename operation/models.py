@@ -82,10 +82,11 @@ class Asset(TimeStampedModel):
         to="operation.Station",
         on_delete=models.PROTECT,
     )
-    short_description = models.TextField(
+    short_description = models.CharField(
         default="",
         blank=True,
         null=False,
+        max_length=96,
     )
     long_description = models.TextField(
         default="",
