@@ -1,7 +1,7 @@
 import strawberry
 import strawberry_django
 
-from common.schema import models
+from common import models
 
 
 @strawberry_django.filters.filter(models.Media)
