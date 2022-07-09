@@ -22,18 +22,14 @@ class Line(TimeStampedModel):
         null=False,
         blank=False,
     )
+    stations = models.ManyToManyField(
+        to="operation.Station",
+        through="operation.StationLine",
+    )
 
 
 class Station(TimeStampedModel):
-    display_name = models.CharField(
-        max_length=64,
-    )
-    display_code = models.CharField(
-        max_length=16,
-        unique=True,
-        null=False,
-        blank=False,
-    )
+    display_name = models.TextField()
     internal_representation = models.CharField(
         max_length=32,
         unique=True,
@@ -41,14 +37,10 @@ class Station(TimeStampedModel):
         blank=True,
         default=None,
     )
-    location = models.PointField(
-        blank=True,
-        null=True,
-        default=None,
-    )
-    line = models.ForeignKey(
+    location = models.PointField()
+    lines = models.ManyToManyField(
         to="operation.Line",
-        on_delete=models.PROTECT,
+        through="operation.StationLine",
     )
     medias = models.ManyToManyField(
         to="common.Media",
@@ -65,6 +57,18 @@ class StationMedia(models.Model):
         "common.Media",
         on_delete=models.PROTECT,
     )
+
+
+class StationLine(TimeStampedModel):
+    station = models.ForeignKey(
+        to="operation.Station",
+        on_delete=models.PROTECT,
+    )
+    line = models.ForeignKey(
+        to="operation.Line",
+        on_delete=models.PROTECT,
+    )
+    # display_name = models.TextField()
 
 
 class Asset(TimeStampedModel):

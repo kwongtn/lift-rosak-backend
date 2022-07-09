@@ -2,7 +2,7 @@ from django import forms
 from django.contrib.gis import admin
 
 from generic.views import GeometricForm
-from operation.models import Asset, AssetMedia, Line, Station, StationMedia
+from operation.models import Asset, AssetMedia, Line, Station, StationLine, StationMedia
 
 
 class AssetStackedInline(admin.StackedInline):
@@ -46,8 +46,14 @@ class LineStackedInline(admin.StackedInline):
     model = Line
 
 
+class StationLineStackedInline(admin.StackedInline):
+    model = StationLine
+
+
 class LineAdmin(admin.ModelAdmin):
-    inlines = []
+    inlines = [
+        StationLineStackedInline,
+    ]
     list_display = [
         "id",
         "code",
@@ -69,6 +75,7 @@ class StationForm(GeometricForm):
 
 class StationAdmin(admin.ModelAdmin):
     inlines = [
+        StationLineStackedInline,
         StationMediaStackedInline,
     ]
     form = StationForm
