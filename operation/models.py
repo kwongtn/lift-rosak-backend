@@ -30,14 +30,11 @@ class Line(TimeStampedModel):
 
 class Station(TimeStampedModel):
     display_name = models.TextField()
-    internal_representation = models.CharField(
-        max_length=32,
-        unique=True,
+    location = models.PointField(
         null=True,
         blank=True,
         default=None,
     )
-    location = models.PointField()
     lines = models.ManyToManyField(
         to="operation.Line",
         through="operation.StationLine",
@@ -68,7 +65,14 @@ class StationLine(TimeStampedModel):
         to="operation.Line",
         on_delete=models.PROTECT,
     )
-    # display_name = models.TextField()
+    display_name = models.TextField()
+    internal_representation = models.CharField(
+        max_length=32,
+        unique=True,
+        null=True,
+        blank=True,
+        default=None,
+    )
 
 
 class Asset(TimeStampedModel):
