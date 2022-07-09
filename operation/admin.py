@@ -13,8 +13,12 @@ class AssetMediaStackedInline(admin.StackedInline):
     model = AssetMedia
 
 
+class AssetMediaTabluarInline(admin.TabularInline):
+    model = AssetMedia
+
+
 class AssetAdmin(admin.ModelAdmin):
-    inlines = [AssetMediaStackedInline]
+    inlines = [AssetMediaTabluarInline]
     list_display = [
         "id",
         "station",
