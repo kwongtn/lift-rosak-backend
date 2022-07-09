@@ -69,6 +69,7 @@ class LineAdmin(admin.ModelAdmin):
 
 class StationForm(GeometricForm):
     field_name = "location"
+    required = False
     GeometricForm.Meta.model = Station
     GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
 
@@ -82,7 +83,6 @@ class StationAdmin(admin.ModelAdmin):
     list_display = [
         "id",
         "display_name",
-        "internal_representation",
         "location",
     ]
     search_fields = [

@@ -18,15 +18,17 @@ class GeometricForm(forms.ModelForm):
         GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
     """
 
+    required: bool = None
+
     latitude = forms.FloatField(
         min_value=-90,
         max_value=90,
-        required=True,
+        required=required,
     )
     longitude = forms.FloatField(
         min_value=-180,
         max_value=180,
-        required=True,
+        required=required,
     )
 
     field_name: str = None
