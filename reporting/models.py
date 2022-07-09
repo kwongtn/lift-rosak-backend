@@ -17,6 +17,21 @@ class Report(TimeStampedModel, UUIDModel, SoftDeletableModel):
     )
     description = models.TextField(default="")
     type = models.TextField(choices=ReportType.choices)
+    medias = models.ManyToManyField(
+        to="common.Media",
+        through="reporting.ReportMedia",
+    )
+
+
+class ReportMedia(models.Model):
+    report = models.ForeignKey(
+        to="reporting.Report",
+        on_delete=models.PROTECT,
+    )
+    media = models.ForeignKey(
+        to="common.Media",
+        on_delete=models.PROTECT,
+    )
 
 
 class Resolution(TimeStampedModel, UUIDModel, SoftDeletableModel):
@@ -28,6 +43,7 @@ class Resolution(TimeStampedModel, UUIDModel, SoftDeletableModel):
         to="common.User",
         on_delete=models.PROTECT,
     )
+    notes = models.TextField(default="")
 
 
 class ReportResolution(models.Model):

@@ -23,6 +23,7 @@ class Resolution:
     id: str
     reports: List["Report"]
     # user: "User"
+    notes: str
 
 
 @strawberry.django.type(models.Vote)

@@ -1,10 +1,14 @@
 from django.contrib import admin
 
-from reporting.models import Report, ReportResolution, Resolution, Vote
+from reporting.models import Report, ReportMedia, ReportResolution, Resolution, Vote
 
 
 class ReportStackedInline(admin.StackedInline):
     model = Report
+
+
+class ReportMediaStackedInline(admin.StackedInline):
+    model = ReportMedia
 
 
 class ResolutionStackedInline(admin.StackedInline):
@@ -15,12 +19,19 @@ class VoteStackedInline(admin.StackedInline):
     model = Vote
 
 
+class VoteTabularInline(admin.TabularInline):
+    model = Vote
+
+
 class ReportResolutionStackedInline(admin.StackedInline):
     model = ReportResolution
 
 
 class ReportAdmin(admin.ModelAdmin):
-    pass
+    inlines = [
+        ReportMediaStackedInline,
+        VoteStackedInline,
+    ]
 
 
 class ResolutionAdmin(admin.ModelAdmin):

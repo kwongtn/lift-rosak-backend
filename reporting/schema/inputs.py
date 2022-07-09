@@ -24,6 +24,7 @@ class ReportPartialInput(ReportInput):
 class ResolutionInput:
     report_ids: List[str]
     user_id: strawberry.ID
+    notes: str
 
 
 @strawberry_django.input(models.Resolution, partial=True)
