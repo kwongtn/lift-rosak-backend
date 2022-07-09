@@ -8,10 +8,11 @@ from operation.enums import AssetType
 
 
 class Line(TimeStampedModel):
-    code = models.TextField(
+    code = models.CharField(
         unique=True,
         null=False,
         blank=False,
+        max_length=32,
     )
     display_name = models.TextField(
         null=False,
@@ -29,9 +30,11 @@ class Line(TimeStampedModel):
 
 class Station(TimeStampedModel):
     display_name = models.TextField()
-    internal_representation = models.TextField(
+    internal_representation = models.CharField(
+        max_length=32,
         unique=True,
         null=True,
+        blank=True,
         default=None,
     )
     location = models.PointField()
@@ -69,17 +72,24 @@ class StationLine(TimeStampedModel):
 
 
 class Asset(TimeStampedModel):
-    officialid = models.TextField()
+    officialid = models.CharField(
+        default=None,
+        null=True,
+        blank=True,
+        max_length=64,
+    )
     station = models.ForeignKey(
         to="operation.Station",
         on_delete=models.PROTECT,
     )
     short_description = models.TextField(
         default="",
+        blank=True,
         null=False,
     )
     long_description = models.TextField(
         default="",
+        blank=True,
         null=False,
     )
     asset_type = models.TextField(choices=AssetType.choices)

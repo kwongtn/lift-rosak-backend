@@ -10,6 +10,9 @@ class Report(TimeStampedModel, UUIDModel, SoftDeletableModel):
     asset = models.ForeignKey(
         to="operation.Asset",
         on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        default=None,
     )
     reporter = models.ForeignKey(
         to="common.User",
