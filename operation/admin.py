@@ -1,4 +1,3 @@
-from django import forms
 from django.contrib.gis import admin
 
 from generic.views import GeometricForm
@@ -71,7 +70,7 @@ class StationForm(GeometricForm):
     field_name = "location"
     required = False
     GeometricForm.Meta.model = Station
-    GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
+    # GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
 
 
 class StationAdmin(admin.ModelAdmin):
