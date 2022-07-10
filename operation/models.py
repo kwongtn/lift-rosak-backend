@@ -154,13 +154,35 @@ class Vehicle(models.Model):
         blank=False,
         on_delete=models.PROTECT,
     )
-    notes = models.TextField(default="")
+    notes = models.TextField(
+        default="",
+        blank=True,
+    )
+
+    def __str__(self) -> str:
+        return f"{self.identification_no} @ {self.line.code}"
 
 
 class VehicleType(models.Model):
+    internal_name = models.CharField(
+        max_length=16,
+        blank=True,
+        null=True,
+        default=None,
+    )
     display_name = models.CharField(
         max_length=64,
         null=False,
         blank=False,
     )
-    description = models.TextField(default="")
+    description = models.TextField(
+        default="",
+        blank=True,
+    )
+
+    def __str__(self) -> str:
+        display_name = (
+            self.internal_name if self.internal_name else self.display_name[:16]
+        )
+
+        return f"{self.id} - {display_name}"
