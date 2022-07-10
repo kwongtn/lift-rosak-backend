@@ -6,6 +6,7 @@ from strawberry import auto
 
 from generic.schema.scalars import GeoPoint
 from operation import models
+from operation.schema.enums import VehicleStatus
 
 
 @strawberry.django.type(models.Station)
@@ -34,3 +35,18 @@ class Asset:
     short_description: str
     long_description: str
     stations: List["Station"]
+
+
+@strawberry.django.type(models.VehicleType)
+class VehicleType:
+    id: auto
+
+
+@strawberry.django.type(models.Vehicle)
+class Vehicle:
+    id: auto
+    identification_no: str
+    vehicle_type: "VehicleType"
+    status: "VehicleStatus"
+    line: "Line"
+    notes: str

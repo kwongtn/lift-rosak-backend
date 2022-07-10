@@ -1,10 +1,23 @@
 from django.contrib.gis import admin
 
 from generic.views import GeometricForm
-from operation.models import Asset, AssetMedia, Line, Station, StationLine, StationMedia
+from operation.models import (
+    Asset,
+    AssetMedia,
+    Line,
+    Station,
+    StationLine,
+    StationMedia,
+    Vehicle,
+    VehicleType,
+)
 
 
 class AssetStackedInline(admin.StackedInline):
+    model = Asset
+
+
+class AssetTabularInline(admin.TabularInline):
     model = Asset
 
 
@@ -19,13 +32,15 @@ class AssetMediaTabluarInline(admin.TabularInline):
 class AssetAdmin(admin.ModelAdmin):
     inlines = [AssetMediaTabluarInline]
     list_display = [
-        "id",
+        "__str__",
         "station",
         "short_description",
         "asset_type",
+        "status",
     ]
     list_filter = [
         "asset_type",
+        "status",
     ]
     search_fields = [
         "short_description",
@@ -49,12 +64,16 @@ class StationLineStackedInline(admin.StackedInline):
     model = StationLine
 
 
+class StationLineTabularInline(admin.TabularInline):
+    model = StationLine
+
+
 class LineAdmin(admin.ModelAdmin):
     inlines = [
-        StationLineStackedInline,
+        StationLineTabularInline,
     ]
     list_display = [
-        "id",
+        "__str__",
         "code",
         "display_name",
         "display_color",
@@ -75,12 +94,13 @@ class StationForm(GeometricForm):
 
 class StationAdmin(admin.ModelAdmin):
     inlines = [
-        StationLineStackedInline,
+        StationLineTabularInline,
         StationMediaStackedInline,
+        AssetTabularInline,
     ]
     form = StationForm
     list_display = [
-        "id",
+        "__str__",
         "display_name",
         "location",
     ]
@@ -90,6 +110,21 @@ class StationAdmin(admin.ModelAdmin):
     ]
 
 
+class StationLineAdmin(admin.ModelAdmin):
+    pass
+
+
+class VehicleAdmin(admin.ModelAdmin):
+    pass
+
+
+class VehicleTypeAdmin(admin.ModelAdmin):
+    pass
+
+
 admin.site.register(Line, LineAdmin)
 admin.site.register(Station, StationAdmin)
+admin.site.register(StationLine, StationLineAdmin)
 admin.site.register(Asset, AssetAdmin)
+admin.site.register(Vehicle, VehicleAdmin)
+admin.site.register(VehicleType, VehicleTypeAdmin)

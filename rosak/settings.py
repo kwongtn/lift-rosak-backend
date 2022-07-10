@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "common",
     "reporting",
     "generic",
+    "spotting",
 ]
 
 MIDDLEWARE = [
