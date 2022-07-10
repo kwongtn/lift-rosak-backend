@@ -1,5 +1,5 @@
 from django.contrib.gis.db import models
-from django.db.models import Q
+from django.db.models import F, Q
 from model_utils.models import TimeStampedModel
 
 from spotting.enums import SpottingEventType, VehicleStatus
@@ -60,35 +60,22 @@ class Event(TimeStampedModel):
                     Q(type=SpottingEventType.BETWEEN_STATIONS)
                     & Q(origin_station__isnull=False)
                     & Q(destination_station__isnull=False)
-                ),
-                name="between_station_spotting_type_has_origin_destination_station",
-            ),
-            models.CheckConstraint(
-                check=Q(
-                    Q(type=SpottingEventType.BETWEEN_STATIONS)
                     & Q(location__isnull=True)
-                ),
-                name="between_station_spotting_type_has_no_location",
-            ),
-            models.CheckConstraint(
-                check=Q(
+                    & ~Q(origin_station=F("destination_station"))
+                    & ~Q(destination_station=F("origin_station"))
+                )
+                | Q(
                     Q(type=SpottingEventType.LOCATION)
                     & Q(origin_station__isnull=True)
                     & Q(destination_station__isnull=True)
-                ),
-                name="location_spotting_type_has_no_origin_destination_station",
-            ),
-            models.CheckConstraint(
-                check=Q(Q(type=SpottingEventType.LOCATION) & Q(location__isnull=True)),
-                name="location_spotting_type_has_location",
-            ),
-            models.CheckConstraint(
-                check=Q(
+                    & Q(location__isnull=False)
+                )
+                | Q(
                     Q(type=SpottingEventType.DEPOT)
                     & Q(origin_station__isnull=True)
                     & Q(destination_station__isnull=True)
                     & Q(location__isnull=True)
                 ),
-                name="depot_spotting_type_has_no_origin_destination_station_location",
+                name="%(app_label)s_%(class)s_value_relevant",
             ),
         ]
