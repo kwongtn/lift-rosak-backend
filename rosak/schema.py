@@ -4,7 +4,7 @@ from strawberry_django_plus.optimizer import DjangoOptimizerExtension
 from common.schema.schema import CommonMutations, CommonScalars
 from operation.schema.schema import OperationMutations, OperationScalars
 from reporting.schema.schema import ReportingMutations, ReportingScalars
-from spotting.schema.schema import SpottingScalars
+from spotting.schema.schema import SpottingMutations, SpottingScalars
 
 
 @strawberry.type
@@ -20,7 +20,12 @@ class Query(
 
 
 @strawberry.type
-class Mutation(OperationMutations, ReportingMutations, CommonMutations):
+class Mutation(
+    OperationMutations,
+    ReportingMutations,
+    CommonMutations,
+    SpottingMutations,
+):
     pass
 
 
