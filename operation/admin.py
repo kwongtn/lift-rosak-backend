@@ -111,11 +111,20 @@ class StationAdmin(admin.ModelAdmin):
 
 
 class StationLineAdmin(admin.ModelAdmin):
-    pass
+    list_display = [
+        "__str__",
+        "internal_representation",
+        "station",
+        "line",
+    ]
 
 
 class VehicleAdmin(admin.ModelAdmin):
-    pass
+    list_display = [
+        "__str__",
+        "vehicle_type",
+        "status",
+    ]
 
 
 class VehicleTypeAdmin(admin.ModelAdmin):
