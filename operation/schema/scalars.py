@@ -1,4 +1,4 @@
-from typing import List
+from typing import TYPE_CHECKING, List
 
 import strawberry
 import strawberry.django
@@ -7,6 +7,7 @@ from strawberry import auto
 from generic.schema.scalars import GeoPoint
 from operation import models
 from operation.schema.enums import VehicleStatus
+from spotting import models as spotting_models
 
 
 @strawberry.django.type(models.Station)
@@ -85,3 +86,14 @@ class Vehicle:
     status: "VehicleStatus"
     line: "Line"
     notes: str
+
+    if TYPE_CHECKING:
+        from spotting.schema.scalars import Event
+
+    @strawberry.field
+    def last_spottings(
+        self, count: int = 1
+    ) -> List[strawberry.LazyType["Event", "spotting.schema.scalars"]]:  # noqa
+        return spotting_models.Event.objects.filter(vehicle_id=self.id,).order_by(
+            "-spotting_date"
+        )[:count]
