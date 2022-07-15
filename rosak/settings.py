@@ -25,7 +25,8 @@ SECRET_KEY = "django-insecure-al9720%e_7+k_))6dn76=z5$39u-&nqhtx#4@7lnb0zet_(2fw
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+
+ALLOWED_HOSTS = ["localhost"]
 
 
 # Application definition
@@ -41,6 +42,7 @@ INSTALLED_APPS = [
     "colorfield",
     "strawberry.django",
     "django.contrib.gis",
+    "corsheaders",
     "operation",
     "common",
     "reporting",
@@ -49,6 +51,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -58,7 +61,9 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-CSRF_TRUSTED_ORIGINS = ["http://localhost:8000"]
+CSRF_TRUSTED_ORIGINS = ["http://localhost:8000", "http://localhost:4200"]
+
+CORS_ALLOWED_ORIGINS = ["http://localhost:8000", "http://localhost:4200"]
 
 ROOT_URLCONF = "rosak.urls"
 
