@@ -36,9 +36,21 @@ class Line:
     stations: List["Station"]
 
     @strawberry.field
-    def station_line(self) -> List[StationLine]:
+    def station_lines(self) -> List["StationLine"]:
         return models.StationLine.objects.filter(
             line_id=self.id,
+        )
+
+    @strawberry.field
+    def vehicles(self) -> List["Vehicle"]:
+        return models.Vehicle.objects.filter(
+            line_id=self.id,
+        )
+
+    @strawberry.field
+    def vehicle_types(self) -> List["VehicleType"]:
+        return models.VehicleType.objects.filter(
+            vehicle__line_id=self.id,
         )
 
 
@@ -55,6 +67,14 @@ class Asset:
 @strawberry.django.type(models.VehicleType)
 class VehicleType:
     id: auto
+    internal_name: str
+    display_name: str
+
+    @strawberry.field
+    def vehicles(self) -> List["Vehicle"]:
+        return models.Vehicle.objects.filter(
+            vehicle_type_id=self.id,
+        )
 
 
 @strawberry.django.type(models.Vehicle)
