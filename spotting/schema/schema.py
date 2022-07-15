@@ -17,4 +17,4 @@ class SpottingScalars:
 @strawberry.type
 class SpottingMutations:
     add_event: Event = strawberry_django.mutations.create(EventInput)
-    delete_event: Event = strawberry_django.mutations.delete(EventInput)
+    delete_events: typing.List[Event] = strawberry_django.mutations.delete()
