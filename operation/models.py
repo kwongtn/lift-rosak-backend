@@ -158,6 +158,11 @@ class Vehicle(models.Model):
         default="",
         blank=True,
     )
+    in_service_since = models.DateField(
+        default=None,
+        null=True,
+        blank=True,
+    )
 
     def __str__(self) -> str:
         return f"{self.id} - {self.identification_no} @ {self.line.code}"

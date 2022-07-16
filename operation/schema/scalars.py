@@ -89,6 +89,7 @@ class Vehicle:
     status: "VehicleStatus"
     line: "Line"
     notes: str
+    in_service_since: date
 
     if TYPE_CHECKING:
         from spotting.schema.scalars import Event

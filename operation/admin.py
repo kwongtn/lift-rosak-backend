@@ -124,6 +124,7 @@ class VehicleAdmin(admin.ModelAdmin):
         "__str__",
         "vehicle_type",
         "status",
+        "in_service_since",
     ]
 
 
