@@ -1,7 +1,10 @@
+from datetime import date
 from typing import TYPE_CHECKING, List
 
 import strawberry
 import strawberry.django
+from asgiref.sync import sync_to_async
+from django.db.models import Q
 from strawberry import auto
 
 from generic.schema.scalars import GeoPoint
@@ -97,3 +100,16 @@ class Vehicle:
         return spotting_models.Event.objects.filter(vehicle_id=self.id,).order_by(
             "-spotting_date"
         )[:count]
+
+    @strawberry.field
+    @sync_to_async
+    def spottingCount(self, after: date = None, before: date = None) -> int:
+        filter = Q(vehicle_id=self.id)
+
+        if after is not None:
+            filter &= Q(spotting_date__gte=after)
+
+        if before is not None:
+            filter &= Q(spotting_date__lte=before)
+
+        return spotting_models.Event.objects.filter(filter).count()
