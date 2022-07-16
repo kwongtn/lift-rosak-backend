@@ -52,7 +52,7 @@ class Line:
     def vehicle_types(self) -> List["VehicleType"]:
         return models.VehicleType.objects.filter(
             vehicle__line_id=self.id,
-        )
+        ).distinct()
 
 
 @strawberry.django.type(models.Asset)
