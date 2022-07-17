@@ -1,5 +1,5 @@
 from datetime import date
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 import strawberry
 import strawberry.django
@@ -9,7 +9,7 @@ from strawberry import auto
 
 from generic.schema.scalars import GeoPoint
 from operation import models
-from operation.schema.enums import VehicleStatus
+from operation.enums import VehicleStatus
 from spotting import models as spotting_models
 
 
@@ -78,7 +78,52 @@ class VehicleType:
     def vehicles(self) -> List["Vehicle"]:
         return models.Vehicle.objects.filter(
             vehicle_type_id=self.id,
-        )
+        ).distinct()
+
+    @strawberry.field
+    @sync_to_async
+    def vehicle_status_in_service_count(self) -> int:
+        return models.Vehicle.objects.filter(
+            vehicle_type_id=self.id,
+            status=VehicleStatus.IN_SERVICE,
+        ).count()
+
+    @strawberry.field
+    @sync_to_async
+    def vehicle_status_not_spotted_count(self) -> int:
+        return models.Vehicle.objects.filter(
+            vehicle_type_id=self.id,
+            status=VehicleStatus.NOT_SPOTTED,
+        ).count()
+
+    @strawberry.field
+    @sync_to_async
+    def vehicle_status_decommissioned_count(self) -> int:
+        return models.Vehicle.objects.filter(
+            vehicle_type_id=self.id,
+            status=VehicleStatus.DECOMMISSIONED,
+        ).count()
+
+    @strawberry.field
+    @sync_to_async
+    def vehicle_status_testing_count(self) -> int:
+        return models.Vehicle.objects.filter(
+            vehicle_type_id=self.id,
+            status=VehicleStatus.TESTING,
+        ).count()
+
+    @strawberry.field
+    @sync_to_async
+    def vehicle_status_unknown_count(self) -> int:
+        return models.Vehicle.objects.filter(
+            vehicle_type_id=self.id,
+            status=VehicleStatus.UNKNOWN,
+        ).count()
+
+    @strawberry.field
+    @sync_to_async
+    def vehicle_total_count(self) -> int:
+        return models.Vehicle.objects.filter(vehicle_type_id=self.id).count()
 
 
 @strawberry.django.type(models.Vehicle)
@@ -86,7 +131,7 @@ class Vehicle:
     id: auto
     identification_no: str
     vehicle_type: "VehicleType"
-    status: "VehicleStatus"
+    status: strawberry.auto
     line: "Line"
     notes: str
     in_service_since: date
@@ -104,7 +149,9 @@ class Vehicle:
 
     @strawberry.field
     @sync_to_async
-    def spottingCount(self, after: date = None, before: date = None) -> int:
+    def spottingCount(
+        self, after: Optional[date] = None, before: Optional[date] = None
+    ) -> int:
         filter = Q(vehicle_id=self.id)
 
         if after is not None:
