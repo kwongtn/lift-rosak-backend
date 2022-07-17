@@ -2,8 +2,7 @@ from colorfield.fields import ColorField
 from django.contrib.gis.db import models
 from model_utils.models import TimeStampedModel
 
-from operation.enums import AssetStatus, AssetType
-from spotting.enums import VehicleStatus
+from operation.enums import AssetStatus, AssetType, VehicleStatus
 
 
 class Line(TimeStampedModel):

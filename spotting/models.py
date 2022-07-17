@@ -2,7 +2,8 @@ from django.contrib.gis.db import models
 from django.db.models import F, Q
 from model_utils.models import TimeStampedModel
 
-from spotting.enums import SpottingEventType, VehicleStatus
+from operation.enums import VehicleStatus
+from spotting.enums import SpottingEventType
 
 
 class Event(TimeStampedModel):
