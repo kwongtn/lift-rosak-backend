@@ -12,7 +12,7 @@ from operation.schema.inputs import (
     StationInput,
     StationPartialInput,
 )
-from operation.schema.scalars import Asset, Line, Station, Vehicle
+from operation.schema.scalars import Asset, Line, Station, Vehicle, VehicleType
 
 
 @strawberry.type
@@ -23,6 +23,9 @@ class OperationScalars:
         filters=StationFilter,
     )
     vehicles: typing.List[Vehicle] = strawberry_django.field(
+        # filters=VehicleFilter,
+    )
+    vehicleTypes: typing.List[VehicleType] = strawberry_django.field(
         # filters=VehicleFilter,
     )
 
