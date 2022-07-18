@@ -3,6 +3,7 @@ import typing
 import strawberry
 import strawberry_django
 from asgiref.sync import sync_to_async
+from firebase_admin import auth
 
 from common.models import User
 from common.schema.scalars import GenericMutationReturn
@@ -27,9 +28,11 @@ class SpottingMutations:
     @strawberry.mutation
     @sync_to_async
     def add_event(self, input: EventInput) -> GenericMutationReturn:
+        key_contents = auth.verify_id_token(input.auth_key)
         reporter_id = User.objects.get(
-            firebase_id=input.reporter,
+            firebase_id=key_contents["uid"],
         ).id
+
         notes = input.notes if input.notes != strawberry.UNSET else ""
         origin_station_id = (
             input.origin_station if input.origin_station != strawberry.UNSET else None

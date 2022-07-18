@@ -11,7 +11,7 @@ from spotting import models
 @strawberry_django.input(models.Event, partial=True)
 class EventInput:
     spotting_date: date
-    reporter: strawberry.ID
+    auth_key: str
     vehicle: strawberry.ID
     notes: Optional[str]
     status: strawberry.auto

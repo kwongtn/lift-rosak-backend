@@ -32,6 +32,7 @@ services:
     command: bash run_app.sh
     volumes:
       - .:/code
+      - ./../.firebase/rosak-7223b-firebase-adminsdk-8hcki-f2e0ee7994.json:/google-application-credential.json
     expose:
       - "8001"
     depends_on:

@@ -2,6 +2,7 @@ FROM python:3.10-slim-bullseye
 
 ARG ENVIRONMENT
 ENV PYTHONUNBUFFERED 1
+ENV GOOGLE_APPLICATION_CREDENTIALS /google-application-credential.json
 RUN pip install pipenv
 RUN apt-get update && apt-get install -y \
     gdal-bin
