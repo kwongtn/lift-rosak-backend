@@ -14,3 +14,8 @@ class Media:
 class User:
     id: strawberry.auto
     firebase_id: str
+
+
+@strawberry.type
+class GenericMutationReturn:
+    ok: bool

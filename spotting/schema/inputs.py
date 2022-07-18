@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Optional
 
 import strawberry
 import strawberry_django
@@ -12,9 +13,9 @@ class EventInput:
     spotting_date: date
     reporter: strawberry.ID
     vehicle: strawberry.ID
-    notes: str
+    notes: Optional[str]
     status: strawberry.auto
     type: strawberry.auto
-    origin_station: strawberry.ID
-    destination_station: strawberry.ID
-    location: "GeoPoint"
+    origin_station: Optional[strawberry.ID]
+    destination_station: Optional[strawberry.ID]
+    location: Optional["GeoPoint"]
