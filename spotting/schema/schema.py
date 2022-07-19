@@ -29,8 +29,9 @@ class SpottingMutations:
     @sync_to_async
     def add_event(self, input: EventInput) -> GenericMutationReturn:
         key_contents = auth.verify_id_token(input.auth_key)
-        reporter_id = User.objects.get(
+        reporter_id = User.objects.get_or_create(
             firebase_id=key_contents["uid"],
+            defaults={"firebase_id": key_contents["uid"]},
         ).id
 
         notes = input.notes if input.notes != strawberry.UNSET else ""
