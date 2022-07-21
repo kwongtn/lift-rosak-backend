@@ -32,7 +32,7 @@ class SpottingMutations:
         reporter_id = User.objects.get_or_create(
             firebase_id=key_contents["uid"],
             defaults={"firebase_id": key_contents["uid"]},
-        ).id
+        )[0].id
 
         notes = input.notes if input.notes != strawberry.UNSET else ""
         origin_station_id = (
