@@ -50,7 +50,10 @@ DEBUG = os.environ.get("DEBUG", True)
 #     },
 # }
 
-ALLOWED_HOSTS = ["localhost"]
+ALLOWED_HOSTS = os.environ.get(
+    "ALLOWED_HOSTS",
+    ["localhost", "127.0.0.1", "kwongnet.ddns.net", "lift-rosak.ddns.net"],
+)
 
 
 # Application definition
