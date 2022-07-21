@@ -23,11 +23,7 @@ services:
     restart: always
 
   app:
-    build:
-      context: .
-      args:
-        - ENVIRONMENT=dev
-    image: rosak-backend-app:latest
+    image: docker.io/kwongtn/rosak_backend:latest
     env_file:
       - secrets.env
     command: bash run_app.sh
