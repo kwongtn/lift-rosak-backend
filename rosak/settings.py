@@ -50,11 +50,15 @@ DEBUG = os.environ.get("DEBUG", True)
 #     },
 # }
 
-ALLOWED_HOSTS = os.environ.get(
-    "ALLOWED_HOSTS",
-    ["localhost", "127.0.0.1", "kwongnet.ddns.net", "lift-rosak.ddns.net"],
-)
-
+if os.environ.get("ALLOWED_HOSTS", None):
+    ALLOWED_HOSTS = [
+        "localhost",
+        "127.0.0.1",
+        "kwongnet.ddns.net",
+        "lift-rosak.ddns.net",
+    ]
+else:
+    ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", None)
 
 # Application definition
 
