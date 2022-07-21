@@ -28,6 +28,9 @@ class Line(TimeStampedModel):
     def __str__(self) -> str:
         return f"{self.id} - {self.code}"
 
+    class Meta:
+        ordering = ["code"]
+
 
 class Station(TimeStampedModel):
     display_name = models.TextField()
@@ -89,6 +92,9 @@ class StationLine(TimeStampedModel):
         )
         return f"{self.id} - {display_name} {representation}"
 
+    class Meta:
+        ordering = ["internal_representation"]
+
 
 class Asset(TimeStampedModel):
     officialid = models.CharField(
@@ -121,6 +127,9 @@ class Asset(TimeStampedModel):
         max_length=32,
         choices=AssetStatus.choices,
     )
+
+    class Meta:
+        ordering = ["officialid"]
 
 
 class AssetMedia(models.Model):
@@ -165,6 +174,9 @@ class Vehicle(models.Model):
 
     def __str__(self) -> str:
         return f"{self.id} - {self.identification_no} @ {self.line.code}"
+
+    class Meta:
+        ordering = ["identification_no"]
 
 
 class VehicleType(models.Model):
