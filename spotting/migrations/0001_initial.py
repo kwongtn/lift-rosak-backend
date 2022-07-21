@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("common", "0001_initial"),
-        ("operation", "0004_vehicletype_internal_name_alter_vehicle_notes_and_more"),
+        ("operation", "0001_initial"),
     ]
 
     operations = [
