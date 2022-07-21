@@ -20,11 +20,35 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-al9720%e_7+k_))6dn76=z5$39u-&nqhtx#4@7lnb0zet_(2fw"
+SECRET_KEY = os.environ.get(
+    "SECRET_KEY",
+    "django-insecure-al9720%e_7+k_))6dn76=z5$39u-&nqhtx#4@7lnb0zet_(2fw",
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DEBUG", True)
 
+# LOGGING = {
+#     "version": 1,
+#     "filters": {
+#         "require_debug_true": {
+#             "()": "django.utils.log.RequireDebugTrue",
+#         }
+#     },
+#     "handlers": {
+#         "console": {
+#             "level": "DEBUG",
+#             "filters": ["require_debug_true"],
+#             "class": "logging.StreamHandler",
+#         }
+#     },
+#     "loggers": {
+#         "django.db.backends": {
+#             "level": "DEBUG",
+#             "handlers": ["console"],
+#         }
+#     },
+# }
 
 ALLOWED_HOSTS = ["localhost"]
 
@@ -92,11 +116,11 @@ WSGI_APPLICATION = "rosak.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.contrib.gis.db.backends.postgis",
-        "HOST": os.environ.get("DATABASE_HOST"),
-        "NAME": os.environ.get("DATABASE_NAME"),
-        "USER": os.environ.get("DATABASE_USER"),
+        "HOST": os.environ.get("DATABASE_HOST", "localhost"),
+        "NAME": os.environ.get("DATABASE_NAME", "postgres"),
+        "USER": os.environ.get("DATABASE_USER", "postgres"),
         "PASSWORD": os.environ.get("DATABASE_PASSWORD", None),
-        "PORT": 5432,
+        "PORT": os.environ.get("DATABASE_PORT", 5432),
         "TEST": {"SERIALIZE": False},
     }
 }

@@ -1,0 +1,41 @@
+version: "3"
+
+services:
+  db:
+    image: postgis/postgis:14-3.2-alpine
+    environment:
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    ports:
+      - "5432:5432"
+    restart: always
+
+  web:
+    image: nginx:alpine
+    env_file:
+      - secrets.env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./nginx/local:/etc/nginx/templates/
+      - ./static:/code/static
+    depends_on:
+      - app
+    restart: always
+
+  app:
+    build:
+      context: .
+      args:
+        - ENVIRONMENT=dev
+    image: rosak-backend-app:latest
+    env_file:
+      - secrets.env
+    command: bash run_app.sh
+    volumes:
+      - .:/code
+      - ./google-application-credential.json:/google-application-credential.json
+    expose:
+      - "8001"
+    depends_on:
+      - db
+    restart: always
