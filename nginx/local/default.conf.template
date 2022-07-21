@@ -4,9 +4,18 @@ upstream django {
 
 server {
 
-  listen 8000;
+  listen 8000 ssl;
 
   client_max_body_size 100M;
+
+  # RSA certificate
+  ssl_certificate /etc/letsencrypt/live/lift-rosak.ddns.net/fullchain.pem; # managed by Certbot
+  ssl_certificate_key /etc/letsencrypt/live/lift-rosak.ddns.net/privkey.pem; # managed by Certbot
+
+  # Redirect non-https traffic to https
+  if ($scheme != "https") {
+      return 301 https://$host$request_uri;
+  } # managed by Certbot
 
   location /static/ {
     alias /code/static/;

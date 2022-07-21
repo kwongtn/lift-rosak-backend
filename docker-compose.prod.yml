@@ -18,6 +18,8 @@ services:
     volumes:
       - ./nginx/local:/etc/nginx/templates/
       - ./static:/code/static
+      - /etc/letsencrypt/live/lift-rosak.ddns.net:/cert/live/lift-rosak.ddns.net:ro
+      - /etc/letsencrypt/archive/lift-rosak.ddns.net:/cert/archive/lift-rosak.ddns.net:ro
     depends_on:
       - app
     restart: always
