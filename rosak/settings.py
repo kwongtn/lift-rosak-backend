@@ -58,7 +58,7 @@ if os.environ.get("ALLOWED_HOSTS", None):
         "lift-rosak.ddns.net",
     ]
 else:
-    ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", None)
+    ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", [])
 
 # Application definition
 
