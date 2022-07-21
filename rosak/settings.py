@@ -93,9 +93,12 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-CSRF_TRUSTED_ORIGINS = ["http://localhost:8000", "http://localhost:4200"]
+CSRF_TRUSTED_ORIGINS = [
+    "http://kwongnet.ddns.net",
+    "http://lift-rosak.ddns.net" "http://127.0.0.1",
+    "http://localhost",
+]
 
-CORS_ALLOWED_ORIGINS = ["http://localhost:8000", "http://localhost:4200"]
 
 ROOT_URLCONF = "rosak.urls"
 
