@@ -44,10 +44,3 @@ server {
     proxy_set_header X-Forwarded-Host $server_name;
   }
 }
-
-# This is the default catch all server, which will close the connection if a valid server name is not given
-server {
-    listen      8000 default_server;
-    server_name "";
-    return      444;
-}
