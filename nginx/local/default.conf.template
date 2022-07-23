@@ -1,11 +1,10 @@
 upstream django {
-  server localhost:8001;
+  server app:8001;
 }
 
 server {
 
   listen 8000;
-  server_name ${HOSTS};
 
   client_max_body_size 100M;
 
@@ -31,11 +30,4 @@ server {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Host $server_name;
   }
-}
-
-# This is the default catch all server, which will close the connection if a valid server name is not given
-server {
-    listen      8000 default_server;
-    server_name "";
-    return      444;
 }
