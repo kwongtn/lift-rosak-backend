@@ -1,21 +1,20 @@
 from datetime import date
 from typing import Optional
 
-import strawberry
-import strawberry_django
+from strawberry_django_plus import gql
 
 from generic.schema.scalars import GeoPoint
 from spotting import models
 
 
-@strawberry_django.input(models.Event, partial=True)
+@gql.django.partial(models.Event)
 class EventInput:
     spotting_date: date
     auth_key: str
-    vehicle: strawberry.ID
+    vehicle: gql.ID
     notes: Optional[str]
-    status: strawberry.auto
-    type: strawberry.auto
-    origin_station: Optional[strawberry.ID]
-    destination_station: Optional[strawberry.ID]
+    status: gql.auto
+    type: gql.auto
+    origin_station: Optional[gql.ID]
+    destination_station: Optional[gql.ID]
     location: Optional["GeoPoint"]

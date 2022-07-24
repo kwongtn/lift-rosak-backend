@@ -1,24 +1,21 @@
 from typing import List
 
-import strawberry
-import strawberry.django
-from strawberry import auto
+from strawberry_django_plus import gql
 
 from operation.schema.scalars import Asset
 from reporting import models
-from reporting.schema.enums import ReportType
 
 
-@strawberry.django.type(models.Report)
+@gql.django.type(models.Report)
 class Report:
     id: str
     asset: "Asset"
     # reporter: "User"
     description: str
-    type: "ReportType"
+    type: gql.auto
 
 
-@strawberry.django.type(models.Resolution)
+@gql.django.type(models.Resolution)
 class Resolution:
     id: str
     reports: List["Report"]
@@ -26,9 +23,9 @@ class Resolution:
     notes: str
 
 
-@strawberry.django.type(models.Vote)
+@gql.django.type(models.Vote)
 class Vote:
-    id: auto
+    id: gql.auto
     is_upvote: bool
     report: "Report"
     # user: "User"

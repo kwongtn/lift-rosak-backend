@@ -1,21 +1,20 @@
-import strawberry
-import strawberry.django
+from strawberry_django_plus import gql
 
 from common import models
 
 
-@strawberry.django.type(models.Media)
+@gql.django.type(models.Media)
 class Media:
     id: str
     uploader: "User"
 
 
-@strawberry.django.type(models.User)
+@gql.django.type(models.User)
 class User:
-    id: strawberry.auto
+    id: gql.auto
     firebase_id: str
 
 
-@strawberry.type
+@gql.type
 class GenericMutationReturn:
     ok: bool

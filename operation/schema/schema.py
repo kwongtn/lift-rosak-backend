@@ -1,60 +1,39 @@
-import typing
+from typing import List
 
-import strawberry
-import strawberry_django
+from strawberry_django_plus import gql
 
-from operation.schema.filters import AssetFilter, LineFilter, StationFilter
-from operation.schema.inputs import (
-    AssetInput,
-    AssetPartialInput,
-    LineInput,
-    LinePartialInput,
-    StationInput,
-    StationPartialInput,
-)
 from operation.schema.scalars import Asset, Line, Station, Vehicle, VehicleType
 
 
-@strawberry.type
+@gql.type
 class OperationScalars:
-    lines: typing.List[Line] = strawberry_django.field(filters=LineFilter)
-    assets: typing.List[Asset] = strawberry_django.field(filters=AssetFilter)
-    stations: typing.List[Station] = strawberry_django.field(
-        filters=StationFilter,
-    )
-    vehicles: typing.List[Vehicle] = strawberry_django.field(
-        # filters=VehicleFilter,
-    )
-    vehicleTypes: typing.List[VehicleType] = strawberry_django.field(
-        # filters=VehicleFilter,
-    )
+    # TODO: Add back filters
+    lines: List[Line] = gql.django.field()
+    assets: List[Asset] = gql.django.field()
+    stations: List[Station] = gql.django.field()
+    vehicles: List[Vehicle] = gql.django.field()
+    vehicleTypes: List[VehicleType] = gql.django.field()
+    assets: List[Asset] = gql.django.field()
 
 
-@strawberry.type
+@gql.type
 class OperationMutations:
-    create_line: Line = strawberry_django.mutations.create(LineInput)
-    create_lines: typing.List[Line] = strawberry_django.mutations.create(
-        LineInput,
-    )
-    update_lines: typing.List[Line] = strawberry_django.mutations.update(
-        LinePartialInput
-    )
-    delete_lines: typing.List[Line] = strawberry_django.mutations.delete()
+    #     create_line: Line = gql.django.mutations.create(LineInput)
+    #     create_lines: List[Line] = gql.django.mutations.create(
+    #         LineInput,
+    #     )
+    #     update_lines: List[Line] = gql.django.mutations.update(LinePartialInput)
+    #     delete_lines: List[Line] = gql.django.mutations.delete()
 
-    create_asset: Asset = strawberry_django.mutations.create(AssetInput)
-    create_assets: typing.List[Asset] = strawberry_django.mutations.create(
-        AssetInput,
-    )
-    update_assets: typing.List[Asset] = strawberry_django.mutations.update(
-        AssetPartialInput
-    )
-    delete_assets: typing.List[Asset] = strawberry_django.mutations.delete()
+    #     create_asset: Asset = gql.django.mutations.create(AssetInput)
+    #     create_assets: List[Asset] = gql.django.mutations.create(
+    #         AssetInput,
+    #     )
+    #     update_assets: List[Asset] = gql.django.mutations.update(AssetPartialInput)
+    #     delete_assets: List[Asset] = gql.django.mutations.delete()
 
-    create_station: Station = strawberry_django.mutations.create(StationInput)
-    create_stations: typing.List[Station] = strawberry_django.mutations.create(
-        StationInput
-    )
-    update_stations: typing.List[Station] = strawberry_django.mutations.update(
-        StationPartialInput
-    )
-    delete_stations: typing.List[Station] = strawberry_django.mutations.delete()
+    #     create_station: Station = gql.django.mutations.create(StationInput)
+    #     create_stations: List[Station] = gql.django.mutations.create(StationInput)
+    #     update_stations: List[Station] = gql.django.mutations.update(StationPartialInput)
+    #     delete_stations: List[Station] = gql.django.mutations.delete()
+    pass
