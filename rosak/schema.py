@@ -1,4 +1,4 @@
-import strawberry
+from strawberry_django_plus import gql
 from strawberry_django_plus.optimizer import DjangoOptimizerExtension
 
 from common.schema.schema import CommonMutations, CommonScalars
@@ -7,19 +7,19 @@ from reporting.schema.schema import ReportingMutations, ReportingScalars
 from spotting.schema.schema import SpottingMutations, SpottingScalars
 
 
-@strawberry.type
+@gql.type
 class Query(
     OperationScalars,
     ReportingScalars,
     CommonScalars,
     SpottingScalars,
 ):
-    @strawberry.field
+    @gql.field
     def hello(self) -> str:
         return "Hello World"
 
 
-@strawberry.type
+@gql.type
 class Mutation(
     OperationMutations,
     ReportingMutations,
@@ -29,12 +29,12 @@ class Mutation(
     pass
 
 
-# @strawberry.type
+# @gql.type
 # class Subscription:
 #     pass
 
 
-schema = strawberry.Schema(
+schema = gql.Schema(
     query=Query,
     mutation=Mutation,
     # subscription=Subscription,
