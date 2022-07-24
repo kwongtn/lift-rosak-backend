@@ -115,12 +115,16 @@ MIDDLEWARE = [
 CSRF_TRUSTED_ORIGINS = [
     "http://kwongnet.ddns.net",
     "https://lift-rosak.ddns.net:8000",
+    "https://rosak-7223b.web.app",
+    "https://rosak-7223b.firebaseapp.com",
     "http://127.0.0.1:8000",
     "http://localhost:8000",
+    "http://localhost:4200",
 ]
 
 CORS_ALLOWED_ORIGINS = [
     "https://rosak-7223b.web.app",
+    "https://rosak-7223b.firebaseapp.com",
     "http://localhost:4200",
 ]
 
