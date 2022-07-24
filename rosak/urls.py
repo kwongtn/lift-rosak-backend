@@ -45,6 +45,10 @@ urlpatterns = (
 if settings.DEBUG:
     import debug_toolbar
 
+    def trigger_error(request):
+        division_by_zero = 1 / 0  # noqa
+
     urlpatterns += [
         path("__debug__/", include(debug_toolbar.urls)),
+        path("sentry-debug/", trigger_error),
     ]
