@@ -131,7 +131,7 @@ class Vehicle:
     if TYPE_CHECKING:
         from spotting.schema.scalars import Event
 
-    @gql.field
+    @gql.django.field
     def last_spottings(
         self, count: int = 1
     ) -> List[gql.LazyType["Event", "spotting.schema.scalars"]]:  # noqa
