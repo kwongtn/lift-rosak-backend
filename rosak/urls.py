@@ -17,8 +17,10 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
+from django.views.decorators.csrf import csrf_exempt
 from strawberry.django.views import AsyncGraphQLView
 
+from . import sentry_view
 from .schema import schema
 
 urlpatterns = (
@@ -32,6 +34,7 @@ urlpatterns = (
                 schema=schema,
             ),
         ),
+        path("sentry/", csrf_exempt(sentry_view.main)),
         # path("oauth2/v1/", include("oauth2.urls", namespace="oauth2_v1")),
     ]
     # These are served in debug mode only
