@@ -1,5 +1,6 @@
 import typing
 
+from asgiref.sync import sync_to_async
 from firebase_admin import auth
 from strawberry_django_plus import gql
 
@@ -20,6 +21,7 @@ class SpottingScalars:
 @gql.type
 class SpottingMutations:
     @gql.mutation
+    @sync_to_async
     def add_event(self, input: EventInput) -> GenericMutationReturn:
         key_contents = auth.verify_id_token(input.auth_key)
         reporter_id = User.objects.get_or_create(
