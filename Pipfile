@@ -20,7 +20,7 @@ promise = "*"
 psycopg2-binary = "*"
 sentry-sdk = "*"
 strawberry-django-plus = "*"
-strawberry-graphql = "*"
+strawberry-graphql = "==0.120.0"
 strawberry-graphql-django = "*"
 uvicorn = {extras = ["standard"], version = "*"}
 

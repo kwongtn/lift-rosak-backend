@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "ed3369206fe6c8bba1e0d94eb665b3a5e4cbd701e21d418d28bea4605ad0b267"
+            "sha256": "e7ae4c4350e807f0c3195652c5833187bc024e10e180d29e1d286a772363da3f"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -833,11 +833,11 @@
         },
         "strawberry-graphql": {
             "hashes": [
-                "sha256:32901a0a73ffcbb3c18810acda1907808b196a6988d2e8151a3306ac6b261cda",
-                "sha256:fae7876aa9302e9c8b62f893d942a85749e249d121e11e57d541a8122e74f7a2"
+                "sha256:3a4b384977df617947fef0ee469316d3baab38f3c4a0713d5647f53735837d37",
+                "sha256:f107d9f6a66b4eed56593bc50a4cad5f1a2b1ef8d26662777006eca0eade331e"
             ],
             "index": "pypi",
-            "version": "==0.121.0"
+            "version": "==0.120.0"
         },
         "strawberry-graphql-django": {
             "hashes": [
@@ -1058,7 +1058,7 @@
                 "sha256:8033ad4e853066ba6ca92050b9df2f89301b8fc8bf7e9324d412a63f8bf1a8fd",
                 "sha256:bac2fd45c0a1c9cf619e63a90d62bdc63892ef92387424b855792a6cabe789aa"
             ],
-            "markers": "python_full_version >= '3.6.0'",
+            "markers": "python_version >= '3.6'",
             "version": "==4.0.9"
         },
         "gitpython": {
@@ -1246,7 +1246,7 @@
                 "sha256:2aba19d6a040e78d8b09de5c57e96207b09ed71d8e55ce0959eeee6c8e190d94",
                 "sha256:c840e62059cd3be204b0c9c9f74be2c09d5648eddd4580d9314c3ecde0b30936"
             ],
-            "markers": "python_full_version >= '3.6.0'",
+            "markers": "python_version >= '3.6'",
             "version": "==5.0.0"
         },
         "sniffio": {
@@ -1266,11 +1266,11 @@
         },
         "strawberry-graphql": {
             "hashes": [
-                "sha256:32901a0a73ffcbb3c18810acda1907808b196a6988d2e8151a3306ac6b261cda",
-                "sha256:fae7876aa9302e9c8b62f893d942a85749e249d121e11e57d541a8122e74f7a2"
+                "sha256:3a4b384977df617947fef0ee469316d3baab38f3c4a0713d5647f53735837d37",
+                "sha256:f107d9f6a66b4eed56593bc50a4cad5f1a2b1ef8d26662777006eca0eade331e"
             ],
             "index": "pypi",
-            "version": "==0.121.0"
+            "version": "==0.120.0"
         },
         "tomli": {
             "hashes": [
