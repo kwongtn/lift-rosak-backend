@@ -13,23 +13,6 @@ import os
 from distutils.util import strtobool
 from pathlib import Path
 
-import sentry_sdk
-from sentry_sdk.integrations.django import DjangoIntegration
-
-sentry_sdk.init(
-    dsn=os.environ.get("SENTRY_DSN", None),
-    integrations=[
-        DjangoIntegration(),
-    ],
-    # Set traces_sample_rate to 1.0 to capture 100%
-    # of transactions for performance monitoring.
-    # We recommend adjusting this value in production.
-    traces_sample_rate=1.0,
-    # If you wish to associate users to errors (assuming you are using
-    # django.contrib.auth) you may enable sending PII data.
-    send_default_pii=True,
-)
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -46,8 +29,28 @@ SECRET_KEY = os.environ.get(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = strtobool(os.getenv("DEBUG", "false"))
 
+
+if DEBUG is not True:
+    import sentry_sdk
+    from sentry_sdk.integrations.django import DjangoIntegration
+
+    sentry_sdk.init(
+        dsn=os.environ.get("SENTRY_DSN", None),
+        integrations=[
+            DjangoIntegration(),
+        ],
+        # Set traces_sample_rate to 1.0 to capture 100%
+        # of transactions for performance monitoring.
+        # We recommend adjusting this value in production.
+        traces_sample_rate=1.0,
+        # If you wish to associate users to errors (assuming you are using
+        # django.contrib.auth) you may enable sending PII data.
+        send_default_pii=True,
+    )
+
 # LOGGING = {
 #     "version": 1,
+#     "disable_existing_loggers": False,
 #     "filters": {
 #         "require_debug_true": {
 #             "()": "django.utils.log.RequireDebugTrue",
@@ -68,15 +71,12 @@ DEBUG = strtobool(os.getenv("DEBUG", "false"))
 #     },
 # }
 
-if os.environ.get("ALLOWED_HOSTS", None):
-    ALLOWED_HOSTS = [
-        "localhost",
-        "127.0.0.1",
-        "kwongnet.ddns.net",
-        "lift-rosak.ddns.net",
-    ]
-else:
-    ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", [])
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "kwongnet.ddns.net",
+    "lift-rosak.ddns.net",
+]
 
 # Application definition
 
