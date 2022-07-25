@@ -30,7 +30,6 @@ services:
       - secrets.env
     command: bash run_app.sh
     volumes:
-      - .:/code
       - ./google-application-credential.json:/google-application-credential.json
     expose:
       - "8001"
