@@ -7,6 +7,11 @@ from strawberry_django_plus import gql
 from generic.schema.scalars import GeoPoint
 from operation import models
 from operation.enums import VehicleStatus
+from operation.schema.loaders import (
+    line_vehicle_type_loader,
+    vehicle_status_count_from_vehicle_type_loader,
+    vehicle_type_vehicle_loader,
+)
 from spotting import models as spotting_models
 
 
@@ -36,24 +41,12 @@ class Line:
     display_color: str
     stations: List["Station"]
     station_lines: List["StationLine"]
+    vehicles: List["Vehicle"]
+    station_lines: List["StationLine"]
 
     @gql.field
-    def station_lines(self) -> List["StationLine"]:
-        return models.StationLine.objects.filter(
-            line_id=self.id,
-        )
-
-    @gql.field
-    def vehicles(self) -> List["Vehicle"]:
-        return models.Vehicle.objects.filter(
-            line_id=self.id,
-        )
-
-    @gql.field
-    def vehicle_types(self) -> List["VehicleType"]:
-        return models.VehicleType.objects.filter(
-            vehicle__line_id=self.id,
-        ).distinct()
+    async def vehicle_types(self) -> List["VehicleType"]:
+        return await line_vehicle_type_loader.load(self.id)
 
 
 @gql.django.type(models.Asset)
@@ -72,46 +65,39 @@ class VehicleType:
     internal_name: str
     display_name: str
 
-    @gql.field
-    def vehicles(self) -> List["Vehicle"]:
-        return models.Vehicle.objects.filter(
-            vehicle_type_id=self.id,
-        ).distinct()
+    @gql.django.field
+    async def vehicles(self) -> List["Vehicle"]:
+        return await vehicle_type_vehicle_loader.load(self.id)
 
     @gql.field
-    def vehicle_status_in_service_count(self) -> int:
-        return models.Vehicle.objects.filter(
-            vehicle_type_id=self.id,
-            status=VehicleStatus.IN_SERVICE,
-        ).count()
+    async def vehicle_status_in_service_count(self) -> int:
+        return await vehicle_status_count_from_vehicle_type_loader.load(
+            (self.id, VehicleStatus.IN_SERVICE)
+        )
 
     @gql.field
-    def vehicle_status_not_spotted_count(self) -> int:
-        return models.Vehicle.objects.filter(
-            vehicle_type_id=self.id,
-            status=VehicleStatus.NOT_SPOTTED,
-        ).count()
+    async def vehicle_status_not_spotted_count(self) -> int:
+        return await vehicle_status_count_from_vehicle_type_loader.load(
+            (self.id, VehicleStatus.NOT_SPOTTED)
+        )
 
     @gql.field
-    def vehicle_status_decommissioned_count(self) -> int:
-        return models.Vehicle.objects.filter(
-            vehicle_type_id=self.id,
-            status=VehicleStatus.DECOMMISSIONED,
-        ).count()
+    async def vehicle_status_decommissioned_count(self) -> int:
+        return await vehicle_status_count_from_vehicle_type_loader.load(
+            (self.id, VehicleStatus.DECOMMISSIONED)
+        )
 
     @gql.field
-    def vehicle_status_testing_count(self) -> int:
-        return models.Vehicle.objects.filter(
-            vehicle_type_id=self.id,
-            status=VehicleStatus.TESTING,
-        ).count()
+    async def vehicle_status_testing_count(self) -> int:
+        return await vehicle_status_count_from_vehicle_type_loader.load(
+            (self.id, VehicleStatus.TESTING)
+        )
 
     @gql.field
-    def vehicle_status_unknown_count(self) -> int:
-        return models.Vehicle.objects.filter(
-            vehicle_type_id=self.id,
-            status=VehicleStatus.UNKNOWN,
-        ).count()
+    async def vehicle_status_unknown_count(self) -> int:
+        return await vehicle_status_count_from_vehicle_type_loader.load(
+            (self.id, VehicleStatus.UNKNOWN)
+        )
 
     @gql.field
     def vehicle_total_count(self) -> int:
@@ -122,7 +108,7 @@ class VehicleType:
 class Vehicle:
     id: gql.auto
     identification_no: str
-    vehicle_type: "VehicleType"
+    vehicle_type: "VehicleType" = gql.django.field(select_related=["vehicle_type"])
     status: gql.auto
     line: "Line"
     notes: str
