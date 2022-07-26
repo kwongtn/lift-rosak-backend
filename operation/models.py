@@ -71,6 +71,7 @@ class StationLine(TimeStampedModel):
     line = models.ForeignKey(
         to="operation.Line",
         on_delete=models.PROTECT,
+        related_name="station_lines",
     )
     display_name = models.TextField()
     internal_representation = models.CharField(
@@ -106,6 +107,7 @@ class Asset(TimeStampedModel):
     station = models.ForeignKey(
         to="operation.Station",
         on_delete=models.PROTECT,
+        related_name="assets",
     )
     short_description = models.CharField(
         default="",
@@ -161,6 +163,7 @@ class Vehicle(models.Model):
         null=False,
         blank=False,
         on_delete=models.PROTECT,
+        related_name="vehicles",
     )
     notes = models.TextField(
         default="",
