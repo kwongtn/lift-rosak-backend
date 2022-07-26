@@ -45,8 +45,6 @@ def batch_load_vehicle_status_count_from_vehicle_type(keys):
     for key in keys:
         status_dict[key] = Count("id", filter=Q(vehicle_type_id=key[0], status=key[1]))
 
-    print(status_dict)
-
     vehicle_object = Vehicle.objects.aggregate(
         **{
             str(dict_entry[0]) + str(dict_entry[1]): status_dict[dict_entry]
@@ -55,20 +53,6 @@ def batch_load_vehicle_status_count_from_vehicle_type(keys):
     )
 
     return [vehicle_object.get(str(key[0]) + str(key[1]), None) for key in keys]
-
-
-@sync_to_async
-def batch_load_vehicle_type_line(keys):
-    vehicles: List[Vehicle] = Vehicle.objects.filter(vehicle_type_id__in=keys)
-
-    vehicle_type_dict = defaultdict()
-    for vehicle in vehicles:
-        if vehicle.vehicle_type_id not in vehicle_type_dict:
-            vehicle_type_dict[vehicle.vehicle_type_id] = [vehicle]
-        else:
-            vehicle_type_dict[vehicle.vehicle_type_id].append(vehicle)
-
-    return [list(vehicle_type_dict.get(key)) for key in keys]
 
 
 vehicle_type_vehicle_loader = DataLoader(load_fn=batch_load_vehicle_type_vehicle)
