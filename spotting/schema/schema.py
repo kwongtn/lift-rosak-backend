@@ -6,6 +6,7 @@ from strawberry_django_plus import gql
 
 from common.models import User
 from common.schema.scalars import GenericMutationReturn
+from operation.models import StationLine
 from spotting import models
 from spotting.schema.inputs import EventInput
 from spotting.schema.scalars import Event
@@ -30,12 +31,22 @@ class SpottingMutations:
         )[0].id
 
         notes = input.notes if input.notes != gql.UNSET else ""
+
+        station_line_dict = {
+            str(station_line.station_id): station_line.id
+            for station_line in StationLine.objects.filter(
+                station_id__in=[input.origin_station, input.destination_station]
+            )
+        }
+
         origin_station_id = (
-            input.origin_station if input.origin_station != gql.UNSET else None
+            station_line_dict[str(input.origin_station)]
+            if input.origin_station != gql.UNSET
+            else None
         )
 
         destination_station_id = (
-            input.destination_station
+            station_line_dict[str(input.destination_station)]
             if input.destination_station != gql.UNSET
             else None
         )
