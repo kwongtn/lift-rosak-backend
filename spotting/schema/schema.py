@@ -33,9 +33,9 @@ class SpottingMutations:
         notes = input.notes if input.notes != gql.UNSET else ""
 
         station_line_dict = {
-            str(station_line.station_id): station_line.id
+            str(station_line.id): station_line.station_id
             for station_line in StationLine.objects.filter(
-                station_id__in=[input.origin_station, input.destination_station]
+                id__in=[input.origin_station, input.destination_station]
             )
         }
 
