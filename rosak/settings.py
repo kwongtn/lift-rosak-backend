@@ -118,6 +118,10 @@ CSRF_TRUSTED_ORIGINS = [
     "https://lift-rosak.ddns.net:8000",
     "https://rosak-7223b.web.app",
     "https://rosak-7223b.firebaseapp.com",
+    "https://lrtrosak.com",
+    "https://www.lrtrosak.com",
+    "https://lifrosak.com",
+    "https://www.lifrosak.com",
     "http://127.0.0.1:8000",
     "http://localhost:8000",
     "http://localhost:4200",
@@ -126,6 +130,10 @@ CSRF_TRUSTED_ORIGINS = [
 CORS_ALLOWED_ORIGINS = [
     "https://rosak-7223b.web.app",
     "https://rosak-7223b.firebaseapp.com",
+    "https://lrtrosak.com",
+    "https://www.lrtrosak.com",
+    "https://lifrosak.com",
+    "https://www.lifrosak.com",
     "http://localhost:4200",
 ]
 
