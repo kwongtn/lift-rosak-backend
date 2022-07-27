@@ -26,7 +26,7 @@ def main(request: HttpRequest):
 
         url = f"https://{sentry_host}/api/{project_id}/envelope/"
 
-        requests.post(url=url, data=envelope)
+        requests.post(url=url, data=envelope.encode("utf-8"))
 
     except Exception as e:
         # handle exception in your preferred style,
