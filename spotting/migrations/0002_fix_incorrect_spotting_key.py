@@ -10,10 +10,12 @@ from spotting.models import Event
 def fix_stations(apps, schema_editor):
     events = Event.objects.filter(type=SpottingEventType.BETWEEN_STATIONS)
     for event in events:
-        event.origin_station_id = StationLine.objects.get(id=event.origin_station_id).id
+        event.origin_station_id = StationLine.objects.get(
+            id=event.origin_station_id
+        ).station_id
         event.destination_station_id = StationLine.objects.get(
             id=event.destination_station_id
-        ).id
+        ).station_id
 
     Event.objects.bulk_update(events, ["origin_station_id", "destination_station_id"])
 
