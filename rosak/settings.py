@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     "strawberry.django",
     "django.contrib.gis",
     "corsheaders",
+    "django_extensions",
     "operation",
     "common",
     "reporting",
