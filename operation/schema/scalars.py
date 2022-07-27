@@ -9,7 +9,6 @@ from operation import models
 from operation.enums import VehicleStatus
 from operation.schema.loaders import (
     line_vehicle_type_loader,
-    vehicle_status_count_from_vehicle_type_loader,
     vehicle_type_vehicle_loader,
 )
 from spotting import models as spotting_models
@@ -70,34 +69,34 @@ class VehicleType:
         return await vehicle_type_vehicle_loader.load(self.id)
 
     @gql.field
-    async def vehicle_status_in_service_count(self) -> int:
-        return await vehicle_status_count_from_vehicle_type_loader.load(
-            (self.id, VehicleStatus.IN_SERVICE)
-        )
+    def vehicle_status_in_service_count(self) -> int:
+        return models.Vehicle.objects.filter(
+            vehicle_type_id=self.id, status=VehicleStatus.IN_SERVICE
+        ).count()
 
     @gql.field
-    async def vehicle_status_not_spotted_count(self) -> int:
-        return await vehicle_status_count_from_vehicle_type_loader.load(
-            (self.id, VehicleStatus.NOT_SPOTTED)
-        )
+    def vehicle_status_not_spotted_count(self) -> int:
+        return models.Vehicle.objects.filter(
+            vehicle_type_id=self.id, status=VehicleStatus.NOT_SPOTTED
+        ).count()
 
     @gql.field
-    async def vehicle_status_decommissioned_count(self) -> int:
-        return await vehicle_status_count_from_vehicle_type_loader.load(
-            (self.id, VehicleStatus.DECOMMISSIONED)
-        )
+    def vehicle_status_decommissioned_count(self) -> int:
+        return models.Vehicle.objects.filter(
+            vehicle_type_id=self.id, status=VehicleStatus.DECOMMISSIONED
+        ).count()
 
     @gql.field
-    async def vehicle_status_testing_count(self) -> int:
-        return await vehicle_status_count_from_vehicle_type_loader.load(
-            (self.id, VehicleStatus.TESTING)
-        )
+    def vehicle_status_testing_count(self) -> int:
+        return models.Vehicle.objects.filter(
+            vehicle_type_id=self.id, status=VehicleStatus.TESTING
+        ).count()
 
     @gql.field
-    async def vehicle_status_unknown_count(self) -> int:
-        return await vehicle_status_count_from_vehicle_type_loader.load(
-            (self.id, VehicleStatus.UNKNOWN)
-        )
+    def vehicle_status_unknown_count(self) -> int:
+        return models.Vehicle.objects.filter(
+            vehicle_type_id=self.id, status=VehicleStatus.UNKNOWN
+        ).count()
 
     @gql.field
     def vehicle_total_count(self) -> int:
