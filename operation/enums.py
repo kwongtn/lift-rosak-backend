@@ -15,5 +15,6 @@ class VehicleStatus(models.TextChoices):
     IN_SERVICE = "IN_SERVICE"
     NOT_SPOTTED = "NOT_SPOTTED"
     DECOMMISSIONED = "DECOMMISSIONED"
+    MARRIED = "MARRIED"
     TESTING = "TESTING"
     UNKNOWN = "UNKNOWN"
