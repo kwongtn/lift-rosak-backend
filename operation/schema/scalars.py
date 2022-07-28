@@ -9,11 +9,11 @@ from operation import models
 from operation.enums import VehicleStatus
 from operation.schema.loaders import (
     last_spotting_date_from_vehicle_loader,
-    line_vehicle_type_loader,
     spotting_count_from_vehicle_loader,
     vehicle_count_from_vehicle_type_loader,
+    vehicle_from_vehicle_type_loader,
     vehicle_status_count_from_vehicle_type_loader,
-    vehicle_type_vehicle_loader,
+    vehicle_type_from_line_loader,
 )
 from spotting import models as spotting_models
 
@@ -49,7 +49,7 @@ class Line:
 
     @gql.field
     async def vehicle_types(self) -> List["VehicleType"]:
-        return await line_vehicle_type_loader.load(self.id)
+        return await vehicle_type_from_line_loader.load(self.id)
 
 
 @gql.django.type(models.Asset)
@@ -70,7 +70,8 @@ class VehicleType:
 
     @gql.django.field
     async def vehicles(self) -> List["Vehicle"]:
-        return await vehicle_type_vehicle_loader.load(self.id)
+        # print("Load vehicles from vehicletype: ", self.id)
+        return await vehicle_from_vehicle_type_loader.load(self.id)
 
     @gql.field
     async def vehicle_status_in_service_count(self) -> int:

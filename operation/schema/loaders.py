@@ -10,7 +10,7 @@ from spotting.models import Event
 
 
 @sync_to_async
-def batch_load_vehicle_type_vehicle(keys):
+def batch_load_vehicle_from_vehicle_type(keys):
     vehicles: List[Vehicle] = Vehicle.objects.filter(vehicle_type_id__in=keys)
 
     vehicle_type_dict = defaultdict()
@@ -24,7 +24,7 @@ def batch_load_vehicle_type_vehicle(keys):
 
 
 @sync_to_async
-def batch_load_line_vehicle_type(keys):
+def batch_load_vehicle_type_from_line(keys):
     vehicles: List[Vehicle] = Vehicle.objects.filter(line_id__in=keys).prefetch_related(
         "vehicle_type"
     )
@@ -81,8 +81,10 @@ def batch_load_spotting_count_from_vehicle(keys):
     return [event_object.get(str(key[0]), None) for key in keys]
 
 
-vehicle_type_vehicle_loader = DataLoader(load_fn=batch_load_vehicle_type_vehicle)
-line_vehicle_type_loader = DataLoader(load_fn=batch_load_line_vehicle_type)
+vehicle_from_vehicle_type_loader = DataLoader(
+    load_fn=batch_load_vehicle_from_vehicle_type
+)
+vehicle_type_from_line_loader = DataLoader(load_fn=batch_load_vehicle_type_from_line)
 vehicle_status_count_from_vehicle_type_loader = DataLoader(
     load_fn=batch_load_vehicle_status_count_from_vehicle_type
 )
