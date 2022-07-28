@@ -8,6 +8,7 @@ from common.models import User
 from common.schema.scalars import GenericMutationReturn
 from operation.models import StationLine
 from spotting import models
+from spotting.enums import SpottingEventType
 from spotting.schema.inputs import EventInput
 from spotting.schema.scalars import Event
 
@@ -32,24 +33,28 @@ class SpottingMutations:
 
         notes = input.notes if input.notes != gql.UNSET else ""
 
-        station_line_dict = {
-            str(station_line.id): station_line.station_id
-            for station_line in StationLine.objects.filter(
-                id__in=[input.origin_station, input.destination_station]
+        origin_station_id = None
+        destination_station_id = None
+        if input.type == SpottingEventType.BETWEEN_STATIONS:
+            station_line_dict = {
+                str(station_line.id): station_line.station_id
+                for station_line in StationLine.objects.filter(
+                    id__in=[input.origin_station, input.destination_station]
+                )
+            }
+
+            origin_station_id = (
+                station_line_dict[str(input.origin_station)]
+                if input.origin_station != gql.UNSET
+                else None
             )
-        }
 
-        origin_station_id = (
-            station_line_dict[str(input.origin_station)]
-            if input.origin_station != gql.UNSET
-            else None
-        )
+            destination_station_id = (
+                station_line_dict[str(input.destination_station)]
+                if input.destination_station != gql.UNSET
+                else None
+            )
 
-        destination_station_id = (
-            station_line_dict[str(input.destination_station)]
-            if input.destination_station != gql.UNSET
-            else None
-        )
         models.Event.objects.create(
             spotting_date=input.spotting_date,
             reporter_id=reporter_id,
