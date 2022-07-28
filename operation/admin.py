@@ -15,14 +15,21 @@ from operation.models import (
 
 class AssetStackedInline(admin.StackedInline):
     model = Asset
+    classes = ["collapse"]
 
 
 class AssetTabularInline(admin.TabularInline):
     model = Asset
+    classes = ["collapse"]
+
+
+class VehicleTabularInline(admin.TabularInline):
+    model = Vehicle
 
 
 class AssetMediaStackedInline(admin.StackedInline):
     model = AssetMedia
+    classes = ["collapse"]
 
 
 class AssetMediaTabluarInline(admin.TabularInline):
@@ -50,10 +57,12 @@ class AssetAdmin(admin.ModelAdmin):
 
 class StationStackedInline(admin.StackedInline):
     model = Station
+    classes = ["collapse"]
 
 
 class StationMediaStackedInline(admin.StackedInline):
     model = StationMedia
+    classes = ["collapse"]
 
 
 class LineStackedInline(admin.StackedInline):
@@ -62,10 +71,12 @@ class LineStackedInline(admin.StackedInline):
 
 class StationLineStackedInline(admin.StackedInline):
     model = StationLine
+    classes = ["collapse"]
 
 
 class StationLineTabularInline(admin.TabularInline):
     model = StationLine
+    classes = ["collapse"]
 
 
 class LineAdmin(admin.ModelAdmin):
@@ -117,6 +128,14 @@ class StationLineAdmin(admin.ModelAdmin):
         "station",
         "line",
     ]
+    list_filter = [
+        "line",
+    ]
+    search_fields = [
+        "station__name",
+        "display_name",
+        "internal_representation",
+    ]
 
 
 class VehicleAdmin(admin.ModelAdmin):
@@ -126,10 +145,29 @@ class VehicleAdmin(admin.ModelAdmin):
         "status",
         "in_service_since",
     ]
+    list_filter = [
+        "vehicle_type",
+        "status",
+        "in_service_since",
+    ]
+    search_fields = [
+        "identification_no",
+        "vehicle_type__internal_name",
+        "vehicle_type__display_name",
+    ]
 
 
 class VehicleTypeAdmin(admin.ModelAdmin):
-    pass
+    inlines = [VehicleTabularInline]
+    list_display = [
+        "__str__",
+        "internal_name",
+        "display_name",
+    ]
+    search_fields = [
+        "internal_name",
+        "display_name",
+    ]
 
 
 admin.site.register(Line, LineAdmin)

@@ -176,7 +176,7 @@ class Vehicle(models.Model):
     )
 
     def __str__(self) -> str:
-        return f"{self.id} - {self.identification_no} @ {self.line.code}"
+        return f"{self.identification_no} @ {self.line.code}"
 
     class Meta:
         ordering = ["identification_no"]

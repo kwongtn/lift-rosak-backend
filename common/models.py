@@ -12,11 +12,11 @@ class Media(TimeStampedModel, UUIDModel, SoftDeletableModel):
     )
 
     def __str__(self) -> str:
-        return self.id[:8] + "..."
+        return self.id[:8]
 
 
 class User(TimeStampedModel):
     firebase_id = models.TextField(unique=True)
 
     def __str__(self) -> str:
-        return self.firebase_id[:8] + "..."
+        return self.firebase_id[:8]

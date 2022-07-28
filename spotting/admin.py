@@ -25,11 +25,15 @@ class EventAdmin(admin.ModelAdmin):
     ]
     list_filter = [
         "type",
-        "vehicle",
-        "reporter",
         "status",
-        "origin_station",
-        "destination_station",
+        "reporter",
+    ]
+    search_fields = [
+        "vehicle__identification_no",
+        "vehicle__vehicle_type__internal_name",
+        "vehicle__vehicle_type__display_name",
+        "origin_station__display_name",
+        "destination_station__display_name",
     ]
 
 
