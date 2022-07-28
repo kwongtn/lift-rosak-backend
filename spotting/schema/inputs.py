@@ -18,3 +18,4 @@ class EventInput:
     origin_station: Optional[gql.ID]
     destination_station: Optional[gql.ID]
     location: Optional["GeoPoint"]
+    is_anonymous: Optional[bool]

@@ -32,6 +32,7 @@ class SpottingMutations:
         )[0].id
 
         notes = input.notes if input.notes != gql.UNSET else ""
+        is_anonymous = input.is_anonymous if input.is_anonymous != gql.UNSET else False
 
         origin_station_id = None
         destination_station_id = None
@@ -64,6 +65,7 @@ class SpottingMutations:
             type=input.type,
             origin_station_id=origin_station_id,
             destination_station_id=destination_station_id,
+            is_anonymous=is_anonymous,
         )
 
         return GenericMutationReturn(ok=True)

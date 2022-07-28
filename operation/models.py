@@ -153,6 +153,7 @@ class Vehicle(models.Model):
     vehicle_type = models.ForeignKey(
         to="operation.VehicleType",
         on_delete=models.PROTECT,
+        related_name="vehicles",
     )
     status = models.CharField(
         max_length=32,

@@ -22,10 +22,12 @@ class EventAdmin(admin.ModelAdmin):
         "origin_station",
         "destination_station",
         "location",
+        "is_anonymous",
     ]
     list_filter = [
         "type",
         "status",
+        "is_anonymous",
         "reporter",
     ]
     search_fields = [

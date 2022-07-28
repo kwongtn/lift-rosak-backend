@@ -31,6 +31,8 @@ class Event(TimeStampedModel):
         choices=SpottingEventType.choices,
     )
 
+    is_anonymous = models.BooleanField(default=False)
+
     origin_station = models.ForeignKey(
         to="operation.Station",
         null=True,
