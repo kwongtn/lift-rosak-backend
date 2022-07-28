@@ -149,6 +149,7 @@ class VehicleAdmin(admin.ModelAdmin):
         "vehicle_type",
         "status",
         "in_service_since",
+        "line",
     ]
     search_fields = [
         "identification_no",
