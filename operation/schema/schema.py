@@ -2,13 +2,14 @@ from typing import List
 
 from strawberry_django_plus import gql
 
+from operation.schema.filters import LineFilter
 from operation.schema.scalars import Asset, Line, Station, Vehicle, VehicleType
 
 
 @gql.type
 class OperationScalars:
     # TODO: Add back filters
-    lines: List[Line] = gql.django.field()
+    lines: List[Line] = gql.django.field(filters=LineFilter)
     assets: List[Asset] = gql.django.field()
     stations: List[Station] = gql.django.field()
     vehicles: List[Vehicle] = gql.django.field()

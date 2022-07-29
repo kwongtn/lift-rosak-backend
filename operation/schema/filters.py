@@ -1,30 +1,39 @@
-# import strawberry
-# import strawberry_django
+from strawberry_django_plus import gql
+
+from operation import models
+
 # from django.contrib.gis.geos import Point
 # from django.contrib.gis.measure import Distance
 
-# from operation import models
+
 # from operation.schema.enums import AssetType
 
 
-# @strawberry_django.filters.filter(models.Line)
-# class LineFilter:
-#     id: strawberry.ID
-#     code: str
-#     display_name: str
-#     display_color: str
+@gql.django.filters.filter(models.Line)
+class LineFilter:
+    id: gql.ID
+    code: str
+    display_name: str
+    display_color: str
+    first_only: bool
 
-#     def filter_id(self, queryset):
-#         return queryset.filter(id=self.id)
+    def filter_first_only(self, queryset):
+        if self.first_only:
+            return queryset[:1]
+        else:
+            return queryset
 
-#     def filter_code(self, queryset):
-#         return queryset.filter(code__icontains=self.code)
+    def filter_id(self, queryset):
+        return queryset.filter(id=self.id)
 
-#     def filter_display_name(self, queryset):
-#         return queryset.filter(display_name__icontains=self.display_name)
+    def filter_code(self, queryset):
+        return queryset.filter(code__icontains=self.code)
 
-#     def filter_display_color(self, queryset):
-#         return queryset.filter(display_color__icontains=self.display_color)
+    def filter_display_name(self, queryset):
+        return queryset.filter(display_name__icontains=self.display_name)
+
+    def filter_display_color(self, queryset):
+        return queryset.filter(display_color__icontains=self.display_color)
 
 
 # @strawberry_django.filters.filter(models.Asset)
