@@ -92,6 +92,12 @@ class VehicleType:
         )
 
     @gql.field
+    async def vehicle_status_married_count(self) -> int:
+        return await vehicle_status_count_from_vehicle_type_loader.load(
+            (self.id, VehicleStatus.MARRIED)
+        )
+
+    @gql.field
     async def vehicle_status_testing_count(self) -> int:
         return await vehicle_status_count_from_vehicle_type_loader.load(
             (self.id, VehicleStatus.TESTING)
