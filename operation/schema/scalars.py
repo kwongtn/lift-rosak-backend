@@ -47,7 +47,7 @@ class Line:
     vehicles: List["Vehicle"]
     station_lines: List["StationLine"]
 
-    @gql.field
+    @gql.django.field
     async def vehicle_types(self) -> List["VehicleType"]:
         return await vehicle_type_from_line_loader.load(self.id)
 
