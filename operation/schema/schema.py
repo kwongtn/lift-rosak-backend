@@ -2,7 +2,7 @@ from typing import List
 
 from strawberry_django_plus import gql
 
-from operation.schema.filters import LineFilter
+from operation.schema.filters import LineFilter, VehicleTypeFilter
 from operation.schema.scalars import Asset, Line, Station, Vehicle, VehicleType
 
 
@@ -13,7 +13,7 @@ class OperationScalars:
     assets: List[Asset] = gql.django.field()
     stations: List[Station] = gql.django.field()
     vehicles: List[Vehicle] = gql.django.field()
-    vehicleTypes: List[VehicleType] = gql.django.field()
+    vehicleTypes: List[VehicleType] = gql.django.field(filters=VehicleTypeFilter)
     assets: List[Asset] = gql.django.field()
 
 

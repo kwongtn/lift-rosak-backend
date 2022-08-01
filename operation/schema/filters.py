@@ -36,6 +36,14 @@ class LineFilter:
         return queryset.filter(display_color__icontains=self.display_color)
 
 
+@gql.django.filters.filter(models.VehicleType)
+class VehicleTypeFilter:
+    line_id: gql.ID
+
+    def filter_line_id(self, queryset):
+        return queryset.filter(vehicles__line_id=self.line_id).distinct()
+
+
 # @strawberry_django.filters.filter(models.Asset)
 # class AssetFilter:
 #     id: strawberry.ID
