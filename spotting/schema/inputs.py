@@ -19,3 +19,4 @@ class EventInput:
     destination_station: Optional[gql.ID]
     location: Optional["GeoPoint"]
     is_anonymous: Optional[bool]
+    captcha_key: str

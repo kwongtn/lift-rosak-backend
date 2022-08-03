@@ -1,7 +1,10 @@
 import typing
 
+import requests
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from firebase_admin import auth
+from strawberry.types import Info
 from strawberry_django_plus import gql
 
 from common.models import User
@@ -24,7 +27,20 @@ class SpottingScalars:
 class SpottingMutations:
     @gql.mutation
     @sync_to_async
-    def add_event(self, input: EventInput) -> GenericMutationReturn:
+    def add_event(self, input: EventInput, info: Info) -> GenericMutationReturn:
+        # Check if captcha is valid
+        response = requests.request(
+            "POST",
+            "https://www.google.com/recaptcha/api/siteverify",
+            params={
+                "secret": settings.RECAPTCHA_KEY,
+                "response": input.captcha_key,
+            },
+        ).json()
+
+        if not response["success"] or response["score"] < settings.RECAPTCHA_MIN_SCORE:
+            raise ConnectionRefusedError("Recaptcha verification failed.")
+
         key_contents = auth.verify_id_token(input.auth_key)
         reporter_id = User.objects.get_or_create(
             firebase_id=key_contents["uid"],
