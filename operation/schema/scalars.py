@@ -2,19 +2,12 @@ from datetime import date
 from typing import TYPE_CHECKING, List, Optional
 
 from django.db.models import Q
+from strawberry.types import Info
 from strawberry_django_plus import gql
 
 from generic.schema.scalars import GeoPoint
 from operation import models
 from operation.enums import VehicleStatus
-from operation.schema.loaders import (
-    last_spotting_date_from_vehicle_loader,
-    spotting_count_from_vehicle_loader,
-    vehicle_count_from_vehicle_type_loader,
-    vehicle_from_vehicle_type_loader,
-    vehicle_status_count_from_vehicle_type_loader,
-    vehicle_type_from_line_loader,
-)
 from spotting import models as spotting_models
 
 
@@ -48,8 +41,10 @@ class Line:
     station_lines: List["StationLine"]
 
     @gql.django.field
-    async def vehicle_types(self) -> List["VehicleType"]:
-        return await vehicle_type_from_line_loader.load(self.id)
+    async def vehicle_types(self, info: Info) -> List["VehicleType"]:
+        return await info.context.loaders.operation.vehicle_type_from_line_loader.load(
+            self.id
+        )
 
 
 @gql.django.type(models.Asset)
@@ -67,51 +62,61 @@ class VehicleType:
     id: gql.auto
     internal_name: str
     display_name: str
+    info: str
 
     @gql.django.field
-    async def vehicles(self) -> List["Vehicle"]:
-        # print("Load vehicles from vehicletype: ", self.id)
-        return await vehicle_from_vehicle_type_loader.load(self.id)
+    async def vehicles(self, info: Info) -> List["Vehicle"]:
+        return (
+            await info.context.loaders.operation.vehicle_from_vehicle_type_loader.load(
+                self.id
+            )
+        )
 
     @gql.field
-    async def vehicle_status_in_service_count(self) -> int:
-        return await vehicle_status_count_from_vehicle_type_loader.load(
+    async def vehicle_status_in_service_count(self, info: Info) -> int:
+        return await info.context.loaders.operation.vehicle_status_count_from_vehicle_type_loader.load(
             (self.id, VehicleStatus.IN_SERVICE)
         )
 
     @gql.field
-    async def vehicle_status_not_spotted_count(self) -> int:
-        return await vehicle_status_count_from_vehicle_type_loader.load(
+    async def vehicle_status_not_spotted_count(self, info: Info) -> int:
+        return await info.context.loaders.operation.vehicle_status_count_from_vehicle_type_loader.load(
             (self.id, VehicleStatus.NOT_SPOTTED)
         )
 
     @gql.field
-    async def vehicle_status_decommissioned_count(self) -> int:
-        return await vehicle_status_count_from_vehicle_type_loader.load(
+    async def vehicle_status_decommissioned_count(self, info: Info) -> int:
+        return await info.context.loaders.operation.vehicle_status_count_from_vehicle_type_loader.load(
             (self.id, VehicleStatus.DECOMMISSIONED)
         )
 
     @gql.field
-    async def vehicle_status_married_count(self) -> int:
-        return await vehicle_status_count_from_vehicle_type_loader.load(
+    async def vehicle_status_married_count(self, info: Info) -> int:
+        return await info.context.loaders.operation.vehicle_status_count_from_vehicle_type_loader.load(
             (self.id, VehicleStatus.MARRIED)
         )
 
     @gql.field
-    async def vehicle_status_testing_count(self) -> int:
-        return await vehicle_status_count_from_vehicle_type_loader.load(
+    async def vehicle_status_testing_count(self, info: Info) -> int:
+        return await info.context.loaders.operation.vehicle_status_count_from_vehicle_type_loader.load(
             (self.id, VehicleStatus.TESTING)
         )
 
     @gql.field
-    async def vehicle_status_unknown_count(self) -> int:
-        return await vehicle_status_count_from_vehicle_type_loader.load(
+    async def vehicle_status_unknown_count(self, info: Info) -> int:
+        return await info.context.loaders.operation.vehicle_status_count_from_vehicle_type_loader.load(
             (self.id, VehicleStatus.UNKNOWN)
         )
 
     @gql.field
-    async def vehicle_total_count(self) -> int:
-        return await vehicle_count_from_vehicle_type_loader.load(self.id)
+    async def vehicle_total_count(self, info: Info) -> int:
+        return await info.context.loaders.operation.vehicle_count_from_vehicle_type_loader.load(
+            self.id
+        )
+
+    @gql.field
+    def info(self, info: Info):
+        return str(info)
 
 
 @gql.django.type(models.Vehicle)
@@ -128,8 +133,10 @@ class Vehicle:
         from spotting.schema.scalars import Event
 
     @gql.django.field
-    async def last_spotting_date(self) -> Optional[date]:
-        return await last_spotting_date_from_vehicle_loader.load(self.id)
+    async def last_spotting_date(self, info: Info) -> Optional[date]:
+        return await info.context.loaders.operation.last_spotting_date_from_vehicle_loader.load(
+            self.id
+        )
 
     @gql.django.field
     def last_spottings(
@@ -141,7 +148,7 @@ class Vehicle:
 
     @gql.field
     async def spottingCount(
-        self, after: Optional[date] = None, before: Optional[date] = None
+        self, info: Info, after: Optional[date] = None, before: Optional[date] = None
     ) -> int:
 
         filter = Q(vehicle_id=self.id)
@@ -152,4 +159,6 @@ class Vehicle:
         if before is not None:
             filter &= Q(spotting_date__lte=before)
 
-        return await spotting_count_from_vehicle_loader.load((self.id, filter))
+        return await info.context.loaders.operation.spotting_count_from_vehicle_loader.load(
+            (self.id, filter)
+        )

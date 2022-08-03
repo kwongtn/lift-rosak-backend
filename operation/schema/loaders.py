@@ -11,16 +11,14 @@ from spotting.models import Event
 
 @sync_to_async
 def batch_load_vehicle_from_vehicle_type(keys):
-    vehicles: List[Vehicle] = Vehicle.objects.filter(vehicle_type_id__in=keys)
-
     vehicle_type_dict = defaultdict()
-    for vehicle in vehicles:
+    for vehicle in Vehicle.objects.filter(vehicle_type_id__in=keys).iterator():
         if vehicle.vehicle_type_id not in vehicle_type_dict:
             vehicle_type_dict[vehicle.vehicle_type_id] = {vehicle}
         else:
             vehicle_type_dict[vehicle.vehicle_type_id].add(vehicle)
 
-    return [list(vehicle_type_dict.get(key)) for key in keys]
+    return [list(vehicle_type_dict.get(key, {})) for key in keys]
 
 
 @sync_to_async
@@ -81,19 +79,22 @@ def batch_load_spotting_count_from_vehicle(keys):
     return [event_object.get(str(key[0]), None) for key in keys]
 
 
-vehicle_from_vehicle_type_loader = DataLoader(
-    load_fn=batch_load_vehicle_from_vehicle_type
-)
-vehicle_type_from_line_loader = DataLoader(load_fn=batch_load_vehicle_type_from_line)
-vehicle_status_count_from_vehicle_type_loader = DataLoader(
-    load_fn=batch_load_vehicle_status_count_from_vehicle_type
-)
-vehicle_count_from_vehicle_type_loader = DataLoader(
-    load_fn=batch_load_vehicle_count_from_vehicle_type
-)
-last_spotting_date_from_vehicle_loader = DataLoader(
-    load_fn=batch_load_last_spotting_date_from_vehicle_id
-)
-spotting_count_from_vehicle_loader = DataLoader(
-    load_fn=batch_load_spotting_count_from_vehicle
-)
+class OperationContextLoaders:
+    vehicle_from_vehicle_type_loader = DataLoader(
+        load_fn=batch_load_vehicle_from_vehicle_type
+    )
+    vehicle_type_from_line_loader = DataLoader(
+        load_fn=batch_load_vehicle_type_from_line
+    )
+    vehicle_status_count_from_vehicle_type_loader = DataLoader(
+        load_fn=batch_load_vehicle_status_count_from_vehicle_type
+    )
+    vehicle_count_from_vehicle_type_loader = DataLoader(
+        load_fn=batch_load_vehicle_count_from_vehicle_type
+    )
+    last_spotting_date_from_vehicle_loader = DataLoader(
+        load_fn=batch_load_last_spotting_date_from_vehicle_id
+    )
+    spotting_count_from_vehicle_loader = DataLoader(
+        load_fn=batch_load_spotting_count_from_vehicle
+    )
