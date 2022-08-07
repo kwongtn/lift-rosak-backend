@@ -41,7 +41,7 @@ class VehicleTypeFilter:
     line_id: gql.ID
 
     def filter_line_id(self, queryset):
-        return queryset.filter(vehicles__line_id=self.line_id).distinct()
+        return queryset.filter(vehicles__line_id=self.line_id).distinct("id")
 
 
 # @strawberry_django.filters.filter(models.Asset)
