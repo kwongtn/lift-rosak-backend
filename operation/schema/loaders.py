@@ -72,22 +72,23 @@ async def batch_load_spotting_count_from_vehicle(keys):
     return [event_object.get(str(key[0]), None) for key in keys]
 
 
-class OperationContextLoaders:
-    vehicle_from_vehicle_type_loader = DataLoader(
+OperationContextLoaders = {
+    "vehicle_from_vehicle_type_loader": DataLoader(
         load_fn=batch_load_vehicle_from_vehicle_type
-    )
-    vehicle_type_from_line_loader = DataLoader(
+    ),
+    "vehicle_type_from_line_loader": DataLoader(
         load_fn=batch_load_vehicle_type_from_line
-    )
-    vehicle_status_count_from_vehicle_type_loader = DataLoader(
+    ),
+    "vehicle_status_count_from_vehicle_type_loader": DataLoader(
         load_fn=batch_load_vehicle_status_count_from_vehicle_type
-    )
-    vehicle_count_from_vehicle_type_loader = DataLoader(
+    ),
+    "vehicle_count_from_vehicle_type_loader": DataLoader(
         load_fn=batch_load_vehicle_count_from_vehicle_type
-    )
-    last_spotting_date_from_vehicle_loader = DataLoader(
+    ),
+    "last_spotting_date_from_vehicle_loader": DataLoader(
         load_fn=batch_load_last_spotting_date_from_vehicle_id
-    )
-    spotting_count_from_vehicle_loader = DataLoader(
+    ),
+    "spotting_count_from_vehicle_loader": DataLoader(
         load_fn=batch_load_spotting_count_from_vehicle
-    )
+    ),
+}
