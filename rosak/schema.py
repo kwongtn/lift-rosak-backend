@@ -39,6 +39,6 @@ schema = gql.Schema(
     mutation=Mutation,
     # subscription=Subscription,
     extensions=[
-        DjangoOptimizerExtension,
+        DjangoOptimizerExtension(),
     ],
 )
