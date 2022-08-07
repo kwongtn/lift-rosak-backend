@@ -6,13 +6,7 @@ from strawberry.django.views import AsyncGraphQLView
 
 from operation.schema.loaders import OperationContextLoaders
 
-# @dataclasses.dataclass
-# class ContextLoaders:
-#     operation: OperationContextLoaders = dataclasses.field(
-#         default_factory=OperationContextLoaders
-# )
-
-ContextLoaders = {"operation": copy.deepcopy(OperationContextLoaders)}
+ContextLoaders = {"operation": OperationContextLoaders}
 
 
 class CustomGraphQLView(AsyncGraphQLView):
