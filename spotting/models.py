@@ -74,7 +74,12 @@ class Event(TimeStampedModel):
                     & Q(location__isnull=False)
                 )
                 | Q(
-                    Q(type=SpottingEventType.DEPOT)
+                    Q(
+                        type__in=[
+                            SpottingEventType.DEPOT,
+                            SpottingEventType.JUST_SPOTTING,
+                        ]
+                    )
                     & Q(origin_station__isnull=True)
                     & Q(destination_station__isnull=True)
                     & Q(location__isnull=True)
