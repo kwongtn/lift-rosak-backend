@@ -117,7 +117,6 @@ class StationAdmin(admin.ModelAdmin):
     ]
     search_fields = [
         "display_name",
-        "internal_representation",
     ]
 
 
@@ -132,7 +131,7 @@ class StationLineAdmin(admin.ModelAdmin):
         "line",
     ]
     search_fields = [
-        "station__name",
+        "station__display_name",
         "display_name",
         "internal_representation",
     ]

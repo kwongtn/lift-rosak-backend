@@ -16,6 +16,7 @@ class EventAdmin(admin.ModelAdmin):
     list_display = [
         "id",
         "reporter",
+        "spotting_date",
         "vehicle",
         "status",
         "type",
@@ -36,6 +37,9 @@ class EventAdmin(admin.ModelAdmin):
         "vehicle__vehicle_type__display_name",
         "origin_station__display_name",
         "destination_station__display_name",
+    ]
+    list_editable = [
+        "spotting_date",
     ]
 
 

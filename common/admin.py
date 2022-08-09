@@ -18,6 +18,13 @@ class UserAdmin(admin.ModelAdmin):
         ReportStackedInline,
         MediaStackedInline,
     ]
+    list_display = [
+        "__str__",
+        "firebase_id",
+    ]
+    search_fields = [
+        "firebase_id",
+    ]
 
 
 admin.site.register(Media, admin.ModelAdmin)
