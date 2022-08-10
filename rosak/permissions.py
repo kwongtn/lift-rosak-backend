@@ -13,6 +13,9 @@ class IsRecaptchaChallengePassed(BasePermission):
     async def has_permission(self, source: typing.Any, info: Info, **kwargs) -> bool:
         request: Request = info.context["request"]
 
+        if request.headers.get("G-Recaptcha-Response", None) is None:
+            return False
+
         # Check if captcha is valid
         response = requests.request(
             "POST",
