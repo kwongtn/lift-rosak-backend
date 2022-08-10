@@ -2,8 +2,7 @@ import typing
 
 import requests
 from django.conf import settings
-from starlette.requests import Request
-from starlette.websockets import WebSocket
+from django.http import request as Request
 from strawberry.permission import BasePermission
 from strawberry.types import Info
 
@@ -12,7 +11,7 @@ class IsRecaptchaChallengePassed(BasePermission):
     message = "You shall not pass. Contact an admin for more info."
 
     async def has_permission(self, source: typing.Any, info: Info, **kwargs) -> bool:
-        request: typing.Union[Request, WebSocket] = info.context["request"]
+        request: Request = info.context["request"]
 
         # Check if captcha is valid
         response = requests.request(
