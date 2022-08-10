@@ -9,12 +9,11 @@ from spotting.models import Event
 
 
 async def batch_load_vehicle_from_vehicle_type(keys):
-    vehicle_type_dict = defaultdict()
-    async for vehicle in Vehicle.objects.filter(vehicle_type_id__in=keys):
-        if vehicle.vehicle_type_id not in vehicle_type_dict:
-            vehicle_type_dict[vehicle.vehicle_type_id] = {vehicle}
-        else:
-            vehicle_type_dict[vehicle.vehicle_type_id].add(vehicle)
+    vehicle_type_dict = defaultdict(set)
+    async for vehicle in Vehicle.objects.filter(vehicle_type_id__in=keys).order_by(
+        "identification_no"
+    ):
+        vehicle_type_dict[vehicle.vehicle_type_id].add(vehicle)
 
     return [list(vehicle_type_dict.get(key, {})) for key in keys]
 
@@ -24,12 +23,9 @@ async def batch_load_vehicle_type_from_line(keys):
         "vehicle_type"
     )
 
-    line_dict = defaultdict()
+    line_dict = defaultdict(set)
     async for vehicle in vehicles:
-        if vehicle.line_id not in line_dict:
-            line_dict[vehicle.line_id] = {vehicle.vehicle_type}
-        else:
-            line_dict[vehicle.line_id].add(vehicle.vehicle_type)
+        line_dict[vehicle.line_id].add(vehicle.vehicle_type)
 
     return [list(line_dict.get(key, {})) for key in keys]
 
