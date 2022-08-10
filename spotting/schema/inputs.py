@@ -10,7 +10,6 @@ from spotting import models
 @gql.django.partial(models.Event)
 class EventInput:
     spotting_date: date
-    auth_key: str
     vehicle: gql.ID
     notes: Optional[str]
     status: gql.auto
@@ -19,4 +18,3 @@ class EventInput:
     destination_station: Optional[gql.ID]
     location: Optional["GeoPoint"]
     is_anonymous: Optional[bool]
-    captcha_key: str

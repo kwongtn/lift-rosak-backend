@@ -11,4 +11,8 @@ ContextLoaders = {"operation": OperationContextLoaders}
 
 class CustomGraphQLView(AsyncGraphQLView):
     async def get_context(self, request: HttpRequest, response: HttpResponse) -> Any:
-        return {"loaders": copy.deepcopy(ContextLoaders)}
+        return {
+            "loaders": copy.deepcopy(ContextLoaders),
+            "request": request,
+            "response": response,
+        }

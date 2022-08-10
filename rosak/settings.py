@@ -13,6 +13,8 @@ import os
 from distutils.util import strtobool
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -135,6 +137,11 @@ CORS_ALLOWED_ORIGINS = [
     "https://lifrosak.com",
     "https://www.lifrosak.com",
     "http://localhost:4200",
+]
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "g-recaptcha-response",
+    "firebase-auth-key",
 ]
 
 INTERNAL_IPS = [

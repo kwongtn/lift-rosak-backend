@@ -1,15 +1,13 @@
 import typing
 
-import requests
 from asgiref.sync import sync_to_async
-from django.conf import settings
-from firebase_admin import auth
 from strawberry.types import Info
 from strawberry_django_plus import gql
 
-from common.models import User
 from common.schema.scalars import GenericMutationReturn
+from common.utils import get_user_from_firebase_key
 from operation.models import StationLine
+from rosak.permissions import IsRecaptchaChallengePassed
 from spotting import models
 from spotting.enums import SpottingEventType
 from spotting.schema.inputs import EventInput
@@ -25,27 +23,10 @@ class SpottingScalars:
 
 @gql.type
 class SpottingMutations:
-    @gql.mutation
+    @gql.mutation(permission_classes=[IsRecaptchaChallengePassed])
     @sync_to_async
     def add_event(self, input: EventInput, info: Info) -> GenericMutationReturn:
-        # Check if captcha is valid
-        response = requests.request(
-            "POST",
-            "https://www.google.com/recaptcha/api/siteverify",
-            params={
-                "secret": settings.RECAPTCHA_KEY,
-                "response": input.captcha_key,
-            },
-        ).json()
-
-        if not response["success"] or response["score"] < settings.RECAPTCHA_MIN_SCORE:
-            raise ConnectionRefusedError("Recaptcha verification failed.")
-
-        key_contents = auth.verify_id_token(input.auth_key)
-        reporter_id = User.objects.get_or_create(
-            firebase_id=key_contents["uid"],
-            defaults={"firebase_id": key_contents["uid"]},
-        )[0].id
+        user_id = get_user_from_firebase_key(info).id
 
         notes = input.notes if input.notes != gql.UNSET else ""
         is_anonymous = input.is_anonymous if input.is_anonymous != gql.UNSET else False
@@ -74,7 +55,7 @@ class SpottingMutations:
 
         models.Event.objects.create(
             spotting_date=input.spotting_date,
-            reporter_id=reporter_id,
+            reporter_id=user_id,
             vehicle_id=input.vehicle,
             notes=notes,
             status=input.status,
