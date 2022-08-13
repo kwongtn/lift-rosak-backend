@@ -566,11 +566,11 @@
         },
         "proto-plus": {
             "hashes": [
-                "sha256:449b4537e83f4776bd69051c4d776db8ffe3f9d0641f1e87b06c116eb94c90e9",
-                "sha256:c6c43c3fcfc360fdab46b47e2e9e805ff56e13169f9f2e45caf88b6b593215ab"
+                "sha256:a27192d8cdc54e044f137b4c9053c9108cf5c065b46d067f1bcd389a911faf5b",
+                "sha256:c2e6693fdf68c405a6428226915a8625d21d0513793598ae3287a1210478d8ec"
             ],
             "markers": "python_version >= '3.6'",
-            "version": "==1.20.6"
+            "version": "==1.22.0"
         },
         "protobuf": {
             "hashes": [
@@ -793,19 +793,19 @@
         },
         "sentry-sdk": {
             "hashes": [
-                "sha256:75643a8c656ffd61ea0a37bf4b0b9463825d6043d4fbfd7c80872ab66e4fa06e",
-                "sha256:baac8e9426b7927f95792b1f38c83ae743a62471e92b72fa3ec2d5987609abeb"
+                "sha256:02b7bf195f209f51c9f9458098a8f541dbf82314d21477e68ad841668fcf9a46",
+                "sha256:f1e2333d1922dca3f91e57dad872c73b3cc449ac8542867664fb898b2eec342f"
             ],
             "index": "pypi",
-            "version": "==1.9.3"
+            "version": "==1.9.4"
         },
         "setuptools": {
             "hashes": [
-                "sha256:73bfae4791da7c1c56882ab17577d00f7a37a0347162aeb9360058de0dc25083",
-                "sha256:abcb76aa4decd7a17cbe0e4b31bdf549d106ba7f668e87e0860f5f7b84b9b3fe"
+                "sha256:194b74f2c2d1800268fe2d857d99981e7c04d010de3099f04ee45ebec535e560",
+                "sha256:3bcaf6e27ad3b0f643ba0a48c5ab9eca930c3eb51df0e068f4826ab880c394ea"
             ],
             "markers": "python_version >= '3.7'",
-            "version": "==63.4.2"
+            "version": "==64.0.3"
         },
         "six": {
             "hashes": [
@@ -833,19 +833,19 @@
         },
         "strawberry-django-plus": {
             "hashes": [
-                "sha256:cd8af515c98681b7312003ad40426161ccac9393d218480ec029c8d1a72ae1ca",
-                "sha256:fd0b4b1b427f32b719559c258cdeadc23066d014bd6b4c2aa3425d007206b133"
+                "sha256:4c25b2468854e2f8402895d9ce0f6364e25a4ae90ea9982cf77d5b626e8b26fe",
+                "sha256:e53bd2a455efd4d67104c4ac4fa1e08fca6d5f97dc9dbde805d569e0d47305a7"
             ],
             "index": "pypi",
-            "version": "==1.22.0"
+            "version": "==1.23.0"
         },
         "strawberry-graphql": {
             "hashes": [
-                "sha256:02e7f6e5d5541779fd2ece3f5302ff6c606b7727b8d23eb712fff07abdafc8e0",
-                "sha256:68841617fc9314027dd1c856c7a24f1456fe65952fd33d38f081cc9af81ecebb"
+                "sha256:c8d93ff00b257749f7d2a2f20da0210963256d52be9b8e6a7dbfb5c4a6e8580a",
+                "sha256:ffc570a79a9b09fa95eea4b59557cb792606ac3dcee7f6276e1e68d5a2e5400a"
             ],
             "index": "pypi",
-            "version": "==0.124.0"
+            "version": "==0.125.0"
         },
         "strawberry-graphql-django": {
             "hashes": [
@@ -1067,7 +1067,7 @@
                 "sha256:8033ad4e853066ba6ca92050b9df2f89301b8fc8bf7e9324d412a63f8bf1a8fd",
                 "sha256:bac2fd45c0a1c9cf619e63a90d62bdc63892ef92387424b855792a6cabe789aa"
             ],
-            "markers": "python_full_version >= '3.6.0'",
+            "markers": "python_version >= '3.6'",
             "version": "==4.0.9"
         },
         "gitpython": {
@@ -1167,7 +1167,7 @@
                 "sha256:348e0240c33b60bbdf4e523192ef919f28cb2c3d7d5c7794f74009290f236325",
                 "sha256:6c2d30ab6be0e4a46919781807b4f0d834ebdd6c6e3dca0bda5a15f863427b6e"
             ],
-            "markers": "python_full_version >= '3.6.0'",
+            "markers": "python_version >= '3.6'",
             "version": "==0.7.0"
         },
         "mypi": {
@@ -1204,7 +1204,7 @@
                 "sha256:2c9607871d58c76354b697b42f5d57e1ada7d261c261efac224b664affdc5785",
                 "sha256:d1735fc58b418fd7c5f658d28d943854f8a849b01a5d0a1e6f3f3fdd0166804b"
             ],
-            "markers": "python_full_version >= '3.6.0'",
+            "markers": "python_version >= '3.6'",
             "version": "==2.9.1"
         },
         "pyflakes": {
@@ -1212,7 +1212,7 @@
                 "sha256:4579f67d887f804e67edb544428f264b7b24f435b263c4614f384135cea553d2",
                 "sha256:491feb020dca48ccc562a8c0cbe8df07ee13078df59813b83959cbdada312ea3"
             ],
-            "markers": "python_full_version >= '3.6.0'",
+            "markers": "python_version >= '3.6'",
             "version": "==2.5.0"
         },
         "pygments": {
@@ -1256,7 +1256,7 @@
                 "sha256:2aba19d6a040e78d8b09de5c57e96207b09ed71d8e55ce0959eeee6c8e190d94",
                 "sha256:c840e62059cd3be204b0c9c9f74be2c09d5648eddd4580d9314c3ecde0b30936"
             ],
-            "markers": "python_full_version >= '3.6.0'",
+            "markers": "python_version >= '3.6'",
             "version": "==5.0.0"
         },
         "sniffio": {
@@ -1276,11 +1276,11 @@
         },
         "strawberry-graphql": {
             "hashes": [
-                "sha256:02e7f6e5d5541779fd2ece3f5302ff6c606b7727b8d23eb712fff07abdafc8e0",
-                "sha256:68841617fc9314027dd1c856c7a24f1456fe65952fd33d38f081cc9af81ecebb"
+                "sha256:c8d93ff00b257749f7d2a2f20da0210963256d52be9b8e6a7dbfb5c4a6e8580a",
+                "sha256:ffc570a79a9b09fa95eea4b59557cb792606ac3dcee7f6276e1e68d5a2e5400a"
             ],
             "index": "pypi",
-            "version": "==0.124.0"
+            "version": "==0.125.0"
         },
         "tomli": {
             "hashes": [
