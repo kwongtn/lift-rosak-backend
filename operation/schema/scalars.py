@@ -37,8 +37,7 @@ class Line:
     display_color: str
     stations: List["Station"]
     station_lines: List["StationLine"]
-    vehicles: List["Vehicle"]
-    station_lines: List["StationLine"]
+    # line_vehicles: List["Vehicle"]
 
     @gql.django.field
     async def vehicle_types(self, info: Info) -> List["VehicleType"]:
@@ -123,7 +122,7 @@ class Vehicle:
     identification_no: str
     vehicle_type: "VehicleType" = gql.django.field(select_related=["vehicle_type"])
     status: gql.auto
-    line: "Line"
+    lines: List["Line"]
     notes: str
     in_service_since: Optional[date]
 

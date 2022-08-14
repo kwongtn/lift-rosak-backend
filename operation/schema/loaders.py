@@ -4,7 +4,7 @@ from typing import List
 from django.db.models import Count, Max, Q
 from strawberry.dataloader import DataLoader
 
-from operation.models import Vehicle
+from operation.models import Vehicle, VehicleLine
 from spotting.models import Event
 
 
@@ -19,13 +19,13 @@ async def batch_load_vehicle_from_vehicle_type(keys):
 
 
 async def batch_load_vehicle_type_from_line(keys):
-    vehicles: List[Vehicle] = Vehicle.objects.filter(line_id__in=keys).prefetch_related(
-        "vehicle_type"
-    )
+    vehicle_lines: List[Vehicle] = VehicleLine.objects.filter(
+        line_id__in=keys
+    ).prefetch_related("vehicle", "vehicle__vehicle_type")
 
     line_dict = defaultdict(set)
-    async for vehicle in vehicles:
-        line_dict[vehicle.line_id].add(vehicle.vehicle_type)
+    async for vehicle_line in vehicle_lines:
+        line_dict[vehicle_line.line_id].add(vehicle_line.vehicle.vehicle_type)
 
     return [list(line_dict.get(key, {})) for key in keys]
 
