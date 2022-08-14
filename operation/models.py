@@ -24,6 +24,11 @@ class Line(TimeStampedModel):
         to="operation.Station",
         through="operation.StationLine",
     )
+    vehicles_new = models.ManyToManyField(
+        to="operation.Vehicle",
+        through="operation.VehicleLine",
+        related_name="lines",
+    )
 
     def __str__(self) -> str:
         return f"{self.id} - {self.code}"
@@ -164,8 +169,14 @@ class Vehicle(models.Model):
         null=False,
         blank=False,
         on_delete=models.PROTECT,
+        # related_name="vehicles",
+    )
+    lines_new = models.ManyToManyField(
+        to="operation.Line",
+        through="operation.VehicleLine",
         related_name="vehicles",
     )
+
     notes = models.TextField(
         default="",
         blank=True,
@@ -181,6 +192,21 @@ class Vehicle(models.Model):
 
     class Meta:
         ordering = ["identification_no"]
+
+
+class VehicleLine(models.Model):
+    vehicle = models.ForeignKey(
+        to="operation.Vehicle",
+        null=False,
+        blank=False,
+        on_delete=models.PROTECT,
+    )
+    line = models.ForeignKey(
+        to="operation.Line",
+        null=False,
+        blank=False,
+        on_delete=models.PROTECT,
+    )
 
 
 class VehicleType(models.Model):
