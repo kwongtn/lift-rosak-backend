@@ -29,8 +29,7 @@ SECRET_KEY = os.environ.get(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = strtobool(os.getenv("DEBUG", "false"))
-
+DEBUG = bool(strtobool(os.getenv("DEBUG", "false")))
 
 if DEBUG is not True:
     import sentry_sdk
