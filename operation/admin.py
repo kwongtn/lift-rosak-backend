@@ -9,6 +9,7 @@ from operation.models import (
     StationLine,
     StationMedia,
     Vehicle,
+    VehicleLine,
     VehicleType,
 )
 
@@ -79,9 +80,20 @@ class StationLineTabularInline(admin.TabularInline):
     classes = ["collapse"]
 
 
+class VehicleLineStackedInline(admin.StackedInline):
+    model = VehicleLine
+    classes = ["collapse"]
+
+
+class VehicleLineTabularInline(admin.TabularInline):
+    model = VehicleLine
+    classes = ["collapse"]
+
+
 class LineAdmin(admin.ModelAdmin):
     inlines = [
         StationLineTabularInline,
+        VehicleLineTabularInline,
     ]
     list_display = [
         "__str__",
@@ -138,6 +150,7 @@ class StationLineAdmin(admin.ModelAdmin):
 
 
 class VehicleAdmin(admin.ModelAdmin):
+    inlines = [VehicleLineTabularInline]
     list_display = [
         "__str__",
         "vehicle_type",
@@ -148,7 +161,7 @@ class VehicleAdmin(admin.ModelAdmin):
         "vehicle_type",
         "status",
         "in_service_since",
-        "line",
+        "vehicle_lines__display_name",
     ]
     search_fields = [
         "identification_no",
@@ -170,9 +183,18 @@ class VehicleTypeAdmin(admin.ModelAdmin):
     ]
 
 
+class VehicleLineAdmin(admin.ModelAdmin):
+    list_display = [
+        "__str__",
+        "vehicle",
+        "line",
+    ]
+
+
 admin.site.register(Line, LineAdmin)
 admin.site.register(Station, StationAdmin)
 admin.site.register(StationLine, StationLineAdmin)
 admin.site.register(Asset, AssetAdmin)
 admin.site.register(Vehicle, VehicleAdmin)
 admin.site.register(VehicleType, VehicleTypeAdmin)
+admin.site.register(VehicleLine, VehicleLineAdmin)

@@ -24,10 +24,10 @@ class Line(TimeStampedModel):
         to="operation.Station",
         through="operation.StationLine",
     )
-    vehicles_new = models.ManyToManyField(
+    vehicles = models.ManyToManyField(
         to="operation.Vehicle",
         through="operation.VehicleLine",
-        related_name="lines",
+        related_name="vehicle_lines",
     )
 
     def __str__(self) -> str:
@@ -164,17 +164,10 @@ class Vehicle(models.Model):
         max_length=32,
         choices=VehicleStatus.choices,
     )
-    line = models.ForeignKey(
-        to="operation.Line",
-        null=False,
-        blank=False,
-        on_delete=models.PROTECT,
-        # related_name="vehicles",
-    )
-    lines_new = models.ManyToManyField(
+    lines = models.ManyToManyField(
         to="operation.Line",
         through="operation.VehicleLine",
-        related_name="vehicles",
+        related_name="line_vehicles",
     )
 
     notes = models.TextField(
@@ -188,7 +181,7 @@ class Vehicle(models.Model):
     )
 
     def __str__(self) -> str:
-        return f"{self.identification_no} @ {self.line.code}"
+        return f"{self.identification_no}"
 
     class Meta:
         ordering = ["identification_no"]
