@@ -54,7 +54,10 @@ class Station(TimeStampedModel):
     )
 
     def __str__(self) -> str:
-        return f"{self.id} - {self.display_name}"
+        return f"{self.display_name}"
+
+    class Meta:
+        ordering = ["display_name"]
 
 
 class StationMedia(models.Model):
