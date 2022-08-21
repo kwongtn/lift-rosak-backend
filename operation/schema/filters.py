@@ -6,7 +6,16 @@ from operation import models
 # from django.contrib.gis.measure import Distance
 
 
-# from operation.schema.enums import AssetType
+@gql.django.filters.filter(models.Vehicle)
+class VehicleFilter:
+    id: gql.ID
+    status: gql.auto
+
+    def filter_id(self, queryset):
+        return queryset.filter(id=self.id)
+
+    def filter_status(self, queryset):
+        return queryset.filter(status=self.status)
 
 
 @gql.django.filters.filter(models.Line)
@@ -44,24 +53,24 @@ class VehicleTypeFilter:
         return queryset.filter(vehicles__vehicle_lines__id=self.line_id).distinct("id")
 
 
-# @strawberry_django.filters.filter(models.Asset)
-# class AssetFilter:
-#     id: strawberry.ID
-#     officialid: str
-#     asset_type: AssetType
-#     station_id: strawberry.ID
+@gql.django.filters.filter(models.Asset)
+class AssetFilter:
+    id: gql.ID
+    officialid: str
+    asset_type: gql.auto
+    station_id: gql.ID
 
-#     def filter_id(self, queryset):
-#         return queryset.filter(id=self.id)
+    def filter_id(self, queryset):
+        return queryset.filter(id=self.id)
 
-#     def filter_officialid(self, queryset):
-#         return queryset.filter(officialid=self.officialid)
+    def filter_officialid(self, queryset):
+        return queryset.filter(officialid=self.officialid)
 
-#     def filter_asset_type(self, queryset):
-#         return queryset.filter(asset_type=self.asset_type)
+    def filter_asset_type(self, queryset):
+        return queryset.filter(asset_type=self.asset_type)
 
-#     def filter_station_id(self, queryset):
-#         return queryset.filter(station_id=self.station_id)
+    def filter_station_id(self, queryset):
+        return queryset.filter(station_id=self.station_id)
 
 
 # @strawberry_django.filters.filter(models.Station)
