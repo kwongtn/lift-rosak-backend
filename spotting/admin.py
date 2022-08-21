@@ -40,6 +40,8 @@ class EventAdmin(admin.ModelAdmin):
     ]
     list_editable = [
         "spotting_date",
+        "status",
+        "type",
     ]
 
 

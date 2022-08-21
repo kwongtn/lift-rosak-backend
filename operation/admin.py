@@ -147,12 +147,16 @@ class StationLineAdmin(admin.ModelAdmin):
         "display_name",
         "internal_representation",
     ]
+    list_editable = [
+        "internal_representation",
+    ]
 
 
 class VehicleAdmin(admin.ModelAdmin):
     inlines = [VehicleLineTabularInline]
     list_display = [
         "__str__",
+        "identification_no",
         "vehicle_type",
         "status",
         "in_service_since",
@@ -167,6 +171,10 @@ class VehicleAdmin(admin.ModelAdmin):
         "identification_no",
         "vehicle_type__internal_name",
         "vehicle_type__display_name",
+    ]
+    list_editable = [
+        "identification_no",
+        "status",
     ]
 
 
@@ -187,6 +195,9 @@ class VehicleLineAdmin(admin.ModelAdmin):
     list_display = [
         "__str__",
         "vehicle",
+        "line",
+    ]
+    list_filter = [
         "line",
     ]
 
