@@ -158,6 +158,12 @@ class Vehicle(models.Model):
         max_length=16,
         null=False,
     )
+    nickname = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        default=None,
+    )
     vehicle_type = models.ForeignKey(
         to="operation.VehicleType",
         on_delete=models.PROTECT,
@@ -211,6 +217,7 @@ class VehicleType(models.Model):
         blank=True,
         null=True,
         default=None,
+        unique=True,
     )
     display_name = models.CharField(
         max_length=64,

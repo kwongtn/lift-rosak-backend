@@ -124,6 +124,7 @@ class Vehicle:
     status: gql.auto
     lines: List["Line"]
     notes: str
+    nickname: Optional[str]
     in_service_since: Optional[date]
 
     if TYPE_CHECKING:
