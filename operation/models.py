@@ -7,7 +7,6 @@ from operation.enums import AssetStatus, AssetType, VehicleStatus
 
 class Line(TimeStampedModel):
     code = models.CharField(
-        unique=True,
         null=False,
         blank=False,
         max_length=32,
@@ -35,6 +34,16 @@ class Line(TimeStampedModel):
 
     class Meta:
         ordering = ["code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["code"],
+                name="%(app_label)s_%(class)s_unique_line_code",
+            ),
+            models.UniqueConstraint(
+                fields=["display_name"],
+                name="%(app_label)s_%(class)s_unique_display_name",
+            ),
+        ]
 
 
 class Station(TimeStampedModel):
@@ -58,6 +67,12 @@ class Station(TimeStampedModel):
 
     class Meta:
         ordering = ["display_name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["display_name"],
+                name="%(app_label)s_%(class)s_unique_display_name",
+            ),
+        ]
 
 
 class StationMedia(models.Model):
@@ -69,6 +84,14 @@ class StationMedia(models.Model):
         "common.Media",
         on_delete=models.PROTECT,
     )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["station", "media"],
+                name="%(app_label)s_%(class)s_unique_station_media",
+            ),
+        ]
 
 
 class StationLine(TimeStampedModel):
@@ -84,11 +107,12 @@ class StationLine(TimeStampedModel):
     display_name = models.TextField()
     internal_representation = models.CharField(
         max_length=32,
-        unique=True,
         null=True,
         blank=True,
         default=None,
     )
+
+    override_internal_representation_constraint = models.BooleanField(default=False)
 
     def __str__(self) -> str:
         display_name = (
@@ -103,6 +127,20 @@ class StationLine(TimeStampedModel):
 
     class Meta:
         ordering = ["internal_representation"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["station", "line"],
+                name="%(app_label)s_%(class)s_unique_station_line",
+            ),
+            models.UniqueConstraint(
+                fields=["internal_representation"],
+                name="%(app_label)s_%(class)s_unique_internal_representation",
+                condition=models.Q(
+                    models.Q(override_internal_representation_constraint=False)
+                    & models.Q(internal_representation__isnull=False)
+                ),
+            ),
+        ]
 
 
 class Asset(TimeStampedModel):
@@ -140,6 +178,12 @@ class Asset(TimeStampedModel):
 
     class Meta:
         ordering = ["officialid"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["officialid"],
+                name="%(app_label)s_%(class)s_unique_officialid",
+            ),
+        ]
 
 
 class AssetMedia(models.Model):
@@ -151,6 +195,14 @@ class AssetMedia(models.Model):
         "common.Media",
         on_delete=models.PROTECT,
     )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["asset", "media"],
+                name="%(app_label)s_%(class)s_unique_asset_media",
+            ),
+        ]
 
 
 class Vehicle(models.Model):
@@ -194,6 +246,12 @@ class Vehicle(models.Model):
 
     class Meta:
         ordering = ["identification_no"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["identification_no", "vehicle_type"],
+                name="%(app_label)s_%(class)s_unique_identification_no_vehicle_type",
+            ),
+        ]
 
 
 class VehicleLine(models.Model):
@@ -209,6 +267,14 @@ class VehicleLine(models.Model):
         blank=False,
         on_delete=models.PROTECT,
     )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["vehicle", "line"],
+                name="%(app_label)s_%(class)s_unique_vehicle_line",
+            ),
+        ]
 
 
 class VehicleType(models.Model):
@@ -235,3 +301,11 @@ class VehicleType(models.Model):
         )
 
         return f"{self.id} - {display_name}"
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["internal_name"],
+                name="%(app_label)s_%(class)s_unique_internal_name",
+            ),
+        ]

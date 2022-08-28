@@ -7,7 +7,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("spotting", "0004_remove_event_spotting_event_value_relevant_and_more"),
+        ("spotting", "0005_alter_event_reporter_alter_event_vehicle"),
     ]
 
     operations = [
