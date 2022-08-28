@@ -259,13 +259,13 @@ class VehicleLine(models.Model):
         to="operation.Vehicle",
         null=False,
         blank=False,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
     )
     line = models.ForeignKey(
         to="operation.Line",
         null=False,
         blank=False,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
     )
 
     class Meta:

@@ -11,11 +11,11 @@ class Event(TimeStampedModel):
     spotting_date = models.DateField()
     reporter = models.ForeignKey(
         to="common.User",
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
     )
     vehicle = models.ForeignKey(
         to="operation.Vehicle",
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
     )
 
     notes = models.TextField(
