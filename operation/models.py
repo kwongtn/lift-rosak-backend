@@ -1,5 +1,6 @@
 from colorfield.fields import ColorField
 from django.contrib.gis.db import models
+from django.contrib.postgres.indexes import BTreeIndex
 from model_utils.models import TimeStampedModel
 
 from operation.enums import AssetStatus, AssetType, VehicleStatus
@@ -44,6 +45,11 @@ class Line(TimeStampedModel):
                 name="%(app_label)s_%(class)s_unique_display_name",
             ),
         ]
+        indexes = [
+            BTreeIndex(fields=["code"]),
+            BTreeIndex(fields=["display_name"]),
+            BTreeIndex(fields=["display_color"]),
+        ]
 
 
 class Station(TimeStampedModel):
@@ -72,6 +78,9 @@ class Station(TimeStampedModel):
                 fields=["display_name"],
                 name="%(app_label)s_%(class)s_unique_display_name",
             ),
+        ]
+        indexes = [
+            BTreeIndex(fields=["display_name"]),
         ]
 
 
@@ -141,6 +150,10 @@ class StationLine(TimeStampedModel):
                 ),
             ),
         ]
+        indexes = [
+            BTreeIndex(fields=["display_name"]),
+            BTreeIndex(fields=["internal_representation"]),
+        ]
 
 
 class Asset(TimeStampedModel):
@@ -183,6 +196,10 @@ class Asset(TimeStampedModel):
                 fields=["officialid"],
                 name="%(app_label)s_%(class)s_unique_officialid",
             ),
+        ]
+        indexes = [
+            BTreeIndex(fields=["short_description"]),
+            BTreeIndex(fields=["long_description"]),
         ]
 
 
@@ -252,6 +269,9 @@ class Vehicle(models.Model):
                 name="%(app_label)s_%(class)s_unique_identification_no_vehicle_type",
             ),
         ]
+        indexes = [
+            BTreeIndex(fields=["identification_no"]),
+        ]
 
 
 class VehicleLine(models.Model):
@@ -308,4 +328,8 @@ class VehicleType(models.Model):
                 fields=["internal_name"],
                 name="%(app_label)s_%(class)s_unique_internal_name",
             ),
+        ]
+        indexes = [
+            BTreeIndex(fields=["internal_name"]),
+            BTreeIndex(fields=["display_name"]),
         ]
