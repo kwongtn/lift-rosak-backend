@@ -1,4 +1,5 @@
 from django.contrib.gis.db import models
+from django.contrib.postgres.indexes import BTreeIndex
 from django.db.models import F, Q
 from model_utils.models import TimeStampedModel
 
@@ -86,4 +87,7 @@ class Event(TimeStampedModel):
                 ),
                 name="%(app_label)s_%(class)s_value_relevant",
             ),
+        ]
+        indexes = [
+            BTreeIndex(fields=["vehicle", "-spotting_date"]),
         ]
