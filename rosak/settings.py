@@ -95,11 +95,13 @@ INSTALLED_APPS = [
     "django.contrib.gis",
     "corsheaders",
     "django_extensions",
+    "ordered_model",
     "operation",
     "common",
     "reporting",
     "generic",
     "spotting",
+    "incident",
 ]
 
 MIDDLEWARE = [
