@@ -8,10 +8,10 @@ from incident.schema.scalars import StationIncident, VehicleIncident
 
 @gql.type
 class IncidentScalars:
-    vehicle_incidents: List["VehicleIncident"] = gql.django.field(
+    vehicle_incidents: List[VehicleIncident] = gql.django.field(
         filters=VehicleIncidentFilter
     )
-    station_incidents: List["StationIncident"] = gql.django.field(
+    station_incidents: List[StationIncident] = gql.django.field(
         filters=StationIncidentFilter
     )
 

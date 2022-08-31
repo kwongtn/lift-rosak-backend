@@ -14,7 +14,7 @@ class IncidentAbstractScalar:
     order: gql.auto
     # location
     title: str
-    description: Optional[str]
+    brief: Optional[str]
 
 
 @gql.django.type(models.VehicleIncident)

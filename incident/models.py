@@ -23,10 +23,11 @@ class IncidentAbstractModel(TimeStampedModel, OrderedModel):
         default=None,
         max_length=64,
     )
-    description = models.TextField(
-        blank=True,
-        null=True,
+    brief = models.CharField(
+        blank=False,
+        null=False,
         default=None,
+        max_length=256,
     )
 
     class Meta:
