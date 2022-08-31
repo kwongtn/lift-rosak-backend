@@ -17,10 +17,11 @@ class IncidentAbstractModel(TimeStampedModel, OrderedModel):
         default=None,
     )
 
-    title = models.TextField(
+    title = models.CharField(
         blank=True,
         null=False,
         default="",
+        max_length=64,
     )
     description = models.TextField(
         blank=True,
