@@ -18,9 +18,9 @@ class IncidentAbstractModel(TimeStampedModel, OrderedModel):
     )
 
     title = models.CharField(
-        blank=True,
+        blank=False,
         null=False,
-        default="",
+        default=None,
         max_length=64,
     )
     description = models.TextField(
