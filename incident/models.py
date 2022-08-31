@@ -40,6 +40,7 @@ class VehicleIncident(IncidentAbstractModel):
     )
     medias = models.ManyToManyField(
         to="common.Media",
+        blank=True,
     )
 
 
@@ -50,6 +51,7 @@ class StationIncident(IncidentAbstractModel):
     )
     medias = models.ManyToManyField(
         to="common.Media",
+        blank=True,
     )
 
 
