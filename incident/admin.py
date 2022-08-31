@@ -22,7 +22,7 @@ class VehicleIncidentLocationForm(GeometricForm):
 class VehicleIncidentAdmin(admin.ModelAdmin):
     form = VehicleIncidentLocationForm
     list_display = incident_list_display + ["vehicle"]
-    list_filter = incident_list_filter + ["vehicle"]
+    list_filter = incident_list_filter + ["vehicle__lines"]
 
 
 class StationIncidentLocationForm(GeometricForm):
@@ -35,7 +35,7 @@ class StationIncidentLocationForm(GeometricForm):
 class StationIncidentAdmin(admin.ModelAdmin):
     form = StationIncidentLocationForm
     list_display = incident_list_display + ["station"]
-    list_filter = incident_list_filter + ["station"]
+    list_filter = incident_list_filter + ["station__lines"]
 
 
 admin.site.register(VehicleIncident, VehicleIncidentAdmin)
