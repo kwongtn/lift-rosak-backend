@@ -142,6 +142,10 @@ class StationLine(TimeStampedModel):
                 name="%(app_label)s_%(class)s_unique_station_line",
             ),
             models.UniqueConstraint(
+                fields=["line", "internal_representation"],
+                name="%(app_label)s_%(class)s_unique_line_internal_representation",
+            ),
+            models.UniqueConstraint(
                 fields=["internal_representation"],
                 name="%(app_label)s_%(class)s_unique_internal_representation",
                 condition=models.Q(
