@@ -141,6 +141,7 @@ class StationLineAdmin(admin.ModelAdmin):
         "internal_representation",
         "station",
         "line",
+        "override_internal_representation_constraint",
     ]
     list_filter = [
         "line",
@@ -152,6 +153,7 @@ class StationLineAdmin(admin.ModelAdmin):
     ]
     list_editable = [
         "internal_representation",
+        "override_internal_representation_constraint",
     ]
 
 
