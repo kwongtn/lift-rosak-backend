@@ -1,6 +1,8 @@
 from django.contrib.gis import admin
+from ordered_model.admin import OrderedInlineModelAdminMixin
 
 from generic.views import GeometricForm
+from incident.admin import StationIncidentInlineAdmin, VehicleIncidentInlineAdmin
 from operation.models import (
     Asset,
     AssetMedia,
@@ -115,11 +117,12 @@ class StationForm(GeometricForm):
     # GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
 
 
-class StationAdmin(admin.ModelAdmin):
+class StationAdmin(OrderedInlineModelAdminMixin, admin.ModelAdmin):
     inlines = [
         StationLineTabularInline,
         StationMediaStackedInline,
         AssetTabularInline,
+        StationIncidentInlineAdmin,
     ]
     form = StationForm
     list_display = [
@@ -152,8 +155,8 @@ class StationLineAdmin(admin.ModelAdmin):
     ]
 
 
-class VehicleAdmin(admin.ModelAdmin):
-    inlines = [VehicleLineTabularInline]
+class VehicleAdmin(OrderedInlineModelAdminMixin, admin.ModelAdmin):
+    inlines = [VehicleLineTabularInline, VehicleIncidentInlineAdmin]
     list_display = [
         "__str__",
         "identification_no",
