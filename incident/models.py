@@ -44,6 +44,8 @@ class VehicleIncident(IncidentAbstractModel):
         blank=True,
     )
 
+    order_with_respect_to = "vehicle"
+
 
 class StationIncident(IncidentAbstractModel):
     station = models.ForeignKey(
@@ -54,6 +56,8 @@ class StationIncident(IncidentAbstractModel):
         to="common.Media",
         blank=True,
     )
+
+    order_with_respect_to = "station"
 
 
 # class LineIncident(IncidentAbstractModel):
