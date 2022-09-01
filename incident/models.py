@@ -1,4 +1,5 @@
 from django.contrib.gis.db import models
+from django.contrib.gis.db.models import Q
 from django.utils.translation import gettext_lazy as _
 from model_utils.models import TimeStampedModel
 from ordered_model.models import OrderedModel
@@ -52,6 +53,15 @@ class VehicleIncident(IncidentAbstractModel):
 
     order_with_respect_to = "vehicle"
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["is_last", "vehicle"],
+                name="%(app_label)s_%(class)s_unique_is_last_vehicle",
+                condition=Q(is_last=True),
+            ),
+        ]
+
 
 class StationIncident(IncidentAbstractModel):
     station = models.ForeignKey(
@@ -64,6 +74,14 @@ class StationIncident(IncidentAbstractModel):
     )
 
     order_with_respect_to = "station"
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["is_last", "station"],
+                name="%(app_label)s_%(class)s_unique_is_last_station",
+            ),
+        ]
 
 
 # class LineIncident(IncidentAbstractModel):
