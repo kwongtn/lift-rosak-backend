@@ -1,3 +1,6 @@
+from django.conf import settings
+from graphql.validation import NoSchemaIntrospectionCustomRule
+from strawberry.extensions import AddValidationRules
 from strawberry.types import Info
 from strawberry_django_plus import gql
 from strawberry_django_plus.optimizer import DjangoOptimizerExtension
@@ -41,12 +44,16 @@ class Mutation(
 # class Subscription:
 #     pass
 
+extensions = [
+    DjangoOptimizerExtension(),
+]
+
+if not settings.DEBUG:
+    extensions.append(AddValidationRules([NoSchemaIntrospectionCustomRule]))
 
 schema = gql.Schema(
     query=Query,
     mutation=Mutation,
     # subscription=Subscription,
-    extensions=[
-        DjangoOptimizerExtension(),
-    ],
+    extensions=extensions,
 )
