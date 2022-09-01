@@ -27,6 +27,7 @@ class VehicleIncidentAdmin(OrderedModelAdmin):
     list_display = incident_list_display + ["vehicle"]
     list_filter = incident_list_filter + ["vehicle", "vehicle__lines"]
     list_editable = [
+        "title",
         "vehicle",
         "order",
     ]
@@ -56,6 +57,7 @@ class StationIncidentAdmin(OrderedModelAdmin):
     list_display = incident_list_display + ["station"]
     list_filter = incident_list_filter + ["station", "station__lines"]
     list_editable = [
+        "title",
         "station",
         "order",
     ]
