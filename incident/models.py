@@ -31,6 +31,8 @@ class IncidentAbstractModel(TimeStampedModel, OrderedModel):
         max_length=256,
     )
 
+    is_last = models.BooleanField(default=False)
+
     # Remove after beta
     order = models.PositiveIntegerField(_("order"), editable=True, db_index=True)
 

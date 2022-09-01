@@ -9,6 +9,7 @@ class IncidentAbstractFilter:
     id: gql.ID
     date: date
     severity: gql.auto
+    is_last: bool
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)
@@ -18,6 +19,9 @@ class IncidentAbstractFilter:
 
     def filter_severity(self, queryset):
         return queryset.filter(severity=self.severity)
+
+    def filter_is_last(self, queryset):
+        return queryset.filter(is_last=self.is_last)
 
 
 @gql.django.filters.filter(models.VehicleIncident)

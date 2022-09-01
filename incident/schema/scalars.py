@@ -15,6 +15,7 @@ class IncidentAbstractScalar:
     # location
     title: str
     brief: Optional[str]
+    is_last: bool
 
 
 @gql.django.type(models.VehicleIncident)
