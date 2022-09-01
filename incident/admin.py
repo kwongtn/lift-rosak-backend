@@ -25,14 +25,21 @@ class VehicleIncidentLocationForm(GeometricForm):
 class VehicleIncidentAdmin(OrderedModelAdmin):
     form = VehicleIncidentLocationForm
     list_display = incident_list_display + ["vehicle"]
-    list_filter = incident_list_filter + ["vehicle__lines"]
+    list_filter = incident_list_filter + ["vehicle", "vehicle__lines"]
+    list_editable = [
+        "vehicle",
+        "order",
+    ]
+    search_fields = [
+        "vehicle__identification_no",
+    ]
 
 
 class VehicleIncidentInlineAdmin(OrderedTabularInline):
     form = VehicleIncidentLocationForm
     model = VehicleIncident
     classes = ["collapse"]
-    readonly_fields = ("move_up_down_links", "order")
+    readonly_fields = ("move_up_down_links",)
     ordering = ("order",)
     extra = 1
 
@@ -47,14 +54,18 @@ class StationIncidentLocationForm(GeometricForm):
 class StationIncidentAdmin(OrderedModelAdmin):
     form = StationIncidentLocationForm
     list_display = incident_list_display + ["station"]
-    list_filter = incident_list_filter + ["station__lines"]
+    list_filter = incident_list_filter + ["station", "station__lines"]
+    list_editable = [
+        "station",
+        "order",
+    ]
 
 
 class StationIncidentInlineAdmin(OrderedTabularInline):
     form = StationIncidentLocationForm
     model = StationIncident
     classes = ["collapse"]
-    readonly_fields = ("move_up_down_links", "order")
+    readonly_fields = ("move_up_down_links",)
     ordering = ("order",)
     extra = 1
 

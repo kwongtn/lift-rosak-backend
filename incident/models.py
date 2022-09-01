@@ -1,4 +1,5 @@
 from django.contrib.gis.db import models
+from django.utils.translation import gettext_lazy as _
 from model_utils.models import TimeStampedModel
 from ordered_model.models import OrderedModel
 
@@ -29,6 +30,9 @@ class IncidentAbstractModel(TimeStampedModel, OrderedModel):
         default=None,
         max_length=256,
     )
+
+    # Remove after beta
+    order = models.PositiveIntegerField(_("order"), editable=True, db_index=True)
 
     class Meta:
         abstract = True
