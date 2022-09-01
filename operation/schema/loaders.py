@@ -4,6 +4,7 @@ from typing import List
 from django.db.models import Count, Max, Q
 from strawberry.dataloader import DataLoader
 
+from incident.models import VehicleIncident
 from operation.models import Vehicle, VehicleLine
 from spotting.models import Event
 
@@ -68,6 +69,26 @@ async def batch_load_spotting_count_from_vehicle(keys):
     return [event_object.get(str(key[0]), None) for key in keys]
 
 
+async def batch_load_incident_from_vehicle(keys):
+    vehicle_incidents: List[VehicleIncident] = VehicleIncident.objects.filter(
+        vehicle_id__in=keys
+    ).prefetch_related("vehicle")
+
+    vehicle_dict = defaultdict(set)
+    async for vehicle_incident in vehicle_incidents:
+        vehicle_dict[vehicle_incident.vehicle_id].add(vehicle_incident)
+
+    return [list(vehicle_dict.get(key, {})) for key in keys]
+
+
+async def batch_load_incident_count_from_vehicle(keys):
+    incident_object = await VehicleIncident.objects.aaggregate(
+        **{str(key): Count("id", filter=Q(vehicle_id=key)) for key in keys}
+    )
+
+    return [incident_object.get(str(key), None) for key in keys]
+
+
 OperationContextLoaders = {
     "vehicle_from_vehicle_type_loader": DataLoader(
         load_fn=batch_load_vehicle_from_vehicle_type
@@ -86,5 +107,11 @@ OperationContextLoaders = {
     ),
     "spotting_count_from_vehicle_loader": DataLoader(
         load_fn=batch_load_spotting_count_from_vehicle
+    ),
+    "incident_from_vehicle_loader": DataLoader(
+        load_fn=batch_load_incident_from_vehicle
+    ),
+    "incident_count_from_vehicle_loader": DataLoader(
+        load_fn=batch_load_incident_count_from_vehicle
     ),
 }

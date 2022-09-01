@@ -118,6 +118,10 @@ class VehicleType:
 
 @gql.django.type(models.Vehicle)
 class Vehicle:
+    if TYPE_CHECKING:
+        from incident.schema.scalars import VehicleIncident
+        from spotting.schema.scalars import Event
+
     id: gql.auto
     identification_no: str
     vehicle_type: "VehicleType" = gql.django.field(select_related=["vehicle_type"])
@@ -126,9 +130,6 @@ class Vehicle:
     notes: str
     nickname: Optional[str]
     in_service_since: Optional[date]
-
-    if TYPE_CHECKING:
-        from spotting.schema.scalars import Event
 
     @gql.django.field
     async def last_spotting_date(self, info: Info) -> Optional[date]:
@@ -160,3 +161,17 @@ class Vehicle:
         return await info.context["loaders"]["operation"][
             "spotting_count_from_vehicle_loader"
         ].load((self.id, filter))
+
+    @gql.django.field
+    async def incidents(
+        self, info: Info
+    ) -> List[gql.LazyType["VehicleIncident", "incident.schema.scalars"]]:  # noqa
+        return await info.context["loaders"]["operation"][
+            "incident_from_vehicle_loader"
+        ].load(self.id)
+
+    @gql.field
+    async def incident_count(self, info: Info) -> int:
+        return await info.context["loaders"]["operation"][
+            "incident_count_from_vehicle_loader"
+        ].load(self.id)
