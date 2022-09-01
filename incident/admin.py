@@ -10,9 +10,16 @@ incident_list_display = [
     "title",
     "move_up_down_links",
     "order",
+    "is_last",
 ]
 
-incident_list_filter = ["severity"]
+incident_list_filter = ["severity", "is_last"]
+
+incident_list_editable = [
+    "title",
+    "order",
+    "is_last",
+]
 
 
 class VehicleIncidentLocationForm(GeometricForm):
@@ -26,11 +33,7 @@ class VehicleIncidentAdmin(OrderedModelAdmin):
     form = VehicleIncidentLocationForm
     list_display = incident_list_display + ["vehicle"]
     list_filter = incident_list_filter + ["vehicle", "vehicle__lines"]
-    list_editable = [
-        "title",
-        "vehicle",
-        "order",
-    ]
+    list_editable = incident_list_editable + ["vehicle"]
     search_fields = [
         "vehicle__identification_no",
     ]
@@ -56,11 +59,7 @@ class StationIncidentAdmin(OrderedModelAdmin):
     form = StationIncidentLocationForm
     list_display = incident_list_display + ["station"]
     list_filter = incident_list_filter + ["station", "station__lines"]
-    list_editable = [
-        "title",
-        "station",
-        "order",
-    ]
+    list_editable = incident_list_editable + ["station"]
 
 
 class StationIncidentInlineAdmin(OrderedTabularInline):
