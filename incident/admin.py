@@ -1,4 +1,5 @@
 from django.contrib.gis import admin, forms
+from ordered_model.admin import OrderedModelAdmin
 
 from generic.views import GeometricForm
 from incident.models import StationIncident, VehicleIncident
@@ -7,6 +8,8 @@ incident_list_display = [
     "__str__",
     "severity",
     "title",
+    "move_up_down_links",
+    "order",
 ]
 
 incident_list_filter = ["severity"]
@@ -19,7 +22,7 @@ class VehicleIncidentLocationForm(GeometricForm):
     GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
 
 
-class VehicleIncidentAdmin(admin.ModelAdmin):
+class VehicleIncidentAdmin(OrderedModelAdmin):
     form = VehicleIncidentLocationForm
     list_display = incident_list_display + ["vehicle"]
     list_filter = incident_list_filter + ["vehicle__lines"]
@@ -32,7 +35,7 @@ class StationIncidentLocationForm(GeometricForm):
     GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
 
 
-class StationIncidentAdmin(admin.ModelAdmin):
+class StationIncidentAdmin(OrderedModelAdmin):
     form = StationIncidentLocationForm
     list_display = incident_list_display + ["station"]
     list_filter = incident_list_filter + ["station__lines"]
