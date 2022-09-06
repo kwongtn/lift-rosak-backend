@@ -24,7 +24,7 @@ class Station:
 class StationLine:
     id: gql.ID
     display_name: str
-    internal_representation: str
+    internal_representation: Optional[str]
     stations: List["Station"]
     lines: List["Line"]
 
