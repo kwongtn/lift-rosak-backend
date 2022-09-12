@@ -5,6 +5,7 @@ from strawberry_django_plus import gql
 from operation.schema.filters import (
     AssetFilter,
     LineFilter,
+    StationFilter,
     VehicleFilter,
     VehicleTypeFilter,
 )
@@ -16,7 +17,7 @@ class OperationScalars:
     # TODO: Add back filters
     lines: List[Line] = gql.django.field(filters=LineFilter)
     assets: List[Asset] = gql.django.field()
-    stations: List[Station] = gql.django.field()
+    stations: List[Station] = gql.django.field(filters=StationFilter)
     vehicles: List[Vehicle] = gql.django.field(filters=VehicleFilter)
     vehicleTypes: List[VehicleType] = gql.django.field(filters=VehicleTypeFilter)
     assets: List[Asset] = gql.django.field(filters=AssetFilter)

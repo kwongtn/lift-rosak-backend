@@ -1,9 +1,9 @@
+import strawberry
+from django.contrib.gis.geos import Point
+from django.contrib.gis.measure import Distance
 from strawberry_django_plus import gql
 
 from operation import models
-
-# from django.contrib.gis.geos import Point
-# from django.contrib.gis.measure import Distance
 
 
 @gql.django.filters.filter(models.Vehicle)
@@ -73,30 +73,34 @@ class AssetFilter:
         return queryset.filter(station_id=self.station_id)
 
 
-# @strawberry_django.filters.filter(models.Station)
-# class StationFilter:
-#     id: strawberry.ID
-#     display_name: str
-#     internal_representation: str
-#     location: strawberry.scalars.JSON
+@gql.django.filters.filter(models.Station)
+class StationFilter:
+    id: gql.ID
+    display_name: str
+    internal_representation: str
+    location: strawberry.scalars.JSON
+    line_id: gql.ID
 
-#     def filter_id(self, queryset):
-#         return queryset.filter(id=self.id)
+    def filter_id(self, queryset):
+        return queryset.filter(id=self.id)
 
-#     def filter_display_name(self, queryset):
-#         return queryset.filter(display_name__icontains=self.display_name)
+    def filter_display_name(self, queryset):
+        return queryset.filter(display_name__icontains=self.display_name)
 
-#     def filter_internal_representation(self, queryset):
-#         return queryset.filter(internal_representation=self.internal_representation)
+    def filter_internal_representation(self, queryset):
+        return queryset.filter(internal_representation=self.internal_representation)
 
-#     def filter_location(self, queryset):
-#         return queryset.filter(
-#             location__distance_lt=(
-#                 Point(
-#                     self.location.get("x"),
-#                     self.location.get("y"),
-#                     self.location.get("z"),
-#                 ),
-#                 Distance(km=self.location.get("radius")),
-#             )
-#         )
+    def filter_location(self, queryset):
+        return queryset.filter(
+            location__distance_lt=(
+                Point(
+                    self.location.get("x"),
+                    self.location.get("y"),
+                    self.location.get("z"),
+                ),
+                Distance(km=self.location.get("radius")),
+            )
+        )
+
+    def filter_line_id(self, queryset):
+        return queryset.filter(lines=self.line_id)
