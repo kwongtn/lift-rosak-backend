@@ -1,4 +1,5 @@
 import strawberry
+from django.contrib.gis.db.models import Subquery
 from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import Distance
 from strawberry_django_plus import gql
@@ -88,7 +89,11 @@ class StationFilter:
         return queryset.filter(display_name__icontains=self.display_name)
 
     def filter_internal_representation(self, queryset):
-        return queryset.filter(internal_representation=self.internal_representation)
+        stationIds = models.StationLine.objects.filter(
+            internal_representation__icontains=self.internal_representation
+        ).values_list("station_id", flat=True)
+
+        return queryset.filter(id__in=Subquery(stationIds))
 
     def filter_location(self, queryset):
         return queryset.filter(
