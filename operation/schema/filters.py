@@ -109,3 +109,29 @@ class StationFilter:
 
     def filter_line_id(self, queryset):
         return queryset.filter(lines=self.line_id)
+
+
+@gql.django.filters.filter(models.StationLine)
+class StationLineFilter:
+    id: gql.ID
+    display_name: str
+    station_id: gql.ID
+    line_id: gql.ID
+    internal_representation: str
+
+    def filter_id(self, queryset):
+        return queryset.filter(id=self.id)
+
+    def filter_display_name(self, queryset):
+        return queryset.filter(display_name__icontains=self.display_name)
+
+    def filter_station_id(self, queryset):
+        return queryset.filter(station_id=self.station_id)
+
+    def filter_line_id(self, queryset):
+        return queryset.filter(line_id=self.line_id)
+
+    def filter_internal_representation(self, queryset):
+        return queryset.filter(
+            internal_representation__icontains=self.internal_representation
+        )
