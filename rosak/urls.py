@@ -21,7 +21,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from rosak.context import CustomGraphQLView
 
-from . import sentry_view
+from . import custom_view
 from .schema import schema
 
 urlpatterns = (
@@ -35,7 +35,8 @@ urlpatterns = (
                 schema=schema,
             ),
         ),
-        path("sentry/", csrf_exempt(sentry_view.main)),
+        path("sentry/", csrf_exempt(custom_view.sentry)),
+        path("version/", csrf_exempt(custom_view.git_version)),
         # path("oauth2/v1/", include("oauth2.urls", namespace="oauth2_v1")),
     ]
     # These are served in debug mode only

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import urllib
 
 import requests
@@ -9,7 +10,7 @@ sentry_host = "o1331817.ingest.sentry.io"
 known_project_ids = ["6596136"]
 
 
-def main(request: HttpRequest):
+def sentry(request: HttpRequest):
     try:
         envelope = request.body.decode("utf-8")
 
@@ -34,3 +35,7 @@ def main(request: HttpRequest):
         logging.exception(e)
 
     return HttpResponse({})
+
+
+def git_version(request: HttpRequest):
+    return HttpResponse(os.environ.get("GIT_COMMIT_HASH", "<<No hash data>>"))

@@ -248,5 +248,6 @@ DEBUG_TOOLBAR_PANELS = [
     "debug_toolbar.panels.profiling.ProfilingPanel",
 ]
 
+# Recaptcha Configuration
 RECAPTCHA_KEY = os.environ.get("RECAPTCHA_SECRET")
 RECAPTCHA_MIN_SCORE = 0.85
