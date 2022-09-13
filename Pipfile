@@ -23,7 +23,7 @@ psycopg2-binary = "*"
 sentry-sdk = "*"
 strawberry-django-plus = "*"
 strawberry-graphql = "*"
-strawberry-graphql-django = "==0.4"
+strawberry-graphql-django = "*"
 uvicorn = {extras = ["standard"], version = "*"}
 
 [dev-packages]
