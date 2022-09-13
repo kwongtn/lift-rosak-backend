@@ -38,4 +38,11 @@ def sentry(request: HttpRequest):
 
 
 def git_version(request: HttpRequest):
-    return HttpResponse(os.environ.get("GIT_COMMIT_HASH", "<<No hash data>>"))
+    return HttpResponse(
+        json.dumps(
+            {
+                "hash": os.environ.get("GIT_COMMIT_HASH", "<<No hash data>>"),
+                "datetime": os.environ.get("GIT_COMMIT_TIME"),
+            }
+        )
+    )
