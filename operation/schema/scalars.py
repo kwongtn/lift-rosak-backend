@@ -41,7 +41,7 @@ class Line:
 
     @gql.django.field
     async def vehicle_types(self, info: Info) -> List["VehicleType"]:
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "vehicle_type_from_line_loader"
         ].load(self.id)
 
@@ -65,49 +65,49 @@ class VehicleType:
 
     @gql.django.field
     async def vehicles(self, info: Info) -> List["Vehicle"]:
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "vehicle_from_vehicle_type_loader"
         ].load(self.id)
 
     @gql.field
     async def vehicle_status_in_service_count(self, info: Info) -> int:
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "vehicle_status_count_from_vehicle_type_loader"
         ].load((self.id, VehicleStatus.IN_SERVICE))
 
     @gql.field
     async def vehicle_status_not_spotted_count(self, info: Info) -> int:
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "vehicle_status_count_from_vehicle_type_loader"
         ].load((self.id, VehicleStatus.NOT_SPOTTED))
 
     @gql.field
     async def vehicle_status_decommissioned_count(self, info: Info) -> int:
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "vehicle_status_count_from_vehicle_type_loader"
         ].load((self.id, VehicleStatus.DECOMMISSIONED))
 
     @gql.field
     async def vehicle_status_married_count(self, info: Info) -> int:
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "vehicle_status_count_from_vehicle_type_loader"
         ].load((self.id, VehicleStatus.MARRIED))
 
     @gql.field
     async def vehicle_status_testing_count(self, info: Info) -> int:
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "vehicle_status_count_from_vehicle_type_loader"
         ].load((self.id, VehicleStatus.TESTING))
 
     @gql.field
     async def vehicle_status_unknown_count(self, info: Info) -> int:
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "vehicle_status_count_from_vehicle_type_loader"
         ].load((self.id, VehicleStatus.UNKNOWN))
 
     @gql.field
     async def vehicle_total_count(self, info: Info) -> int:
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "vehicle_count_from_vehicle_type_loader"
         ].load(self.id)
 
@@ -133,7 +133,7 @@ class Vehicle:
 
     @gql.django.field
     async def last_spotting_date(self, info: Info) -> Optional[date]:
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "last_spotting_date_from_vehicle_loader"
         ].load(self.id)
 
@@ -158,7 +158,7 @@ class Vehicle:
         if before is not None:
             filter &= Q(spotting_date__lte=before)
 
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "spotting_count_from_vehicle_loader"
         ].load((self.id, filter))
 
@@ -166,12 +166,12 @@ class Vehicle:
     async def incidents(
         self, info: Info
     ) -> List[gql.LazyType["VehicleIncident", "incident.schema.scalars"]]:  # noqa
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "incident_from_vehicle_loader"
         ].load(self.id)
 
     @gql.field
     async def incident_count(self, info: Info) -> int:
-        return await info.context["loaders"]["operation"][
+        return await info.context.loaders["operation"][
             "incident_count_from_vehicle_loader"
         ].load(self.id)
