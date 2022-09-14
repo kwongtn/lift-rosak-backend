@@ -1,5 +1,5 @@
 from datetime import date
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Annotated, List, Optional
 
 from django.db.models import Q
 from strawberry.types import Info
@@ -140,7 +140,7 @@ class Vehicle:
     @gql.django.field
     def last_spottings(
         self, count: int = 1
-    ) -> List[gql.LazyType["Event", "spotting.schema.scalars"]]:  # noqa
+    ) -> List[Annotated["Event", gql.lazy("spotting.schema.scalars")]]:
         return spotting_models.Event.objects.filter(vehicle_id=self.id,).order_by(
             "-spotting_date"
         )[:count]
@@ -165,7 +165,7 @@ class Vehicle:
     @gql.django.field
     async def incidents(
         self, info: Info
-    ) -> List[gql.LazyType["VehicleIncident", "incident.schema.scalars"]]:  # noqa
+    ) -> List[Annotated["VehicleIncident", gql.lazy("incident.schema.scalars")]]:
         return await info.context.loaders["operation"][
             "incident_from_vehicle_loader"
         ].load(self.id)
