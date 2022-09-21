@@ -1,16 +1,16 @@
 #!groovy
 
 pipeline {
-    agent none
+    agent {
+        docker { image 'docker:latest' }
+    }
     stages {
         stage('Docker Build') {
-            agent any
             steps {
                 sh 'docker build --tag=kwongtn/rosak_backend:latest --tag=kwongtn/rosak_backend:$(date +%Y%m%d-%H%M) .'
             }
         }
         stage('Docker Push') {
-            agent any
             steps {
                 withCredentials(
                     [
