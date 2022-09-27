@@ -11,6 +11,7 @@ from spotting import models
 @gql.django.type(models.Event)
 class Event:
     id: gql.auto
+    created: date
     spotting_date: date
     reporter: "User"
     vehicle: "Vehicle"

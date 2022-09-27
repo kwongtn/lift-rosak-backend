@@ -10,6 +10,7 @@ from operation.models import StationLine
 from rosak.permissions import IsRecaptchaChallengePassed
 from spotting import models
 from spotting.enums import SpottingEventType
+from spotting.schema.filters import EventFilter
 from spotting.schema.inputs import EventInput
 from spotting.schema.scalars import Event
 
@@ -17,7 +18,7 @@ from spotting.schema.scalars import Event
 @gql.type
 class SpottingScalars:
     events: typing.List[Event] = gql.django.field(
-        # filters=EventFilter,
+        filters=EventFilter,
     )
 
 
