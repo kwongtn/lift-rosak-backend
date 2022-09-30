@@ -5,9 +5,8 @@ from strawberry.types import Info
 from strawberry_django_plus import gql
 
 from common.schema.scalars import GenericMutationReturn
-from common.utils import get_user_from_firebase_key
 from operation.models import StationLine
-from rosak.permissions import IsRecaptchaChallengePassed
+from rosak.permissions import IsLoggedIn, IsRecaptchaChallengePassed
 from spotting import models
 from spotting.enums import SpottingEventType
 from spotting.schema.filters import EventFilter
@@ -24,10 +23,10 @@ class SpottingScalars:
 
 @gql.type
 class SpottingMutations:
-    @gql.mutation(permission_classes=[IsRecaptchaChallengePassed])
+    @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
     @sync_to_async
     def add_event(self, input: EventInput, info: Info) -> GenericMutationReturn:
-        user_id = get_user_from_firebase_key(info).id
+        user_id = info.context.user.id
 
         notes = input.notes if input.notes != gql.UNSET else ""
         is_anonymous = input.is_anonymous if input.is_anonymous != gql.UNSET else False
