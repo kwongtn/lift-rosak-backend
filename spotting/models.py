@@ -91,3 +91,22 @@ class Event(TimeStampedModel):
         indexes = [
             BTreeIndex(fields=["vehicle", "-spotting_date"]),
         ]
+
+
+class EventRead(TimeStampedModel):
+    reader = models.ForeignKey(
+        to="common.User",
+        on_delete=models.CASCADE,
+    )
+    event = models.ForeignKey(
+        to="spotting.Event",
+        on_delete=models.CASCADE,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("reader_id", "event_id"),
+                name="%(app_label)s_%(class)s_reader_event_unique",
+            ),
+        ]
