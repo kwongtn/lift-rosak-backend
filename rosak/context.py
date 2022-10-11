@@ -5,7 +5,7 @@ from django.http import HttpRequest, HttpResponse
 from dotmap import DotMap
 from strawberry.django.views import AsyncGraphQLView
 
-from common.utils import get_user_from_firebase_key
+from common.utils import FirebaseUser
 from operation.schema.loaders import OperationContextLoaders
 
 ContextLoaders = {"operation": OperationContextLoaders}
@@ -18,6 +18,6 @@ class CustomGraphQLView(AsyncGraphQLView):
                 "loaders": copy.deepcopy(ContextLoaders),
                 "request": request,
                 "response": response,
-                "user": await get_user_from_firebase_key(request),
+                "user": await FirebaseUser(request).get_current_user(),
             }
         )
