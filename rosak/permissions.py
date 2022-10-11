@@ -36,7 +36,4 @@ class IsLoggedIn(BasePermission):
     message = "You are not logged in."
 
     async def has_permission(self, source: typing.Any, info: Info, **kwargs) -> bool:
-        if info.context.user is None:
-            return False
-
-        return True
+        return bool(info.context.user)
