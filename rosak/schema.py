@@ -1,7 +1,6 @@
 from django.conf import settings
 from graphql.validation import NoSchemaIntrospectionCustomRule
 from strawberry.extensions import AddValidationRules
-from strawberry.types import Info
 from strawberry_django_plus import gql
 from strawberry_django_plus.optimizer import DjangoOptimizerExtension
 
@@ -20,13 +19,7 @@ class Query(
     SpottingScalars,
     IncidentScalars,
 ):
-    @gql.field
-    def hello(self, info: Info) -> str:
-        return "Hello World"
-
-    @gql.field
-    def hello2(self, info: Info) -> str:
-        return "Hello World 2"
+    pass
 
 
 @gql.type
