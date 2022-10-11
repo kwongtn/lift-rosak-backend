@@ -37,3 +37,11 @@ class IsLoggedIn(BasePermission):
 
     async def has_permission(self, source: typing.Any, info: Info, **kwargs) -> bool:
         return bool(info.context.user)
+
+
+class IsAdmin(BasePermission):
+    message = "You don't have the appropriate permissions to perform this action."
+
+    async def has_permission(self, source: typing.Any, info: Info, **kwargs) -> bool:
+        # TODO: Check permissions from firestore
+        return True

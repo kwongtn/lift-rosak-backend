@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Optional
+from typing import List, Optional
 
 from strawberry_django_plus import gql
 
@@ -18,3 +18,8 @@ class EventInput:
     destination_station: Optional[gql.ID]
     location: Optional["GeoPoint"]
     is_anonymous: Optional[bool]
+
+
+@gql.input
+class MarkEventAsReadInput:
+    event_ids: List[gql.ID]

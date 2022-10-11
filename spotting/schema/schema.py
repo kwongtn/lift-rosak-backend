@@ -6,11 +6,11 @@ from strawberry_django_plus import gql
 
 from common.schema.scalars import GenericMutationReturn
 from operation.models import StationLine
-from rosak.permissions import IsLoggedIn, IsRecaptchaChallengePassed
+from rosak.permissions import IsAdmin, IsLoggedIn, IsRecaptchaChallengePassed
 from spotting import models
 from spotting.enums import SpottingEventType
 from spotting.schema.filters import EventFilter
-from spotting.schema.inputs import EventInput
+from spotting.schema.inputs import EventInput, MarkEventAsReadInput
 from spotting.schema.scalars import Event
 
 
@@ -63,6 +63,24 @@ class SpottingMutations:
             origin_station_id=origin_station_id,
             destination_station_id=destination_station_id,
             is_anonymous=is_anonymous,
+        )
+
+        return GenericMutationReturn(ok=True)
+
+    @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed, IsAdmin])
+    @sync_to_async
+    def mark_as_read(
+        self, input: MarkEventAsReadInput, info: Info
+    ) -> GenericMutationReturn:
+        models.EventRead.objects.bulk_create(
+            [
+                models.EventRead(
+                    event_id=event_id,
+                    reader_id=info.context.user.id,
+                )
+                for event_id in input.event_ids
+            ],
+            ignore_conflicts=True,
         )
 
         return GenericMutationReturn(ok=True)
