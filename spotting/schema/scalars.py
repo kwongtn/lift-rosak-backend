@@ -8,7 +8,7 @@ from operation.schema.scalars import Station, Vehicle
 from spotting import models
 
 
-@gql.django.type(models.Event)
+@gql.django.type(models.Event, pagination=True)
 class Event:
     id: gql.auto
     created: date
