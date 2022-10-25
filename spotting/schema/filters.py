@@ -31,6 +31,9 @@ class EventFilter:
         return queryset.filter(~Q(vehicle__status=F("status")))
 
     def filter_is_read(self, queryset, info: Info):
+        if not info.context.user:
+            return queryset.none()
+
         read_filter = models.EventRead.objects.filter(reader_id=info.context.user.id)
 
         if self.is_read:
