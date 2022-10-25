@@ -1,5 +1,6 @@
 from datetime import date
 
+from strawberry.types import Info
 from strawberry_django_plus import gql
 
 from common.schema.scalars import User
@@ -21,3 +22,9 @@ class Event:
     origin_station: "Station"
     destination_station: "Station"
     location: "GeoPoint"
+
+    @gql.field
+    async def is_read(self, info: Info) -> bool:
+        return await info.context.loaders["spotting"]["is_read_from_event_loader"].load(
+            (self.id, info.context.user.id)
+        )

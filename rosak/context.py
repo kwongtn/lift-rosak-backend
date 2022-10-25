@@ -7,8 +7,12 @@ from strawberry.django.views import AsyncGraphQLView
 
 from common.utils import FirebaseUser
 from operation.schema.loaders import OperationContextLoaders
+from spotting.schema.loaders import SpottingContextLoaders
 
-ContextLoaders = {"operation": OperationContextLoaders}
+ContextLoaders = {
+    "operation": OperationContextLoaders,
+    "spotting": SpottingContextLoaders,
+}
 
 
 class CustomGraphQLView(AsyncGraphQLView):
