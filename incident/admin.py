@@ -33,7 +33,7 @@ class VehicleIncidentAdmin(OrderedModelAdmin):
     form = VehicleIncidentLocationForm
     list_display = incident_list_display + ["vehicle"]
     list_filter = incident_list_filter + ["vehicle", "vehicle__lines"]
-    list_editable = incident_list_editable + ["vehicle"]
+    list_editable = incident_list_editable
     search_fields = [
         "vehicle__identification_no",
     ]
