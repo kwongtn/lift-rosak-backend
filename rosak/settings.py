@@ -79,6 +79,8 @@ ALLOWED_HOSTS = [
     "lift-rosak.ddns.net",
 ]
 
+LOGIN_REDIRECT_URL = os.getenv("LOGIN_REDIRECT_URL", "admin/")
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -90,6 +92,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "location_field.apps.DefaultConfig",
+    "hijack",
+    "hijack.contrib.admin",
     "colorfield",
     "strawberry.django",
     "django.contrib.gis",
@@ -114,6 +118,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "hijack.middleware.HijackUserMiddleware",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
