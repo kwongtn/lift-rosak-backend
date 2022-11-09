@@ -5,10 +5,16 @@ agent:
     type: e1-standard-2
     os_image: ubuntu2004
 blocks:
-  - name: Build
+  - name: Build & Push
     task:
       jobs:
         - name: docker build
           commands:
             - checkout
-            - docker build -t your-image .
+            - echo $DOCKER_HUB_ACCESS_TOKEN | docker login -u kwongtn --password-stdin
+            - 'docker --tag=kwongtn/rosak_backend:latest --tag=kwongtn/rosak_backend:$(date +%Y%m%d-%H%M) .'
+      secrets:
+        - name: Rosak
+      env_vars:
+        - name: ENVIRONMENT
+          value: prod
