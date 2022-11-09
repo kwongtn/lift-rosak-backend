@@ -11,8 +11,9 @@ blocks:
         - name: docker build
           commands:
             - checkout
-            - echo $DOCKER_HUB_ACCESS_TOKEN | docker login -u kwongtn --password-stdin
+            - echo $DOCKER_HUB_ACCESS_TOKEN | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
             - 'docker --tag=kwongtn/rosak_backend:latest --tag=kwongtn/rosak_backend:$(date +%Y%m%d-%H%M) .'
+            - docker push
       secrets:
         - name: Rosak
       env_vars:
