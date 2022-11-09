@@ -21,3 +21,5 @@ blocks:
           value: prod
         - name: IMAGE_NAME
           value: rosak_backend
+    run:
+      when: branch = 'main'
