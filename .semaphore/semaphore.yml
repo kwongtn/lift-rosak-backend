@@ -12,10 +12,12 @@ blocks:
           commands:
             - checkout
             - echo $DOCKER_HUB_ACCESS_TOKEN | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
-            - 'docker build --tag=kwongtn/rosak_backend:latest --tag=kwongtn/rosak_backend:$(date +%Y%m%d-%H%M) .'
-            - docker push
+            - 'docker build --tag=$DOCKERHUB_USERNAME/$IMAGE_NAME:latest --tag=$DOCKERHUB_USERNAME/$IMAGE_NAME:$(date +%Y%m%d-%H%M) .'
+            - 'docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:latest'
       secrets:
         - name: Rosak
       env_vars:
         - name: ENVIRONMENT
           value: prod
+        - name: IMAGE_NAME
+          value: rosak_backend
