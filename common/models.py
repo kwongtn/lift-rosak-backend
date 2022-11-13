@@ -1,8 +1,6 @@
 from django.db import models
 from model_utils.models import SoftDeletableModel, TimeStampedModel, UUIDModel
 
-# Create your models here.
-
 
 class Media(TimeStampedModel, UUIDModel, SoftDeletableModel):
     file = models.FileField()
