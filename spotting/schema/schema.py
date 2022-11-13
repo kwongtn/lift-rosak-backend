@@ -1,6 +1,7 @@
 import typing
 
 from asgiref.sync import sync_to_async
+from django.contrib.gis.geos import Point
 from strawberry.types import Info
 from strawberry_django_plus import gql
 
@@ -53,7 +54,7 @@ class SpottingMutations:
                 else None
             )
 
-        models.Event.objects.create(
+        event = models.Event.objects.create(
             spotting_date=input.spotting_date,
             reporter_id=user_id,
             vehicle_id=input.vehicle,
@@ -64,6 +65,42 @@ class SpottingMutations:
             destination_station_id=destination_station_id,
             is_anonymous=is_anonymous,
         )
+
+        if input.location != gql.UNSET:
+            location_input = input.location
+            accuracy = (
+                location_input.accuracy
+                if location_input.accuracy != gql.UNSET
+                else None
+            )
+            altitude_accuracy = (
+                location_input.altitude_accuracy
+                if location_input.altitude_accuracy != gql.UNSET
+                else None
+            )
+            heading = (
+                location_input.heading if location_input.heading != gql.UNSET else None
+            )
+            speed = location_input.speed if location_input.speed != gql.UNSET else None
+
+            if location_input.altitude == gql.UNSET:
+                location = Point(x=location_input.longitude, y=location_input.latitude)
+
+            else:
+                location = Point(
+                    x=location_input.longitude,
+                    y=location_input.latitude,
+                    z=location_input.altitude,
+                )
+
+            models.LocationEvent.objects.create(
+                event=event,
+                location=location,
+                accuracy=accuracy,
+                altitude_accuracy=altitude_accuracy,
+                heading=heading,
+                speed=speed,
+            )
 
         return GenericMutationReturn(ok=True)
 
