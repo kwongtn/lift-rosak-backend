@@ -1,4 +1,4 @@
-from typing import NewType, Tuple
+from typing import NewType, Optional, Tuple
 
 from django.contrib.gis.geos import LinearRing, LineString, MultiPoint, Point, Polygon
 from strawberry_django_plus import gql
@@ -42,3 +42,14 @@ GeoMultiPoint = gql.scalar(
     parse_value=lambda v: MultiPoint(*[Point(x) for x in v]),
     serialize=lambda v: v.tuple,
 )
+
+
+class WebLocationParent:
+    id: gql.auto
+    accuracy: Optional[float]
+    altitudeAccuracy: Optional[float]
+    heading: Optional[float]
+    speed: Optional[float]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    altitude: Optional[float]

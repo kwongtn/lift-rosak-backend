@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from strawberry_django_plus import gql
 
-from generic.schema.scalars import GeoPoint
+from generic.schema.inputs import WebLocationInput
 from spotting import models
 
 
@@ -16,7 +16,7 @@ class EventInput:
     type: gql.auto
     origin_station: Optional[gql.ID]
     destination_station: Optional[gql.ID]
-    location: Optional["GeoPoint"]
+    location: Optional["WebLocationInput"]
     is_anonymous: Optional[bool]
 
 
