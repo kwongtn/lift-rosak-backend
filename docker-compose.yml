@@ -29,7 +29,6 @@ services:
       context: .
       args:
         - ENVIRONMENT=dev
-    image: rosak-backend-app:latest
     env_file:
       - secrets.dev.env
     command: bash run_app.sh
