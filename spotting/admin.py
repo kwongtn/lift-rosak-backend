@@ -22,7 +22,6 @@ class EventAdmin(admin.ModelAdmin):
         "type",
         "origin_station",
         "destination_station",
-        "location",
         "is_anonymous",
     ]
     list_filter = [

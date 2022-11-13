@@ -3,8 +3,22 @@ from django.contrib.postgres.indexes import BTreeIndex
 from django.db.models import F, Q
 from model_utils.models import TimeStampedModel
 
+from generic.models import WebLocationModel
 from operation.enums import VehicleStatus
 from spotting.enums import SpottingEventType
+
+
+class LocationEvent(WebLocationModel):
+    event = models.ForeignKey(
+        to="spotting.Event",
+        on_delete=models.CASCADE,
+    )
+
+    # Override to be not null
+    location = models.PointField(
+        blank=False,
+        null=False,
+    )
 
 
 class Event(TimeStampedModel):
@@ -51,12 +65,6 @@ class Event(TimeStampedModel):
         related_name="destination_station_event",
     )
 
-    location = models.PointField(
-        blank=True,
-        null=True,
-        default=None,
-    )
-
     class Meta:
         constraints = [
             models.CheckConstraint(
@@ -64,26 +72,19 @@ class Event(TimeStampedModel):
                     Q(type=SpottingEventType.BETWEEN_STATIONS)
                     & Q(origin_station__isnull=False)
                     & Q(destination_station__isnull=False)
-                    & Q(location__isnull=True)
                     & ~Q(origin_station=F("destination_station"))
                     & ~Q(destination_station=F("origin_station"))
-                )
-                | Q(
-                    Q(type=SpottingEventType.LOCATION)
-                    & Q(origin_station__isnull=True)
-                    & Q(destination_station__isnull=True)
-                    & Q(location__isnull=False)
                 )
                 | Q(
                     Q(
                         type__in=[
                             SpottingEventType.DEPOT,
                             SpottingEventType.JUST_SPOTTING,
+                            SpottingEventType.LOCATION,
                         ]
                     )
                     & Q(origin_station__isnull=True)
                     & Q(destination_station__isnull=True)
-                    & Q(location__isnull=True)
                 ),
                 name="%(app_label)s_%(class)s_value_relevant",
             ),
