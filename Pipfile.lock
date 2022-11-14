@@ -230,11 +230,11 @@
         },
         "django-hijack": {
             "hashes": [
-                "sha256:8df524fd085a43205a6bb497c53fd94483824b4f3179762fc1c31c1dea58d1ca",
-                "sha256:b0723750b247e5b1f69f600a40b1d512404061f33918e0bffb4aa928314ea1db"
+                "sha256:a1be08a9067240c0860d2b23bfada9ce2c6c2472f574dfcdd2df75143e54cee2",
+                "sha256:d84d077967ee6191acfb681fac06c5b6113f3bff121f236f0476394d91cb1bdf"
             ],
             "index": "pypi",
-            "version": "==3.2.1"
+            "version": "==3.2.3"
         },
         "django-location-field": {
             "hashes": [
@@ -437,7 +437,7 @@
                 "sha256:06d2aad0ac723e35b1cb47885d3e5c45e956a53bc1b209a9fc5369007fe46676",
                 "sha256:5766780452bd5ec8ba133f8bf287dc92713e3868ddd83aee4faab9fc3e303dc3"
             ],
-            "markers": "python_version >= '3.6' and python_version < '4'",
+            "markers": "python_version >= '3.6' and python_version < '4.0'",
             "version": "==3.2.3"
         },
         "grpcio": {
@@ -938,7 +938,7 @@
                 "sha256:7c5599b102feddaa661c826c56ab4fee28bfd17f5abca1ebbe3e7f19d7c97983",
                 "sha256:8fefa2a1a1365bf5520aac41836fbee479da67864514bdb821f31ce07ce65349"
             ],
-            "markers": "python_version >= '3.7' and python_version < '4'",
+            "markers": "python_version >= '3.7' and python_version < '4.0'",
             "version": "==2.28.1"
         },
         "rsa": {
@@ -951,11 +951,11 @@
         },
         "sentry-sdk": {
             "hashes": [
-                "sha256:06c0fa9ccfdc80d7e3b5d2021978d6eb9351fa49db9b5847cf4d1f2a473414ad",
-                "sha256:105faf7bd7b7fa25653404619ee261527266b14103fe1389e0ce077bd23a9691"
+                "sha256:e7b78a1ddf97a5f715a50ab8c3f7a93f78b114c67307785ee828ef67a5d6f117",
+                "sha256:f467e6c7fac23d4d42bc83eb049c400f756cd2d65ab44f0cc1165d0c7c3d40bc"
             ],
             "index": "pypi",
-            "version": "==1.10.1"
+            "version": "==1.11.0"
         },
         "setuptools": {
             "hashes": [
@@ -1264,7 +1264,7 @@
                 "sha256:06d2aad0ac723e35b1cb47885d3e5c45e956a53bc1b209a9fc5369007fe46676",
                 "sha256:5766780452bd5ec8ba133f8bf287dc92713e3868ddd83aee4faab9fc3e303dc3"
             ],
-            "markers": "python_version >= '3.6' and python_version < '4'",
+            "markers": "python_version >= '3.6' and python_version < '4.0'",
             "version": "==3.2.3"
         },
         "h11": {
