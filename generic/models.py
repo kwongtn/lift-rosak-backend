@@ -5,6 +5,9 @@ class WebLocationModel(models.Model):
     accuracy = models.DecimalField(
         blank=True, null=True, default=None, max_digits=12, decimal_places=6
     )
+    altitude = models.DecimalField(
+        blank=True, null=True, default=None, max_digits=12, decimal_places=6
+    )
     altitude_accuracy = models.DecimalField(
         blank=True, null=True, default=None, max_digits=12, decimal_places=6
     )

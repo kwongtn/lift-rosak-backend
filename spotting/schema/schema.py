@@ -83,20 +83,18 @@ class SpottingMutations:
             )
             speed = location_input.speed if location_input.speed != gql.UNSET else None
 
-            if location_input.altitude == gql.UNSET:
-                location = Point(x=location_input.longitude, y=location_input.latitude)
-
-            else:
-                location = Point(
-                    x=location_input.longitude,
-                    y=location_input.latitude,
-                    z=location_input.altitude,
-                )
+            location = Point(x=location_input.longitude, y=location_input.latitude)
+            altitude = (
+                location_input.altitude
+                if location_input.altitude != gql.UNSET
+                else None
+            )
 
             models.LocationEvent.objects.create(
                 event=event,
                 location=location,
                 accuracy=accuracy,
+                altitude=altitude,
                 altitude_accuracy=altitude_accuracy,
                 heading=heading,
                 speed=speed,
