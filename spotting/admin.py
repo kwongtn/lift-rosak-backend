@@ -1,18 +1,17 @@
 from django.contrib import admin
 
 from generic.views import GeometricForm
-from spotting.models import Event
+from spotting.models import Event, LocationEvent
 
 
-class EventForm(GeometricForm):
+class LocationEventForm(GeometricForm):
     field_name = "location"
     required = False
-    GeometricForm.Meta.model = Event
+    GeometricForm.Meta.model = LocationEvent
     # GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
 
 
 class EventAdmin(admin.ModelAdmin):
-    form = EventForm
     list_display = [
         "id",
         "reporter",
@@ -44,4 +43,21 @@ class EventAdmin(admin.ModelAdmin):
     ]
 
 
+class LocationEventAdmin(admin.ModelAdmin):
+    form = LocationEventForm
+    list_display = [
+        "id",
+        "location",
+        "accuracy",
+        "altitude",
+        "altitude_accuracy",
+        "heading",
+        "speed",
+    ]
+    search_fields = [
+        "location",
+    ]
+
+
 admin.site.register(Event, EventAdmin)
+admin.site.register(LocationEvent, LocationEventAdmin)
