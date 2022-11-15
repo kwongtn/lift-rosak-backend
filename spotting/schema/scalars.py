@@ -20,13 +20,18 @@ class Event:
     id: gql.auto
     created: date
     spotting_date: date
-    reporter: "User"
     vehicle: "Vehicle"
     notes: str
     status: gql.auto
     type: gql.auto
     origin_station: Optional["Station"]
     destination_station: Optional["Station"]
+
+    @gql.field
+    async def reporter(self, info: Info) -> Optional["User"]:
+        return await info.context.loaders["spotting"][
+            "reporter_from_event_loader"
+        ].load((self.id, info.context.user.id))
 
     @gql.field
     async def is_read(self, info: Info) -> bool:

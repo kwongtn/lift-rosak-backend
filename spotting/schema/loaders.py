@@ -3,7 +3,21 @@ from collections import defaultdict
 from django.db.models import Q
 from strawberry.dataloader import DataLoader
 
-from spotting.models import EventRead, LocationEvent
+from spotting.models import Event, EventRead, LocationEvent
+
+
+async def batch_load_reporter_from_event(keys):
+    events = Event.objects.filter(
+        id__in=[key[0] for key in keys],
+        reporter_id__in=[key[1] for key in keys],
+        is_anonymous=False,
+    ).select_related("reporter")
+
+    reporter_dict = defaultdict()
+    async for event in events:
+        reporter_dict[(event.id, event.reporter_id)] = event.reporter
+
+    return [reporter_dict.get((key[0], key[1]), None) for key in keys]
 
 
 async def batch_load_is_read_from_event(keys):
@@ -31,4 +45,5 @@ SpottingContextLoaders = {
     "location_event_from_event_loader": DataLoader(
         load_fn=batch_load_location_event_from_event
     ),
+    "reporter_from_event_loader": DataLoader(load_fn=batch_load_reporter_from_event),
 }
