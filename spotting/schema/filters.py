@@ -14,6 +14,7 @@ class EventFilter:
     last_n: int
     different_status_than_vehicle: bool
     is_read: bool
+    only_mine: bool
 
     def filter_days_before(self, queryset):
         return queryset.filter(
@@ -42,3 +43,9 @@ class EventFilter:
             query = ~Q(id__in=Subquery(read_filter.values_list("event_id", flat=True)))
 
         return queryset.filter(query)
+
+    def filter_only_mine(self, queryset, info: Info):
+        if not info.context.user:
+            return queryset.none()
+
+        return queryset.filter(reporter_id=info.context.user.id)
