@@ -47,7 +47,7 @@ GeoMultiPoint = gql.scalar(
 class WebLocationParent:
     id: gql.auto
     accuracy: Optional[float]
-    altitudeAccuracy: Optional[float]
+    altitude_accuracy: Optional[float]
     heading: Optional[float]
     speed: Optional[float]
     # latitude: Optional[float]
