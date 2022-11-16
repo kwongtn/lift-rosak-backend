@@ -16,7 +16,7 @@ class LocationEvent(WebLocationParent):
 
 
 @gql.django.type(models.Event, pagination=True)
-class Event:
+class EventScalar:
     id: gql.auto
     created: date
     spotting_date: date
