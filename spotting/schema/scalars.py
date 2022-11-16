@@ -7,6 +7,7 @@ from strawberry_django_plus import gql
 from common.schema.scalars import User
 from generic.schema.scalars import WebLocationParent
 from operation.schema.scalars import Station, Vehicle
+from rosak.permissions import IsLoggedIn
 from spotting import models
 
 
@@ -33,7 +34,7 @@ class EventScalar:
             "reporter_from_event_loader"
         ].load((self.id, info.context.user.id))
 
-    @gql.field
+    @gql.field(permission_classes=[IsLoggedIn])
     async def is_read(self, info: Info) -> bool:
         return await info.context.loaders["spotting"]["is_read_from_event_loader"].load(
             (self.id, info.context.user.id)
