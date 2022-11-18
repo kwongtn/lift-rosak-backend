@@ -32,7 +32,7 @@ class EventScalar:
     async def reporter(self, info: Info) -> Optional["User"]:
         return await info.context.loaders["spotting"][
             "reporter_from_event_loader"
-        ].load((self.id, info.context.user.id))
+        ].load(self.id)
 
     @gql.field(permission_classes=[IsLoggedIn])
     async def is_read(self, info: Info) -> bool:
