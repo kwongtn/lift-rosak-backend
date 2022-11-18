@@ -4,7 +4,7 @@ from typing import List, Optional
 from strawberry.types import Info
 from strawberry_django_plus import gql
 
-from common.schema.scalars import User
+from common.schema.scalars import UserScalar
 from generic.schema.scalars import WebLocationParent
 from operation.schema.scalars import Station, Vehicle
 from rosak.permissions import IsLoggedIn
@@ -29,7 +29,7 @@ class EventScalar:
     destination_station: Optional["Station"]
 
     @gql.field
-    async def reporter(self, info: Info) -> Optional["User"]:
+    async def reporter(self, info: Info) -> Optional["UserScalar"]:
         return await info.context.loaders["spotting"][
             "reporter_from_event_loader"
         ].load(self.id)

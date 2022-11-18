@@ -9,11 +9,11 @@ from common import models
 @gql.django.type(models.Media)
 class Media:
     id: str
-    uploader: "User"
+    uploader: "UserScalar"
 
 
 @gql.django.type(models.User)
-class User:
+class UserScalar:
     if TYPE_CHECKING:
         from spotting.schema.scalars import EventScalar
 
