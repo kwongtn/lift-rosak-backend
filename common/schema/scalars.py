@@ -17,7 +17,6 @@ class UserScalar:
     if TYPE_CHECKING:
         from spotting.schema.scalars import EventScalar
 
-    id: gql.auto
     firebase_id: str
 
     @gql.django.field
