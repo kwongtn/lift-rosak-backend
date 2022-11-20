@@ -6,3 +6,4 @@ class SpottingEventType(models.TextChoices):
     LOCATION = "LOCATION"
     BETWEEN_STATIONS = "BETWEEN_STATIONS"
     JUST_SPOTTING = "JUST_SPOTTING"
+    AT_STATION = "AT_STATION"
