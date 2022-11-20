@@ -1,5 +1,5 @@
 from datetime import date
-from typing import List, Optional
+from typing import Optional
 
 from strawberry.types import Info
 from strawberry_django_plus import gql
@@ -41,7 +41,7 @@ class EventScalar:
         )
 
     @gql.field
-    async def location(self, info: Info) -> List["LocationEvent"]:
+    async def location(self, info: Info) -> Optional["LocationEvent"]:
         return await info.context.loaders["spotting"][
             "location_event_from_event_loader"
         ].load(self.id)

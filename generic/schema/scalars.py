@@ -52,5 +52,5 @@ class WebLocationParent:
     speed: Optional[float]
     # latitude: Optional[float]
     # longitude: Optional[float]
-    location: Optional[str]
+    location: Optional[GeoPoint]
     altitude: Optional[float]
