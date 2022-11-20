@@ -19,11 +19,11 @@ async def batch_load_is_read_from_event(keys):
 
 
 async def batch_load_location_event_from_event(keys):
-    event_dict = defaultdict(set)
+    event_dict = defaultdict()
     async for location_event in LocationEvent.objects.filter(event_id__in=keys):
-        event_dict[location_event.event_id].add(location_event)
+        event_dict[location_event.event_id] = location_event
 
-    return [event_dict[key] for key in keys]
+    return [event_dict.get(key, None) for key in keys]
 
 
 SpottingContextLoaders = {
