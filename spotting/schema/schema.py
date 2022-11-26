@@ -54,6 +54,13 @@ class SpottingMutations:
                 else None
             )
 
+        if input.type == SpottingEventType.AT_STATION:
+            origin_station_id = (
+                StationLine.objects.get(id=input.origin_station).station_id
+                if input.origin_station != gql.UNSET
+                else None
+            )
+
         event = models.Event.objects.create(
             spotting_date=input.spotting_date,
             reporter_id=user_id,
