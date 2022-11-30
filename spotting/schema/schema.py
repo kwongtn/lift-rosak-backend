@@ -12,13 +12,14 @@ from spotting import models
 from spotting.enums import SpottingEventType
 from spotting.schema.filters import EventFilter
 from spotting.schema.inputs import EventInput, MarkEventAsReadInput
+from spotting.schema.orderings import EventOrder
 from spotting.schema.scalars import EventScalar
 
 
 @gql.type
 class SpottingScalars:
     events: typing.List[EventScalar] = gql.django.field(
-        filters=EventFilter,
+        filters=EventFilter, pagination=True, order=EventOrder
     )
 
 
