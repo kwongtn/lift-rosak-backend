@@ -76,6 +76,11 @@ class Event(TimeStampedModel):
                     & ~Q(destination_station=F("origin_station"))
                 )
                 | Q(
+                    Q(type=SpottingEventType.AT_STATION)
+                    & Q(origin_station__isnull=False)
+                    & Q(destination_station__isnull=True)
+                )
+                | Q(
                     Q(
                         type__in=[
                             SpottingEventType.DEPOT,
