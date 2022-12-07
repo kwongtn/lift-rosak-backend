@@ -4,6 +4,7 @@ from strawberry.types import Info
 from strawberry_django_plus import gql
 
 from common import models
+from spotting import models as spotting_models
 
 
 @gql.django.type(models.Media)
@@ -26,6 +27,10 @@ class UserScalar:
         return await info.context.loaders["common"]["spottings_from_user_loader"].load(
             self.id
         )
+
+    @gql.django.field
+    async def spottings_count(self, info: Info) -> int:
+        return spotting_models.Event.objects.filter(reporter_id=self.id).acount()
 
 
 @gql.type
