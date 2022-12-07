@@ -3,6 +3,7 @@ from typing import Optional
 
 from strawberry.types import Info
 from strawberry_django_plus import gql
+from strawberry_django_plus.gql import relay
 
 from common.schema.scalars import UserScalar
 from generic.schema.scalars import WebLocationParent
@@ -45,3 +46,8 @@ class EventScalar:
         return await info.context.loaders["spotting"][
             "location_event_from_event_loader"
         ].load(self.id)
+
+
+@gql.django.type(models.Event)
+class EventRelay(relay.Node, EventScalar):
+    pass
