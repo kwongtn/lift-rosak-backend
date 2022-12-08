@@ -5,6 +5,7 @@ from django.http import HttpRequest, HttpResponse
 from dotmap import DotMap
 from strawberry.django.views import AsyncGraphQLView
 
+from common.schema.loaders import CommonContextLoaders
 from common.utils import FirebaseUser
 from operation.schema.loaders import OperationContextLoaders
 from spotting.schema.loaders import SpottingContextLoaders
@@ -12,6 +13,7 @@ from spotting.schema.loaders import SpottingContextLoaders
 ContextLoaders = {
     "operation": OperationContextLoaders,
     "spotting": SpottingContextLoaders,
+    "common": CommonContextLoaders,
 }
 
 

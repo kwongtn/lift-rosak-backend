@@ -3,10 +3,12 @@ from typing import Optional
 
 from strawberry.types import Info
 from strawberry_django_plus import gql
+from strawberry_django_plus.gql import relay
 
-from common.schema.scalars import User
+from common.schema.scalars import UserScalar
 from generic.schema.scalars import WebLocationParent
 from operation.schema.scalars import Station, Vehicle
+from rosak.permissions import IsLoggedIn
 from spotting import models
 
 
@@ -16,11 +18,10 @@ class LocationEvent(WebLocationParent):
 
 
 @gql.django.type(models.Event, pagination=True)
-class Event:
+class EventScalar:
     id: gql.auto
     created: date
     spotting_date: date
-    reporter: "User"
     vehicle: "Vehicle"
     notes: str
     status: gql.auto
@@ -29,6 +30,12 @@ class Event:
     destination_station: Optional["Station"]
 
     @gql.field
+    async def reporter(self, info: Info) -> Optional["UserScalar"]:
+        return await info.context.loaders["spotting"][
+            "reporter_from_event_loader"
+        ].load(self.id)
+
+    @gql.field(permission_classes=[IsLoggedIn])
     async def is_read(self, info: Info) -> bool:
         return await info.context.loaders["spotting"]["is_read_from_event_loader"].load(
             (self.id, info.context.user.id)
@@ -39,3 +46,8 @@ class Event:
         return await info.context.loaders["spotting"][
             "location_event_from_event_loader"
         ].load(self.id)
+
+
+@gql.django.type(models.Event)
+class EventRelay(relay.Node, EventScalar):
+    pass
