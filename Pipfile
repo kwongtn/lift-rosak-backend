@@ -31,7 +31,7 @@ uvicorn = {extras = ["standard"], version = "*"}
 black = "*"
 flake8 = "*"
 mypi = "*"
-strawberry-graphql = {extras = ["debug-server"], version = "*"}
+strawberry-graphql = {extras = ["debug-server", "cli"], version = "*"}
 
 [requires]
 python_version = "3.11"
