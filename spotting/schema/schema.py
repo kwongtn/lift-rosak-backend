@@ -1,7 +1,9 @@
 import typing
+from datetime import timedelta
 
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
+from django.utils.timezone import now
 from strawberry.types import Info
 from strawberry_django_plus import gql
 from strawberry_django_plus.gql import relay
@@ -12,7 +14,7 @@ from rosak.permissions import IsAdmin, IsLoggedIn, IsRecaptchaChallengePassed
 from spotting import models
 from spotting.enums import SpottingEventType
 from spotting.schema.filters import EventFilter
-from spotting.schema.inputs import EventInput, MarkEventAsReadInput
+from spotting.schema.inputs import DeleteEventInput, EventInput, MarkEventAsReadInput
 from spotting.schema.orderings import EventOrder
 from spotting.schema.scalars import EventRelay, EventScalar
 
@@ -28,6 +30,24 @@ class SpottingScalars:
 
 @gql.type
 class SpottingMutations:
+    @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
+    async def delete_event(
+        self, input: DeleteEventInput, info: Info
+    ) -> GenericMutationReturn:
+        user_id = info.context.user.id
+
+        to_delete = models.Event.objects.filter(
+            reporter_id=user_id,
+            id=input.id,
+            # User can only delete events from last 3 days
+            created__gte=now() - timedelta(days=3),
+        )
+        if await to_delete.aexists():
+            await to_delete.adelete()
+            return GenericMutationReturn(ok=True)
+        else:
+            return GenericMutationReturn(ok=False)
+
     @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
     @sync_to_async
     def add_event(self, input: EventInput, info: Info) -> GenericMutationReturn:

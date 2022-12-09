@@ -23,3 +23,8 @@ class EventInput:
 @gql.input
 class MarkEventAsReadInput:
     event_ids: List[gql.ID]
+
+
+@gql.input
+class DeleteEventInput:
+    id: gql.ID
