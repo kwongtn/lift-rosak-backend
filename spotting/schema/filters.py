@@ -10,6 +10,7 @@ from spotting import models
 @gql.django.filters.filter(models.Event)
 class EventFilter:
     id: gql.auto
+    vehicle_id: gql.ID
     days_before: int
     has_notes: bool
     last_n: int
@@ -20,6 +21,9 @@ class EventFilter:
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)
+
+    def filter_vehicle_id(self, queryset):
+        return queryset.filter(vehicle_id=self.vehicle_id)
 
     def filter_days_before(self, queryset):
         return queryset.filter(
