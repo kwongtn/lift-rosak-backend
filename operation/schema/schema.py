@@ -10,6 +10,7 @@ from operation.schema.filters import (
     VehicleFilter,
     VehicleTypeFilter,
 )
+from operation.schema.orderings import VehicleOrder
 from operation.schema.scalars import (
     Asset,
     Line,
@@ -27,7 +28,9 @@ class OperationScalars:
     assets: List[Asset] = gql.django.field()
     stations: List[Station] = gql.django.field(filters=StationFilter)
     stationLines: List[StationLine] = gql.django.field(filters=StationLineFilter)
-    vehicles: List[Vehicle] = gql.django.field(filters=VehicleFilter)
+    vehicles: List[Vehicle] = gql.django.field(
+        filters=VehicleFilter, order=VehicleOrder
+    )
     vehicleTypes: List[VehicleType] = gql.django.field(filters=VehicleTypeFilter)
     assets: List[Asset] = gql.django.field(filters=AssetFilter)
 
