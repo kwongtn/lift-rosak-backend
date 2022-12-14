@@ -29,6 +29,7 @@ urlpatterns = (
         path("health-check/", include("health_check.urls")),
         path("admin/", admin.site.urls),
         path("hijack/", include("hijack.urls")),
+        path(r"^advanced_filters/", include("advanced_filters.urls")),
         path(
             "graphql/",
             CustomGraphQLView.as_view(

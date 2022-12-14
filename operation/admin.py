@@ -1,3 +1,4 @@
+from advanced_filters.admin import AdminAdvancedFiltersMixin
 from django.contrib.gis import admin
 from ordered_model.admin import OrderedInlineModelAdminMixin
 
@@ -92,7 +93,7 @@ class VehicleLineTabularInline(admin.TabularInline):
     classes = ["collapse"]
 
 
-class LineAdmin(admin.ModelAdmin):
+class LineAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
     inlines = [
         StationLineTabularInline,
         VehicleLineTabularInline,
@@ -108,6 +109,11 @@ class LineAdmin(admin.ModelAdmin):
         "display_name",
         "display_color",
     ]
+    advanced_filter_fields = [
+        "code",
+        "display_name",
+        "display_color",
+    ]
 
 
 class StationForm(GeometricForm):
@@ -117,7 +123,9 @@ class StationForm(GeometricForm):
     # GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
 
 
-class StationAdmin(OrderedInlineModelAdminMixin, admin.ModelAdmin):
+class StationAdmin(
+    AdminAdvancedFiltersMixin, OrderedInlineModelAdminMixin, admin.ModelAdmin
+):
     inlines = [
         StationLineTabularInline,
         StationMediaStackedInline,
@@ -133,9 +141,13 @@ class StationAdmin(OrderedInlineModelAdminMixin, admin.ModelAdmin):
     search_fields = [
         "display_name",
     ]
+    advanced_filter_fields = [
+        "display_name",
+        "location",
+    ]
 
 
-class StationLineAdmin(admin.ModelAdmin):
+class StationLineAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
     list_display = [
         "__str__",
         "internal_representation",
@@ -152,7 +164,14 @@ class StationLineAdmin(admin.ModelAdmin):
         "internal_representation",
     ]
     list_editable = [
+        "override_internal_representation_constraint",
+    ]
+    advanced_filter_fields = [
+        "display_name",
         "internal_representation",
+        ("station__display_name", "Station display name"),
+        ("line__display_name", "Line display name"),
+        ("line__code", "Line code"),
         "override_internal_representation_constraint",
     ]
 

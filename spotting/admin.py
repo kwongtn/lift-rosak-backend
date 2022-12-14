@@ -1,3 +1,4 @@
+from advanced_filters.admin import AdminAdvancedFiltersMixin
 from django.contrib import admin
 
 from generic.views import GeometricForm
@@ -11,7 +12,7 @@ class LocationEventForm(GeometricForm):
     # GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
 
 
-class EventAdmin(admin.ModelAdmin):
+class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
     list_display = [
         "id",
         "reporter",
@@ -42,8 +43,19 @@ class EventAdmin(admin.ModelAdmin):
         "type",
     ]
 
+    advanced_filter_fields = [
+        "reporter",
+        "spotting_date",
+        "vehicle",
+        "status",
+        "type",
+        "origin_station",
+        "destination_station",
+        "is_anonymous",
+    ]
 
-class LocationEventAdmin(admin.ModelAdmin):
+
+class LocationEventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
     form = LocationEventForm
     list_display = [
         "id",
@@ -56,6 +68,14 @@ class LocationEventAdmin(admin.ModelAdmin):
     ]
     search_fields = [
         "location",
+    ]
+    advanced_filter_fields = [
+        "location",
+        "accuracy",
+        "altitude",
+        "altitude_accuracy",
+        "heading",
+        "speed",
     ]
 
 
