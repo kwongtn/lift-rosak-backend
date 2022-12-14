@@ -37,5 +37,5 @@ blocks:
     run:
       when: branch = 'main'
 promotions:
-  - name: Deploy
+  - name: Deploy to Prod
     pipeline_file: pipeline_2.yml

@@ -11,8 +11,6 @@ blocks:
         - name: Deploy
           commands:
             - chmod 0400 /home/semaphore/.ssh/azure-default.pem
-            - ssh -i /home/semaphore/.ssh/azure-default.pem azureuser@lift-rosak.ddns.net \
-            - '    docker-compose -f lift-rosak-backend/docker-compose.prod.yml pull && \'
-            - '    docker-compose -f lift-rosak-backend/docker-compose.prod.yml up -d'
+            - ssh -i /home/semaphore/.ssh/azure-default.pem azureuser@lift-rosak.ddns.net /home/azureuser/deploy_lift_rosak.sh
       secrets:
         - name: AzureSSH
