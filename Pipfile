@@ -20,6 +20,7 @@ django-storages = "*"
 dotmap = "*"
 firebase-admin = "*"
 gunicorn = "*"
+pendulum = "*"
 promise = "*"
 psycopg2-binary = "*"
 sentry-sdk = "*"
@@ -31,6 +32,7 @@ uvicorn = {extras = ["standard"], version = "*"}
 [dev-packages]
 black = "*"
 flake8 = "*"
+ipykernel = "*"
 mypi = "*"
 strawberry-graphql = {extras = ["debug-server", "cli"], version = "*"}
 
