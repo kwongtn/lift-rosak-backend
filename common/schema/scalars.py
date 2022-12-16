@@ -8,9 +8,9 @@ from strawberry_django_plus import gql
 
 from common import models
 from common.schema.types import UserSpottingTrend
-from common.utils import date_splitter
 from generic.schema.enums import DateGroupings
 from spotting import models as spotting_models
+from spotting.enums import SpottingEventType
 
 
 @gql.django.type(models.Media)
@@ -44,7 +44,8 @@ class UserScalar:
         info: Info,
         start: Optional[date] = gql.UNSET,
         end: Optional[date] = gql.UNSET,
-        group: Optional[DateGroupings] = gql.UNSET,
+        date_group: Optional[DateGroupings] = gql.UNSET,
+        type_group: Optional[bool] = False,
     ) -> List[UserSpottingTrend]:
         if start is gql.UNSET:
             start = date.today() - timedelta(days=30)
@@ -53,18 +54,21 @@ class UserScalar:
 
         group_strs = ["spotting_date"]
         range_type = "days"
-        if group == DateGroupings.YEAR:
+        if date_group == DateGroupings.YEAR:
             group_strs = ["spotting_date__year"]
             range_type = "years"
-        elif group == DateGroupings.MONTH:
+        elif date_group == DateGroupings.MONTH:
             group_strs = ["spotting_date__year", "spotting_date__month"]
             range_type = "months"
-        elif group == DateGroupings.DAY:
+        elif date_group == DateGroupings.DAY:
             group_strs = [
                 "spotting_date__year",
                 "spotting_date__month",
                 "spotting_date__day",
             ]
+
+        if type_group:
+            group_strs.append("type")
 
         results = list(
             spotting_models.Event.objects.filter(
@@ -81,52 +85,90 @@ class UserScalar:
         period = pendulum.period(start, end)
         range = period.range(range_type)
 
-        if group in [DateGroupings.DAY, gql.UNSET]:
-            result_days = [
-                date_splitter(result["spotting_date"], range_type) for result in results
-            ]
-            for elem in range:
-                if date_splitter(elem, range_type) not in result_days:
-                    results.append(
-                        {
-                            "spotting_date": date(elem.year, elem.month, elem.day),
-                            "count": 0,
-                        }
-                    )
-            results = sorted(results, key=lambda d: d["spotting_date"])
+        spotting_date__year = results[0].get("spotting_date__year", None)
+        spotting_date__month = results[0].get("spotting_date__month", None)
+        spotting_date__day = results[0].get("spotting_date__day", None)
 
-        elif group == DateGroupings.MONTH:
-            result_months = [
-                [result["spotting_date__year"], result["spotting_date__month"]]
+        if not type_group:
+            result_dates = [
+                (
+                    result.get("spotting_date__year", None),
+                    result.get("spotting_date__month", None),
+                    result.get("spotting_date__day", None),
+                )
                 for result in results
             ]
+
             for elem in range:
-                if [elem.year, elem.month] not in result_months:
+                year_val = elem.year if spotting_date__year is not None else None
+                month_val = elem.month if spotting_date__month is not None else None
+                day_val = elem.day if spotting_date__day is not None else None
+
+                if (year_val, month_val, day_val) not in result_dates:
                     results.append(
                         {
-                            "spotting_date__year": elem.year,
-                            "spotting_date__month": elem.month,
+                            "spotting_date__year": year_val,
+                            "spotting_date__month": month_val,
+                            "spotting_date__day": day_val,
                             "count": 0,
                         }
                     )
 
+        else:
+            result_types = [
+                (
+                    result.get("spotting_date__year", None),
+                    result.get("spotting_date__month", None),
+                    result.get("spotting_date__day", None),
+                    result["type"],
+                )
+                for result in results
+            ]
+            event_types = [event_type.value for event_type in SpottingEventType]
+
+            for elem in range:
+                year_val = elem.year if spotting_date__year is not None else None
+                month_val = elem.month if spotting_date__month is not None else None
+                day_val = elem.day if spotting_date__day is not None else None
+
+                for event_type in event_types:
+                    if (year_val, month_val, day_val, event_type) not in result_types:
+                        results.append(
+                            {
+                                "spotting_date__year": year_val,
+                                "spotting_date__month": month_val,
+                                "spotting_date__day": day_val,
+                                "type": event_type,
+                                "count": 0,
+                            }
+                        )
+
+        if date_group == DateGroupings.YEAR:
+            results = sorted(
+                results,
+                key=lambda d: f'{d["spotting_date__year"]}',
+            )
+        elif date_group == DateGroupings.MONTH:
             results = sorted(
                 results,
                 key=lambda d: f'{d["spotting_date__year"]}{d["spotting_date__month"]:02}',
             )
-
-        elif group == DateGroupings.YEAR:
-            result_years = [result["spotting_date__year"] for result in results]
-            for elem in range:
-                if elem.year not in result_years:
-                    results.append({"spotting_date__year": elem.year, "count": 0})
-
-            results = sorted(results, key=lambda d: d["spotting_date__year"])
+        elif date_group == DateGroupings.DAY:
+            results = sorted(
+                results,
+                key=lambda d: f'{d["spotting_date__year"]}{d["spotting_date__month"]:02}{d["spotting_date__day"]:02}',
+            )
+        else:
+            results = sorted(
+                results,
+                key=lambda d: f'{d["spotting_date"]}',
+            )
 
         return [
             UserSpottingTrend(
                 spotting_date=value.get("spotting_date", None),
                 count=value["count"],
+                event_type=value.get("type", None),
                 # Year
                 year=value["spotting_date"].year
                 if value.get("spotting_date", None) is not None

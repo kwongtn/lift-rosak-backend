@@ -10,4 +10,5 @@ class UserSpottingTrend:
     year: Optional[int]
     month: Optional[int]
     day: Optional[int]
+    event_type: Optional[str]
     count: int
