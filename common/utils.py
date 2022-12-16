@@ -1,4 +1,6 @@
 import dataclasses
+from datetime import date
+from typing import List
 
 from asgiref.sync import sync_to_async
 from django.http import HttpRequest
@@ -26,3 +28,14 @@ class FirebaseUser:
         )[0]
 
         return user
+
+
+def date_splitter(input_date: date, type: str = "days") -> List[int]:
+    return_list = []
+    if type in ["years", "months", "days"]:
+        return_list.append(input_date.year)
+        if type in ["months", "days"]:
+            return_list.append(input_date.month)
+            if type == "days":
+                return_list.append(input_date.day)
+    return return_list
