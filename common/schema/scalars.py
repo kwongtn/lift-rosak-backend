@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING, Annotated, List, Optional
 
 import pendulum
-from django.db.models import Count
+from django.db.models import Count, Min
 from strawberry.types import Info
 from strawberry_django_plus import gql
 
@@ -47,9 +47,22 @@ class UserScalar:
         end: Optional[date] = gql.UNSET,
         date_group: Optional[DateGroupings] = gql.UNSET,
         type_group: Optional[bool] = False,
+        free_range: Optional[bool] = False,
     ) -> List[UserSpottingTrend]:
         if start is gql.UNSET:
-            start = date.today() - timedelta(days=30)
+            today = date.today()
+            if date_group == DateGroupings.YEAR:
+                today.month = 1
+                today.day = 1
+                start = today - timedelta(days=18263)
+
+            elif date_group == DateGroupings.MONTH:
+                today.day = 1
+                start = date.today() - timedelta(days=1500)  # 50 months
+
+            else:
+                start = date.today() - timedelta(days=365)
+
         if end is gql.UNSET:
             end = date.today()
 
@@ -70,19 +83,31 @@ class UserScalar:
         if type_group:
             group_strs.append("type")
 
+        filter_params = {
+            "reporter_id": self.id,
+            "spotting_date__lte": end,
+            "spotting_date__gte": start,
+        }
+
+        if free_range:
+            filter_params.pop("spotting_date__lte", None)
+            filter_params.pop("spotting_date__gte", None)
+
+        qs = spotting_models.Event.objects.filter(**filter_params)
+
         results = list(
-            spotting_models.Event.objects.filter(
-                reporter_id=self.id,
-                spotting_date__lte=end,
-                spotting_date__gte=start,
-            )
-            .values(*group_strs)
+            qs.values(*group_strs)
             .annotate(count=Count("id"))
             .values(*group_strs, "count")
             .order_by(*[f"-{group_str}" for group_str in group_strs])
         )
 
-        period = pendulum.period(start, end)
+        period = pendulum.period(
+            qs.aggregate(min=Min("spotting_date"))["min"]
+            if start == gql.UNSET
+            else start,
+            date.today() if end == gql.UNSET else end,
+        )
         range = period.range(range_type)
 
         spotting_date__year = results[0].get("spotting_date__year", None)
