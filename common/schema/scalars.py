@@ -60,7 +60,7 @@ class UserScalar:
                 today.day = 1
                 start = date.today() - timedelta(days=1500)  # 50 months
 
-            else:
+            elif date_group == DateGroupings.DAY:
                 start = date.today() - timedelta(days=365)
 
         if end is gql.UNSET:
