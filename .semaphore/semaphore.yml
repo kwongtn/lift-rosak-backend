@@ -6,7 +6,7 @@ agent:
     os_image: ubuntu2004
 auto_cancel:
   running:
-    when: 'true'
+    when: "true"
 blocks:
   - name: Build & Push
     task:
@@ -14,17 +14,11 @@ blocks:
         - name: docker build
           commands:
             - checkout
-            - 'curl -sL https://sentry.io/get-cli/ | SENTRY_CLI_VERSION="2.2.0" bash'
-            - VERSION=$(sentry-cli releases propose-version)
-            - sentry-cli releases new "$VERSION"
-            - sentry-cli releases set-commits "$VERSION" --auto
-            - sentry-cli releases finalize "$VERSION"
             - echo $DOCKER_HUB_ACCESS_TOKEN | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
-            - 'docker build --tag=$DOCKERHUB_USERNAME/$IMAGE_NAME:latest --tag=$DOCKERHUB_USERNAME/$IMAGE_NAME:$(date +%Y%m%d-%H%M) .'
-            - 'docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:latest'
+            - "docker build --tag=$DOCKERHUB_USERNAME/$IMAGE_NAME:latest --tag=$DOCKERHUB_USERNAME/$IMAGE_NAME:$(date +%Y%m%d-%H%M) ."
+            - "docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:latest"
       secrets:
         - name: Rosak
-        - name: SentryAuth
       env_vars:
         - name: ENVIRONMENT
           value: prod

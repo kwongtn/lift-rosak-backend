@@ -10,7 +10,19 @@ blocks:
       jobs:
         - name: Deploy
           commands:
+            - checkout
+            - 'curl -sL https://sentry.io/get-cli/ | SENTRY_CLI_VERSION="2.2.0" bash'
+            - VERSION=$(sentry-cli releases propose-version)
+            - sentry-cli releases new "$VERSION"
+            - sentry-cli releases set-commits "$VERSION" --auto
+            - sentry-cli releases finalize "$VERSION"
             - chmod 0400 /home/semaphore/.ssh/azure-default.pem
             - ssh -i /home/semaphore/.ssh/azure-default.pem azureuser@lift-rosak.ddns.net /home/azureuser/deploy_lift_rosak.sh
       secrets:
         - name: AzureSSH
+        - name: SentryAuth
+      env_vars:
+        - name: SENTRY_ORG
+          value: kwongtn
+        - name: SENTRY_PROJECT
+          value: python-django
