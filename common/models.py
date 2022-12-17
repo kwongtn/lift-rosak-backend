@@ -16,5 +16,7 @@ class Media(TimeStampedModel, UUIDModel, SoftDeletableModel):
 class User(TimeStampedModel):
     firebase_id = models.TextField(unique=True)
 
+    badges = models.ManyToManyField(to="mlptf.Badge", through="mlptf.UserBadge")
+
     def __str__(self) -> str:
         return self.firebase_id[:8]

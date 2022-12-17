@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from common.models import Media, User
-from reporting.admin import ReportStackedInline, VoteTabularInline
+from mlptf.admin import UserBadgeStackedInline
 
 
 class MediaStackedInline(admin.StackedInline):
@@ -12,12 +12,12 @@ class MediaTabularInline(admin.TabularInline):
     model = Media
 
 
+class UserStackedInline(admin.StackedInline):
+    model = User
+
+
 class UserAdmin(admin.ModelAdmin):
-    inlines = [
-        VoteTabularInline,
-        ReportStackedInline,
-        MediaStackedInline,
-    ]
+    inlines = [UserBadgeStackedInline]
     list_display = [
         "__str__",
         "firebase_id",

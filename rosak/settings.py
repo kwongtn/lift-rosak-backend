@@ -110,6 +110,7 @@ INSTALLED_APPS = [
     "generic",
     "spotting",
     "incident",
+    "mlptf",
 ]
 
 MIDDLEWARE = [
