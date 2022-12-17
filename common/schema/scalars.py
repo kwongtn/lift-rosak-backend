@@ -8,6 +8,7 @@ from strawberry_django_plus import gql
 
 from common import models
 from common.schema.types import UserSpottingTrend
+from common.utils import get_date_key
 from generic.schema.enums import DateGroupings
 from spotting import models as spotting_models
 from spotting.enums import SpottingEventType
@@ -52,20 +53,19 @@ class UserScalar:
         if end is gql.UNSET:
             end = date.today()
 
-        group_strs = ["spotting_date"]
-        range_type = "days"
         if date_group == DateGroupings.YEAR:
             group_strs = ["spotting_date__year"]
             range_type = "years"
         elif date_group == DateGroupings.MONTH:
             group_strs = ["spotting_date__year", "spotting_date__month"]
             range_type = "months"
-        elif date_group == DateGroupings.DAY:
+        else:
             group_strs = [
                 "spotting_date__year",
                 "spotting_date__month",
                 "spotting_date__day",
             ]
+            range_type = "days"
 
         if type_group:
             group_strs.append("type")
@@ -143,44 +143,23 @@ class UserScalar:
                             }
                         )
 
-        if date_group == DateGroupings.YEAR:
-            results = sorted(
-                results,
-                key=lambda d: f'{d["spotting_date__year"]}',
+        for result in results:
+            result["date_key"] = get_date_key(
+                year=result["spotting_date__year"],
+                month=result.get("spotting_date__month", None),
+                day=result.get("spotting_date__day", None),
             )
-        elif date_group == DateGroupings.MONTH:
-            results = sorted(
-                results,
-                key=lambda d: f'{d["spotting_date__year"]}{d["spotting_date__month"]:02}',
-            )
-        elif date_group == DateGroupings.DAY:
-            results = sorted(
-                results,
-                key=lambda d: f'{d["spotting_date__year"]}{d["spotting_date__month"]:02}{d["spotting_date__day"]:02}',
-            )
-        else:
-            results = sorted(
-                results,
-                key=lambda d: f'{d["spotting_date"]}',
-            )
+
+        results = sorted(results, key=lambda d: f'{d["date_key"]}')
 
         return [
             UserSpottingTrend(
-                spotting_date=value.get("spotting_date", None),
+                date_key=value["date_key"],
                 count=value["count"],
                 event_type=value.get("type", None),
-                # Year
-                year=value["spotting_date"].year
-                if value.get("spotting_date", None) is not None
-                else value.get("spotting_date__year", None),
-                # Month
-                month=value["spotting_date"].month
-                if value.get("spotting_date", None) is not None
-                else value.get("spotting_date__month", None),
-                # Day
-                day=value["spotting_date"].day
-                if value.get("spotting_date", None) is not None
-                else value.get("spotting_date__day", None),
+                year=value.get("spotting_date__year", None),
+                month=value.get("spotting_date__month", None),
+                day=value.get("spotting_date__day", None),
             )
             for value in results
         ]

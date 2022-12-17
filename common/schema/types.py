@@ -1,4 +1,3 @@
-from datetime import date
 from typing import Optional
 
 import strawberry
@@ -6,8 +5,8 @@ import strawberry
 
 @strawberry.type
 class UserSpottingTrend:
-    spotting_date: Optional[date]
-    year: Optional[int]
+    date_key: str
+    year: int
     month: Optional[int]
     day: Optional[int]
     event_type: Optional[str]
