@@ -26,11 +26,11 @@
         },
         "asgiref": {
             "hashes": [
-                "sha256:1d2880b792ae8757289136f1db2b7b99100ce959b2aa57fd69dab783d05afac4",
-                "sha256:4a29362a6acebe09bf1d6640db38c1dc3d9217c68e6f9f6204d72667fc19a424"
+                "sha256:71e68008da809b957b7ee4b43dbccff33d1b23519fb8344e33f049897077afac",
+                "sha256:9567dfe7bd8d3c8c892227827c41cce860b368104c3431da67a0c5a65a949506"
             ],
             "markers": "python_version >= '3.7'",
-            "version": "==3.5.2"
+            "version": "==3.6.0"
         },
         "cachecontrol": {
             "hashes": [
@@ -994,11 +994,11 @@
         },
         "sentry-sdk": {
             "hashes": [
-                "sha256:3c9bc64025976842c1103cd75d45cff94a7c0cc48fa07770d07a09d2ab8dac30",
-                "sha256:dc0fe6ef2f77a3853b399c75c97d87be7666098817c1c314f8fcdf68a6865914"
+                "sha256:5bbe4b72de22f9ac1e67f2a4e6efe8fbd595bb59b7b223443f50fe5802a5551c",
+                "sha256:9f0b960694e2d8bb04db4ba6ac2a645040caef4e762c65937998ff06064f10d6"
             ],
             "index": "pypi",
-            "version": "==1.12.0"
+            "version": "==1.12.1"
         },
         "setuptools": {
             "hashes": [
@@ -1101,19 +1101,19 @@
         },
         "strawberry-django-plus": {
             "hashes": [
-                "sha256:a8e1f83f936d6d3960eae9a9e0cb16a8144f327f218a8794d55f8656ded7eedc",
-                "sha256:e37eab8718546886878943a050791169ae24c2bf3a376c0fdf79453c3e73d6d7"
+                "sha256:675255d461be2d94f417f92e84bf0c4f2d946b668216050c28d90fed2e5e3728",
+                "sha256:90881dee528d3cf56352c38fb33288c0e94dbf5bd63326eadb4d05bb80838224"
             ],
             "index": "pypi",
-            "version": "==1.32"
+            "version": "==1.32.1"
         },
         "strawberry-graphql": {
             "hashes": [
-                "sha256:9edfeb2e00517c86dd431a4dd08b4a23ae5d9ef8cf82891753caa03980d4fc5c",
-                "sha256:f637641dff8755694ef5534bdf92f206906c54a0d63ccb1516ece8506ee8b545"
+                "sha256:03b46a42c42a0f2baaef268315c0e030b2b73effac0bec3ec42edffe58c4e9c8",
+                "sha256:c054215fc2f3759540e69f5df092c7b03284cad657091b310196a39862a9b7b8"
             ],
             "index": "pypi",
-            "version": "==0.151.0"
+            "version": "==0.151.1"
         },
         "strawberry-graphql-django": {
             "hashes": [
@@ -1462,11 +1462,11 @@
         },
         "ipykernel": {
             "hashes": [
-                "sha256:1374a55c57ca7a7286c3d8b15799cd76e1a2381b6b1fea99c494b955988926b6",
-                "sha256:1ab68d3d3654196266baa93990055413e167263ffbe4cfe834f871bcd3d3506d"
+                "sha256:0ecdae0060da61c5222ad221681f3b99b5bef739e11a3b1eb5778aa47f056f1f",
+                "sha256:4140c282a6c71cdde59abe5eae2c71bf1eeb4a69316ab76e1c4c25150a49722b"
             ],
             "index": "pypi",
-            "version": "==6.19.2"
+            "version": "==6.19.4"
         },
         "ipython": {
             "hashes": [
@@ -1940,11 +1940,11 @@
         },
         "strawberry-graphql": {
             "hashes": [
-                "sha256:9edfeb2e00517c86dd431a4dd08b4a23ae5d9ef8cf82891753caa03980d4fc5c",
-                "sha256:f637641dff8755694ef5534bdf92f206906c54a0d63ccb1516ece8506ee8b545"
+                "sha256:03b46a42c42a0f2baaef268315c0e030b2b73effac0bec3ec42edffe58c4e9c8",
+                "sha256:c054215fc2f3759540e69f5df092c7b03284cad657091b310196a39862a9b7b8"
             ],
             "index": "pypi",
-            "version": "==0.151.0"
+            "version": "==0.151.1"
         },
         "tomli": {
             "hashes": [
@@ -1973,11 +1973,11 @@
         },
         "traitlets": {
             "hashes": [
-                "sha256:57ba2ba951632eeab9388fa45f342a5402060a5cc9f0bb942f760fafb6641581",
-                "sha256:fde8f62c05204ead43c2c1b9389cfc85befa7f54acb5da28529d671175bb4108"
+                "sha256:6cc57d6dc28c85d5365961726ffd19b538739347749e13ebe34e03323a0e8f84",
+                "sha256:c864831efa0ba6576d09b44884b34e41defc18c0d7e720b4a2d6698c842cab3e"
             ],
             "markers": "python_version >= '3.7'",
-            "version": "==5.7.1"
+            "version": "==5.8.0"
         },
         "typing-extensions": {
             "hashes": [
