@@ -2,12 +2,12 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING, Annotated, List, Optional
 
 import pendulum
-from django.db.models import Count, Min
+from django.db.models import Count, F, Min
 from strawberry.types import Info
 from strawberry_django_plus import gql
 
 from common import models
-from common.schema.types import UserSpottingTrend
+from common.schema.types import UserSpottingTrend, WithMostEntriesData
 from common.utils import get_date_key
 from generic.schema.enums import DateGroupings
 from spotting import models as spotting_models
@@ -26,6 +26,37 @@ class UserScalar:
         from spotting.schema.scalars import EventScalar
 
     firebase_id: str
+
+    @gql.django.field
+    def with_most_entries(self, type: DateGroupings) -> WithMostEntriesData:
+        groupings = {"year": F("created__year")}
+
+        if type in [DateGroupings.MONTH, DateGroupings.DAY]:
+            groupings["month"] = F("created__month")
+
+            if type == DateGroupings.DAY:
+                groupings["day"] = F("created__day")
+
+        max = (
+            spotting_models.Event.objects.filter(reporter_id=self.id)
+            .annotate(**groupings)
+            .values(*groupings.keys())
+            .annotate(count=Count("id"))
+            .order_by("-count")[0]
+        )
+
+        return WithMostEntriesData(
+            type=type,
+            date_key=get_date_key(
+                year=max["year"],
+                month=max.get("month", None),
+                day=max.get("day", None),
+            ),
+            year=max["year"],
+            month=max.get("month", None),
+            day=max.get("day", None),
+            count=max["count"],
+        )
 
     @gql.django.field
     async def spottings(
