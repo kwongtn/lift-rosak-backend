@@ -8,6 +8,7 @@ from strawberry_django_plus import gql
 from generic.schema.scalars import GeoPoint
 from operation import models
 from operation.enums import VehicleStatus
+from spotting import models as spotting_models
 
 
 @gql.django.type(models.Station)
@@ -62,6 +63,7 @@ class VehicleType:
     display_name: str
     info: str
 
+    @gql.django.field
     async def vehicles(self, info: Info) -> List["Vehicle"]:
         return await info.context.loaders["operation"][
             "vehicle_from_vehicle_type_loader"
@@ -134,6 +136,14 @@ class Vehicle:
         return await info.context.loaders["operation"][
             "last_spotting_date_from_vehicle_loader"
         ].load(self.id)
+
+    @gql.django.field
+    def last_spottings(
+        self, count: int = 1
+    ) -> List[Annotated["EventScalar", gql.lazy("spotting.schema.scalars")]]:
+        return spotting_models.Event.objects.filter(vehicle_id=self.id,).order_by(
+            "-spotting_date"
+        )[:count]
 
     @gql.field
     async def spottingCount(
