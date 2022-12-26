@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 from typing import TYPE_CHECKING, Annotated, List, Optional
 
 import pendulum
@@ -8,7 +8,12 @@ from strawberry_django_plus import gql
 
 from common import models
 from common.schema.types import UserSpottingTrend, WithMostEntriesData
-from common.utils import get_date_key
+from common.utils import (
+    get_date_key,
+    get_default_start_time,
+    get_group_strs,
+    get_result_comparison_tuple,
+)
 from generic.schema.enums import DateGroupings
 from spotting import models as spotting_models
 from spotting.enums import SpottingEventType
@@ -60,7 +65,7 @@ class UserScalar:
 
     @gql.django.field
     async def spottings(
-        self, info: Info, count: int = 1
+        self, info: Info
     ) -> List[Annotated["EventScalar", gql.lazy("spotting.schema.scalars")]]:
         return await info.context.loaders["common"]["spottings_from_user_loader"].load(
             self.id
@@ -73,43 +78,21 @@ class UserScalar:
     @gql.django.field
     def spotting_trends(
         self,
-        info: Info,
         start: Optional[date] = gql.UNSET,
         end: Optional[date] = gql.UNSET,
-        date_group: Optional[DateGroupings] = gql.UNSET,
+        date_group: Optional[DateGroupings] = DateGroupings.DAY,
         type_group: Optional[bool] = False,
         free_range: Optional[bool] = False,
     ) -> List[UserSpottingTrend]:
         if start is gql.UNSET:
-            today = date.today()
-            if date_group == DateGroupings.YEAR:
-                today.month = 1
-                today.day = 1
-                start = today - timedelta(days=18263)
-
-            elif date_group == DateGroupings.MONTH:
-                today.day = 1
-                start = date.today() - timedelta(days=1500)  # 50 months
-
-            elif date_group == DateGroupings.DAY:
-                start = date.today() - timedelta(days=365)
+            start = get_default_start_time(type=date_group)
 
         if end is gql.UNSET:
             end = date.today()
 
-        if date_group == DateGroupings.YEAR:
-            group_strs = ["spotting_date__year"]
-            range_type = "years"
-        elif date_group == DateGroupings.MONTH:
-            group_strs = ["spotting_date__year", "spotting_date__month"]
-            range_type = "months"
-        else:
-            group_strs = [
-                "spotting_date__year",
-                "spotting_date__month",
-                "spotting_date__day",
-            ]
-            range_type = "days"
+        (group_strs, range_type) = get_group_strs(
+            grouping=date_group, prefix="spotting_date__"
+        )
 
         if type_group:
             group_strs.append("type")
@@ -134,10 +117,8 @@ class UserScalar:
         )
 
         period = pendulum.period(
-            qs.aggregate(min=Min("spotting_date"))["min"]
-            if start == gql.UNSET
-            else start,
-            date.today() if end == gql.UNSET else end,
+            qs.aggregate(min=Min("spotting_date"))["min"] if free_range else start,
+            date.today() if free_range else end,
         )
         range = period.range(range_type)
 
@@ -146,14 +127,10 @@ class UserScalar:
         spotting_date__day = results[0].get("spotting_date__day", None)
 
         if not type_group:
-            result_dates = [
-                (
-                    result.get("spotting_date__year", None),
-                    result.get("spotting_date__month", None),
-                    result.get("spotting_date__day", None),
-                )
-                for result in results
-            ]
+            result_dates = get_result_comparison_tuple(
+                results=results,
+                prefix="spotting_date__",
+            )
 
             for elem in range:
                 year_val = elem.year if spotting_date__year is not None else None
@@ -171,15 +148,11 @@ class UserScalar:
                     )
 
         else:
-            result_types = [
-                (
-                    result.get("spotting_date__year", None),
-                    result.get("spotting_date__month", None),
-                    result.get("spotting_date__day", None),
-                    result["type"],
-                )
-                for result in results
-            ]
+            result_types = get_result_comparison_tuple(
+                results=results,
+                additional_params=["type"],
+                prefix="spotting_date__",
+            )
             event_types = [event_type.value for event_type in SpottingEventType]
 
             for elem in range:
