@@ -7,7 +7,11 @@ from strawberry.types import Info
 from strawberry_django_plus import gql
 
 from common import models
-from common.schema.types import UserSpottingTrend, WithMostEntriesData
+from common.schema.types import (
+    FavouriteVehicleData,
+    UserSpottingTrend,
+    WithMostEntriesData,
+)
 from common.utils import (
     get_date_key,
     get_default_start_time,
@@ -15,6 +19,7 @@ from common.utils import (
     get_result_comparison_tuple,
 )
 from generic.schema.enums import DateGroupings
+from operation import models as operation_models
 from spotting import models as spotting_models
 from spotting.enums import SpottingEventType
 
@@ -31,6 +36,29 @@ class UserScalar:
         from spotting.schema.scalars import EventScalar
 
     firebase_id: str
+
+    @gql.django.field
+    def favourite_vehicles(
+        self, count: Optional[int] = 1
+    ) -> List[FavouriteVehicleData]:
+        vehicle_count_dict = list(
+            spotting_models.Event.objects.filter(reporter_id=self.id)
+            .values("vehicle")
+            .annotate(Count("vehicle"))
+            .order_by("-vehicle__count")[0:count]
+        )
+
+        vehicles = operation_models.Vehicle.objects.filter(
+            id__in=[elem["vehicle"] for elem in vehicle_count_dict]
+        ).in_bulk()
+
+        return [
+            FavouriteVehicleData(
+                vehicle=vehicles[elem["vehicle"]],
+                count=elem["vehicle__count"],
+            )
+            for elem in vehicle_count_dict
+        ]
 
     @gql.django.field
     def with_most_entries(self, type: DateGroupings) -> WithMostEntriesData:

@@ -3,6 +3,7 @@ from typing import Optional
 import strawberry
 
 from generic.schema.enums import DateGroupings
+from operation.schema.scalars import Vehicle
 
 
 @strawberry.type
@@ -22,4 +23,10 @@ class WithMostEntriesData:
     year: int
     month: Optional[int]
     day: Optional[int]
+    count: int
+
+
+@strawberry.type
+class FavouriteVehicleData:
+    vehicle: Vehicle
     count: int
