@@ -39,6 +39,10 @@ class UserScalar:
     firebase_id: str = gql.django.field(permission_classes=[IsAdmin])
 
     @gql.django.field
+    def short_id(self) -> str:
+        return self.firebase_id[:8]
+
+    @gql.django.field
     def favourite_vehicles(
         self, count: Optional[int] = 1
     ) -> List[FavouriteVehicleData]:
