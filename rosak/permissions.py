@@ -3,6 +3,7 @@ import typing
 import requests
 from django.conf import settings
 from django.http import request as Request
+from firebase_admin import auth
 from strawberry.permission import BasePermission
 from strawberry.types import Info
 
@@ -43,5 +44,9 @@ class IsAdmin(BasePermission):
     message = "You don't have the appropriate permissions to perform this action."
 
     async def has_permission(self, source: typing.Any, info: Info, **kwargs) -> bool:
-        # TODO: Check permissions from firestore
-        return True
+        if info.context.user:
+            user = auth.get_user(info.context.user.firebase_id)
+            if user.custom_claims:
+                return user.custom_claims.get("admin", False)
+
+        return False

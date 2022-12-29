@@ -20,6 +20,7 @@ from common.utils import (
 )
 from generic.schema.enums import DateGroupings
 from operation import models as operation_models
+from rosak.permissions import IsAdmin
 from spotting import models as spotting_models
 from spotting.enums import SpottingEventType
 
@@ -35,7 +36,7 @@ class UserScalar:
     if TYPE_CHECKING:
         from spotting.schema.scalars import EventScalar
 
-    firebase_id: str
+    firebase_id: str = gql.django.field(permission_classes=[IsAdmin])
 
     @gql.django.field
     def favourite_vehicles(
