@@ -29,6 +29,7 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "status",
         "is_anonymous",
         "reporter",
+        "spotting_date",
     ]
     search_fields = [
         "vehicle__identification_no",
@@ -36,9 +37,9 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "vehicle__vehicle_type__display_name",
         "origin_station__display_name",
         "destination_station__display_name",
+        "spotting_date",
     ]
     list_editable = [
-        "spotting_date",
         "status",
         "type",
     ]
