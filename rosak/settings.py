@@ -186,8 +186,21 @@ DATABASES = {
         "PASSWORD": os.environ.get("DATABASE_PASSWORD", None),
         "PORT": os.environ.get("DATABASE_PORT", 5432),
         "TEST": {"SERIALIZE": False},
-    }
+    },
+    "timescale": {
+        "ENGINE": "django.contrib.gis.db.backends.postgis",
+        "HOST": os.environ.get("TIMESCALE_HOST", "localhost"),
+        "NAME": os.environ.get("TIMESCALE_NAME", "postgres"),
+        "USER": os.environ.get("TIMESCALE_USER", "postgres"),
+        "PASSWORD": os.environ.get("TIMESCALE_PASSWORD", None),
+        "PORT": os.environ.get("TIMESCALE_PORT", 5432),
+        "TEST": {"SERIALIZE": False},
+    },
 }
+
+DATABASE_ROUTERS = [
+    "rosak.routers.timescale.TimescaleRouter",
+]
 
 
 # Password validation
