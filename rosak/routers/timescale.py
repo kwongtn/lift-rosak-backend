@@ -4,7 +4,7 @@ class TimescaleRouter:
     auth and contenttypes applications.
     """
 
-    route_app_labels = {"timescale"}
+    route_app_labels = {"jejak"}
 
     def db_for_read(self, model, **hints):
         """

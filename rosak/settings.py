@@ -111,6 +111,7 @@ INSTALLED_APPS = [
     "spotting",
     "incident",
     "mlptf",
+    "jejak",
 ]
 
 MIDDLEWARE = [
