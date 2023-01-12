@@ -6,7 +6,20 @@ import pandas as pd
 from django.db.models import Q
 from psycopg2.extras import DateTimeTZRange
 
-from jejak.models import Bus, Provider, Trip, TripRange
+from jejak.models import (
+    Accessibility,
+    Bus,
+    BusStop,
+    Captain,
+    EngineStatus,
+    Provider,
+    Route,
+    Trip,
+    TripRange,
+    TripRev,
+)
+
+from .import_range_utils import identifier_detail_abstract_model_input
 
 INPUT_FILENAME = "./@utils/2022-05-28_dedup.json"
 
@@ -16,6 +29,33 @@ RANGE_TARGET = "trip_no"
 print("⏩ Reading data...")
 df = pd.read_json(INPUT_FILENAME, lines=True)
 
+
+identifier_detail_abstract_model_input(
+    model=Route, identifiers=list(df["route"].dropna().unique())
+)
+identifier_detail_abstract_model_input(
+    model=Bus, identifiers=list(df["bus_no"].unique())
+)
+identifier_detail_abstract_model_input(
+    model=Captain, identifiers=list(df["captain_id"].dropna().astype(int).unique())
+)
+identifier_detail_abstract_model_input(
+    model=TripRev, identifiers=list(df["trip_rev_kind"].dropna().astype(int).unique())
+)
+identifier_detail_abstract_model_input(
+    model=EngineStatus,
+    identifiers=list(df["engine_status"].dropna().astype(int).unique()),
+)
+identifier_detail_abstract_model_input(
+    model=Accessibility,
+    identifiers=list(df["accessibility"].dropna().astype(int).unique()),
+)
+identifier_detail_abstract_model_input(
+    model=Provider, identifiers=list(df["provider"].unique())
+)
+identifier_detail_abstract_model_input(
+    model=BusStop, identifiers=list(df["busstop_id"].dropna().astype(int).unique())
+)
 
 # Trip No
 
@@ -96,16 +136,7 @@ for (range_target, provider, bus_no) in ranges.keys():
 
 print("⏩ Inserting preliminary values...")
 
-Bus.objects.bulk_create(
-    [Bus(identifier=bus_no) for bus_no in bus_no_set],
-    ignore_conflicts=True,
-)
 buses = Bus.objects.filter(identifier__in=bus_no_set).in_bulk(field_name="identifier")
-
-Provider.objects.bulk_create(
-    [Provider(identifier=provider) for provider in provider_set],
-    ignore_conflicts=True,
-)
 providers = Provider.objects.filter(identifier__in=provider_set).in_bulk(
     field_name="identifier"
 )
