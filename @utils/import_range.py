@@ -64,24 +64,29 @@ for elem in dfs:
             }
         )
 
+
 # If this end_dt and next start_dt is less than 5 minutes,
 # group them together.
+def group_close_dt(range_group):
+    for index in range(0, len(range_group) - 1):
+        if datetime.fromisoformat(
+            range_group[index + 1]["start_dt"]
+        ) - datetime.fromisoformat(range_group[index]["end_dt"]) < timedelta(minutes=5):
+            range_group[index]["end_dt"] = range_group[index + 1]["end_dt"]
+            del range_group[index + 1]
+            return True
+
+    return False
+
+
 print("⏩ Regrouping values...")
 for key in ranges:
+    counter = 0
     if len(ranges[key]) > 1:
-        to_delete = []
-        for index in range(0, len(ranges[key]) - 1):
-            if datetime.fromisoformat(
-                ranges[key][index + 1]["start_dt"]
-            ) - datetime.fromisoformat(ranges[key][index]["end_dt"]) < timedelta(
-                minutes=5
-            ):
-                ranges[key][index]["end_dt"] = ranges[key][index + 1]["end_dt"]
-                to_delete.insert(0, index + 1)
-
-        if to_delete:
-            for index in to_delete:
-                del ranges[key][index]
+        while group_close_dt(ranges[key]):
+            counter += 1
+            # print(key, counter)
+            # print(ranges[key])
 
 # Prepare data for addition
 bus_no_set = set()
