@@ -1,5 +1,4 @@
 from collections import defaultdict
-from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -19,7 +18,10 @@ from jejak.models import (
     TripRev,
 )
 
-from .import_range_utils import identifier_detail_abstract_model_input
+from .import_range_utils import (
+    group_is_close_dt,
+    identifier_detail_abstract_model_input,
+)
 
 INPUT_FILENAME = "./@utils/2022-05-28_dedup.json"
 
@@ -77,20 +79,15 @@ grouped["group"] = df_groupings.ne(df_groupings.shift()).cumsum()
 
 # Separate data based on group
 print("⏩ Splitting data into dataframes...")
-dfs = []
-for name, data in grouped.groupby("group"):
-    dfs.append(data)
+dfs = [data for name, data in grouped.groupby("group")]
 
 # Generate start_dt and end_dt of each group
 print("⏩ Aggregrating values...")
 ranges = defaultdict(list)
 for elem in dfs:
     operation_dict = {
-        RANGE_TARGET: elem.loc[:, RANGE_TARGET].iloc[0],
+        key: elem.loc[:, key].iloc[0] for key in [RANGE_TARGET, *groupings.keys()]
     }
-
-    for key in groupings.keys():
-        operation_dict[key] = elem.loc[:, key].iloc[0]
 
     if operation_dict[RANGE_TARGET] is not None:
         ranges[tuple([operation_dict[key] for key in operation_dict.keys()])].append(
@@ -101,28 +98,11 @@ for elem in dfs:
         )
 
 
-# If this end_dt and next start_dt is less than 5 minutes,
-# group them together.
-def group_close_dt(range_group):
-    for index in range(0, len(range_group) - 1):
-        if datetime.fromisoformat(
-            range_group[index + 1]["start_dt"]
-        ) - datetime.fromisoformat(range_group[index]["end_dt"]) < timedelta(minutes=5):
-            range_group[index]["end_dt"] = range_group[index + 1]["end_dt"]
-            del range_group[index + 1]
-            return True
-
-    return False
-
-
 print("⏩ Regrouping values...")
 for key in ranges:
-    counter = 0
     if len(ranges[key]) > 1:
-        while group_close_dt(ranges[key]):
-            counter += 1
-            # print(key, counter)
-            # print(ranges[key])
+        while group_is_close_dt(ranges[key]):
+            pass
 
 # Prepare data for addition
 bus_no_set = set()
