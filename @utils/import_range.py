@@ -17,24 +17,23 @@ print("⏩ Reading data...")
 df = pd.read_json(INPUT_FILENAME, lines=True)
 
 
+# Trip No
+
+groupings = {
+    "provider": Provider,
+    "bus_no": Bus,
+}
+
 # Sort then assign groupings based on change of value
 print("⏩ Sorting values...")
-grouped = df.sort_values(["provider", "bus_no", DT_TARGET])
-grouped["group"] = (
-    (
-        grouped["provider"].astype(str)
-        + grouped["bus_no"].astype(str)
-        + grouped[RANGE_TARGET].astype(str)
-    )
-    .ne(
-        (
-            grouped["provider"].astype(str)
-            + grouped["bus_no"].astype(str)
-            + grouped[RANGE_TARGET].astype(str)
-        ).shift()
-    )
-    .cumsum()
-)
+grouped = df.sort_values([*groupings.keys(), DT_TARGET])
+
+df_groupings = grouped[RANGE_TARGET].astype(str)
+
+for key in groupings.keys():
+    df_groupings = grouped[key].astype(str) + df_groupings
+
+grouped["group"] = df_groupings.ne(df_groupings.shift()).cumsum()
 
 # Separate data based on group
 print("⏩ Splitting data into dataframes...")
@@ -47,17 +46,14 @@ print("⏩ Aggregrating values...")
 ranges = defaultdict(list)
 for elem in dfs:
     operation_dict = {
-        "provider": elem.loc[:, "provider"].iloc[0],
-        "bus_no": elem.loc[:, "bus_no"].iloc[0],
         RANGE_TARGET: elem.loc[:, RANGE_TARGET].iloc[0],
     }
 
+    for key in groupings.keys():
+        operation_dict[key] = elem.loc[:, key].iloc[0]
+
     if operation_dict[RANGE_TARGET] is not None:
-        ranges[
-            operation_dict["provider"],
-            operation_dict["bus_no"],
-            operation_dict[RANGE_TARGET],
-        ].append(
+        ranges[tuple([operation_dict[key] for key in operation_dict.keys()])].append(
             {
                 "start_dt": elem.aggregate(np.min)[DT_TARGET],
                 "end_dt": elem.aggregate(np.max)[DT_TARGET],
@@ -93,7 +89,7 @@ bus_no_set = set()
 range_target_set = set()
 provider_set = set()
 
-for (provider, bus_no, range_target) in ranges.keys():
+for (range_target, provider, bus_no) in ranges.keys():
     provider_set.add(provider)
     bus_no_set.add(bus_no)
     range_target_set.add((provider, bus_no, range_target))
