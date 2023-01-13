@@ -4,8 +4,9 @@ from typing import List
 
 import numpy as np
 from pandas import DataFrame
+from psycopg2.extras import DateTimeTZRange
 
-from jejak.models import IdentifierDetailAbstractModel
+from jejak.models import IdentifierDetailAbstractModel, RangeAbstractModel
 
 
 def identifier_detail_abstract_model_input(
@@ -54,3 +55,67 @@ def aggregate_start_end_dt(
                     "end_dt": elem.aggregate(np.max)[dt_target],
                 }
             )
+
+    return ranges
+
+
+# As a best practice, left should be the model that has more values
+def single_fk_range_import(
+    df: DataFrame,
+    range_model: RangeAbstractModel,
+    left_model: IdentifierDetailAbstractModel,
+    right_model: IdentifierDetailAbstractModel,
+    left_key: str,
+    right_key: str,
+    dt_target: str = "dt_gps",
+):
+    # Sort then assign groupings based on change of value
+    print(f"⏩ [{left_key}, {right_key}] Sorting values...")
+    grouped = df.sort_values([left_key, dt_target])
+
+    df_groupings = grouped[left_key].astype(str) + grouped[right_key].astype(str)
+    grouped["group"] = df_groupings.ne(df_groupings.shift()).cumsum()
+
+    print(f"⏩ [{left_key}, {right_key}] Splitting data into dataframes...")
+    dfs = [data for name, data in grouped.groupby("group")]
+
+    ranges = aggregate_start_end_dt(
+        dfs=dfs,
+        target_key=left_key,
+        grouping_keys=[right_key],
+    )
+
+    print(f"⏩ [{left_key}, {right_key}] Regrouping values...")
+    for key in ranges:
+        if len(ranges[key]) > 1:
+            while group_is_close_dt(ranges[key]):
+                pass
+
+    left_obj_dict: dict = left_model.objects.filter(
+        identifier__in=df[left_key].unique()
+    ).in_bulk(field_name="identifier")
+
+    right_obj_dict: dict = right_model.objects.filter(
+        identifier__in=df[right_key].unique()
+    ).in_bulk(field_name="identifier")
+
+    print(f"⏩ [{left_key}, {right_key}] Inserting ranges...")
+    to_create = []
+    for key in ranges:
+        for elem in ranges[key]:
+            to_create.append(
+                range_model(
+                    **{
+                        left_key + "_id": left_obj_dict[key[0]].id,
+                        right_key + "_id": right_obj_dict[key[1]].id,
+                    },
+                    dt_range=DateTimeTZRange(
+                        lower=elem["start_dt"],
+                        upper=elem["end_dt"],
+                        bounds="[]",
+                    ),
+                )
+            )
+
+    range_model.objects.bulk_create(to_create, ignore_conflicts=True)
+    print(f"⏩ [{left_key}, {right_key}] Done.")

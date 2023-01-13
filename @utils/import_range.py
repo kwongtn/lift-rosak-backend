@@ -7,6 +7,7 @@ from psycopg2.extras import DateTimeTZRange
 from jejak.models import (
     Accessibility,
     Bus,
+    BusProviderRange,
     BusStop,
     Captain,
     EngineStatus,
@@ -21,6 +22,7 @@ from .import_range_utils import (
     aggregate_start_end_dt,
     group_is_close_dt,
     identifier_detail_abstract_model_input,
+    single_fk_range_import,
 )
 
 INPUT_FILENAME = "./@utils/2022-05-28_dedup.json"
@@ -78,6 +80,14 @@ identifier_detail_abstract_model_input(
     identifiers=list(df["busstop_id"].dropna().unique()),
 )
 
+single_fk_range_import(
+    df=df,
+    range_model=BusProviderRange,
+    left_model=Bus,
+    right_model=Provider,
+    left_key="bus",
+    right_key="provider",
+)
 
 # Trip No
 
@@ -126,7 +136,7 @@ for (range_target, provider, bus) in ranges.keys():
     provider_set.add(provider)
     bus_set.add(bus)
 
-print("⏩ Inserting preliminary values...")
+print("⏩ Obtaining preliminary values...")
 
 buses = Bus.objects.filter(identifier__in=bus_set).in_bulk(field_name="identifier")
 providers = Provider.objects.filter(identifier__in=provider_set).in_bulk(
