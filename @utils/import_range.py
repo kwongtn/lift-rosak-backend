@@ -46,14 +46,20 @@ df = pd.read_json(
 
 
 identifier_detail_abstract_model_input(
-    model=Route, identifiers=list(df["route"].dropna().unique())
-)
-identifier_detail_abstract_model_input(model=Bus, identifiers=list(df["bus"].unique()))
-identifier_detail_abstract_model_input(
-    model=Captain, identifiers=list(df["captain_id"].dropna().unique())
+    model=Route,
+    identifiers=list(df["route"].dropna().unique()),
 )
 identifier_detail_abstract_model_input(
-    model=TripRev, identifiers=list(df["trip_rev_kind"].dropna().unique())
+    model=Bus,
+    identifiers=list(df["bus"].unique()),
+)
+identifier_detail_abstract_model_input(
+    model=Captain,
+    identifiers=list(df["captain_id"].dropna().unique()),
+)
+identifier_detail_abstract_model_input(
+    model=TripRev,
+    identifiers=list(df["trip_rev_kind"].dropna().unique()),
 )
 identifier_detail_abstract_model_input(
     model=EngineStatus,
@@ -64,11 +70,14 @@ identifier_detail_abstract_model_input(
     identifiers=list(df["accessibility"].dropna().unique()),
 )
 identifier_detail_abstract_model_input(
-    model=Provider, identifiers=list(df["provider"].unique())
+    model=Provider,
+    identifiers=list(df["provider"].unique()),
 )
 identifier_detail_abstract_model_input(
-    model=BusStop, identifiers=list(df["busstop_id"].dropna().unique())
+    model=BusStop,
+    identifiers=list(df["busstop_id"].dropna().unique()),
 )
+
 
 # Trip No
 
