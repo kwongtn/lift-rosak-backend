@@ -4,10 +4,7 @@ from jejak.models.abstracts import IdentifierDetailAbstractModel, RangeAbstractM
 
 
 class Captain(IdentifierDetailAbstractModel):
-    providers = models.ManyToManyField(
-        to="jejak.Provider",
-        through="jejak.CaptainProviderRange",
-    )
+    pass
 
 
 class CaptainProviderRange(RangeAbstractModel):

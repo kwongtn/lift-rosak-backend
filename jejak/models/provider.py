@@ -11,4 +11,11 @@ class Provider(IdentifierDetailAbstractModel):
 
 
 class BusProviderRange(RangeAbstractModel):
-    pass
+    bus = models.ForeignKey(
+        to="jejak.Bus",
+        on_delete=models.PROTECT,
+    )
+    provider = models.ForeignKey(
+        to="jejak.Provider",
+        on_delete=models.PROTECT,
+    )
