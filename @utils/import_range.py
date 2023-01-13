@@ -1,3 +1,5 @@
+from typing import Union
+
 import pandas as pd
 from django.db.models import Q
 from psycopg2.extras import DateTimeTZRange
@@ -27,41 +29,52 @@ DT_TARGET = "dt_gps"
 RANGE_TARGET = "trip_no"
 
 print("⏩ Reading data...")
-df = pd.read_json(INPUT_FILENAME, lines=True)
+str_none_type = Union[str, None]
+df = pd.read_json(
+    INPUT_FILENAME,
+    lines=True,
+    dtype={
+        "route": str_none_type,
+        "bus_no": str_none_type,
+        "captain_id": str_none_type,
+        "trip_rev_kind": str_none_type,
+        "engine_status": str_none_type,
+        "accessibility": str_none_type,
+        "busstop_id": str_none_type,
+    },
+).rename(columns={"bus_no": "bus"})
 
 
 identifier_detail_abstract_model_input(
     model=Route, identifiers=list(df["route"].dropna().unique())
 )
+identifier_detail_abstract_model_input(model=Bus, identifiers=list(df["bus"].unique()))
 identifier_detail_abstract_model_input(
-    model=Bus, identifiers=list(df["bus_no"].unique())
+    model=Captain, identifiers=list(df["captain_id"].dropna().unique())
 )
 identifier_detail_abstract_model_input(
-    model=Captain, identifiers=list(df["captain_id"].dropna().astype(int).unique())
-)
-identifier_detail_abstract_model_input(
-    model=TripRev, identifiers=list(df["trip_rev_kind"].dropna().astype(int).unique())
+    model=TripRev, identifiers=list(df["trip_rev_kind"].dropna().unique())
 )
 identifier_detail_abstract_model_input(
     model=EngineStatus,
-    identifiers=list(df["engine_status"].dropna().astype(int).unique()),
+    identifiers=list(df["engine_status"].dropna().unique()),
 )
 identifier_detail_abstract_model_input(
     model=Accessibility,
-    identifiers=list(df["accessibility"].dropna().astype(int).unique()),
+    identifiers=list(df["accessibility"].dropna().unique()),
 )
 identifier_detail_abstract_model_input(
     model=Provider, identifiers=list(df["provider"].unique())
 )
 identifier_detail_abstract_model_input(
-    model=BusStop, identifiers=list(df["busstop_id"].dropna().astype(int).unique())
+    model=BusStop, identifiers=list(df["busstop_id"].dropna().unique())
 )
 
 # Trip No
 
 groupings = {
     "provider": Provider,
-    "bus_no": Bus,
+    "bus": Bus,
 }
 
 # Sort then assign groupings based on change of value
@@ -95,18 +108,18 @@ for key in ranges:
             pass
 
 # Prepare data for addition
-bus_no_set = set()
+bus_set = set()
 range_target_set = set()
 provider_set = set()
 
-for (range_target, provider, bus_no) in ranges.keys():
+for (range_target, provider, bus) in ranges.keys():
+    range_target_set.add((range_target, provider, bus))
     provider_set.add(provider)
-    bus_no_set.add(bus_no)
-    range_target_set.add((provider, bus_no, range_target))
+    bus_set.add(bus)
 
 print("⏩ Inserting preliminary values...")
 
-buses = Bus.objects.filter(identifier__in=bus_no_set).in_bulk(field_name="identifier")
+buses = Bus.objects.filter(identifier__in=bus_set).in_bulk(field_name="identifier")
 providers = Provider.objects.filter(identifier__in=provider_set).in_bulk(
     field_name="identifier"
 )
@@ -115,24 +128,24 @@ Trip.objects.bulk_create(
     [
         Trip(
             identifier=range_target,
-            bus_id=buses[bus_no].id,
+            bus_id=buses[bus].id,
             provider_id=providers[provider].id,
         )
-        for (provider, bus_no, range_target) in range_target_set
+        for (range_target, provider, bus) in range_target_set
     ],
     ignore_conflicts=True,
 )
 
 criteria = Q()
 # It is guaranteed that range_target_set is not empty
-for (provider, bus_no, range_target) in range_target_set:
+for (range_target, provider, bus) in range_target_set:
     criteria |= Q(
         provider_id=providers[provider].id,
-        bus_id=buses[bus_no].id,
+        bus_id=buses[bus].id,
         identifier=range_target,
     )
 
-trips = Trip.objects.filter(criteria).select_related("provider", "bus")
+trips = Trip.objects.filter(criteria).select_related(*groupings.keys())
 trips_dict = {}
 for trip in trips:
     trips_dict[trip.provider.identifier, trip.bus.identifier, trip.identifier] = trip
