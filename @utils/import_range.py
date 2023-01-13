@@ -1,6 +1,3 @@
-from collections import defaultdict
-
-import numpy as np
 import pandas as pd
 from django.db.models import Q
 from psycopg2.extras import DateTimeTZRange
@@ -19,6 +16,7 @@ from jejak.models import (
 )
 
 from .import_range_utils import (
+    aggregate_start_end_dt,
     group_is_close_dt,
     identifier_detail_abstract_model_input,
 )
@@ -83,19 +81,11 @@ dfs = [data for name, data in grouped.groupby("group")]
 
 # Generate start_dt and end_dt of each group
 print("⏩ Aggregrating values...")
-ranges = defaultdict(list)
-for elem in dfs:
-    operation_dict = {
-        key: elem.loc[:, key].iloc[0] for key in [RANGE_TARGET, *groupings.keys()]
-    }
-
-    if operation_dict[RANGE_TARGET] is not None:
-        ranges[tuple([operation_dict[key] for key in operation_dict.keys()])].append(
-            {
-                "start_dt": elem.aggregate(np.min)[DT_TARGET],
-                "end_dt": elem.aggregate(np.max)[DT_TARGET],
-            }
-        )
+ranges = aggregate_start_end_dt(
+    dfs=dfs,
+    target_key=DT_TARGET,
+    grouping_keys=groupings.keys(),
+)
 
 
 print("⏩ Regrouping values...")
