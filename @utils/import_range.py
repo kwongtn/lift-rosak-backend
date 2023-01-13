@@ -96,7 +96,7 @@ dfs = [data for name, data in grouped.groupby("group")]
 print("⏩ Aggregrating values...")
 ranges = aggregate_start_end_dt(
     dfs=dfs,
-    target_key=DT_TARGET,
+    target_key=RANGE_TARGET,
     grouping_keys=groupings.keys(),
 )
 
