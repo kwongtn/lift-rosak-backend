@@ -60,7 +60,18 @@ class TripRevBusRange(RangeAbstractModel):
 
 
 class Route(IdentifierDetailAbstractModel):
-    pass
+    provider = models.ForeignKey(
+        to="jejak.Provider",
+        on_delete=models.PROTECT,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["identifier", "provider"],
+                name="%(app_label)s_%(class)s_unique_identifier_per_provider",
+            ),
+        ]
 
 
 class RouteBusRange(RangeAbstractModel):

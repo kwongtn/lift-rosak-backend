@@ -192,6 +192,13 @@ class Migration(migrations.Migration):
                 ),
                 ("identifier", models.CharField(max_length=64, unique=True)),
                 ("details", models.TextField(blank=True, default="")),
+                (
+                    "provider",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        to="jejak.provider",
+                    ),
+                ),
             ],
             options={
                 "abstract": False,
@@ -562,6 +569,13 @@ class Migration(migrations.Migration):
             options={
                 "abstract": False,
             },
+        ),
+        migrations.AddConstraint(
+            model_name="route",
+            constraint=models.UniqueConstraint(
+                fields=("identifier", "provider"),
+                name="jejak_route_unique_identifier_per_provider",
+            ),
         ),
         migrations.AddConstraint(
             model_name="trip",
