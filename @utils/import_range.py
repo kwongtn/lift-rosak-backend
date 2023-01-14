@@ -2,7 +2,7 @@ import pandas as pd
 from django.db.models import Q
 from psycopg2.extras import DateTimeTZRange
 
-from jejak.models import (
+from jejak.models import (  # Route,; RouteBusRange,
     Accessibility,
     Bus,
     BusProviderRange,
@@ -10,7 +10,6 @@ from jejak.models import (
     Captain,
     EngineStatus,
     Provider,
-    Route,
     Trip,
     TripRange,
     TripRev,
@@ -53,39 +52,21 @@ df = pd.read_json(
     }
 )
 
-
-identifier_detail_abstract_model_input(
-    model=Route,
-    identifiers=list(df["route"].dropna().unique()),
-)
-identifier_detail_abstract_model_input(
-    model=Bus,
-    identifiers=list(df["bus"].unique()),
-)
-identifier_detail_abstract_model_input(
-    model=Captain,
-    identifiers=list(df["captain_id"].dropna().unique()),
-)
-identifier_detail_abstract_model_input(
-    model=TripRev,
-    identifiers=list(df["trip_rev_kind"].dropna().unique()),
-)
-identifier_detail_abstract_model_input(
-    model=EngineStatus,
-    identifiers=list(df["engine_status"].dropna().unique()),
-)
-identifier_detail_abstract_model_input(
-    model=Accessibility,
-    identifiers=list(df["accessibility"].dropna().unique()),
-)
-identifier_detail_abstract_model_input(
-    model=Provider,
-    identifiers=list(df["provider"].unique()),
-)
-identifier_detail_abstract_model_input(
-    model=BusStop,
-    identifiers=list(df["busstop_id"].dropna().unique()),
-)
+for (model, identifier) in [
+    # (Route, "route"),
+    (Bus, "bus"),
+    (Captain, "captain"),
+    (TripRev, "trip_rev"),
+    (EngineStatus, "engine_status"),
+    (Accessibility, "accessibility"),
+    (Provider, "provider"),
+    (BusStop, "bus_stop"),
+]:
+    print(f"⏩ Importing data for {model.__name__}...")
+    identifier_detail_abstract_model_input(
+        model=model,
+        identifiers=list(df[identifier].dropna().unique()),
+    )
 
 single_fk_range_import(
     df=df,
