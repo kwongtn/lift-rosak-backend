@@ -1,5 +1,3 @@
-from typing import Union
-
 import pandas as pd
 from django.db.models import Q
 from psycopg2.extras import DateTimeTZRange
@@ -31,20 +29,29 @@ DT_TARGET = "dt_gps"
 RANGE_TARGET = "trip_no"
 
 print("⏩ Reading data...")
-str_none_type = Union[str, None]
 df = pd.read_json(
     INPUT_FILENAME,
     lines=True,
     dtype={
-        "route": str_none_type,
-        "bus_no": str_none_type,
-        "captain_id": str_none_type,
-        "trip_rev_kind": str_none_type,
-        "engine_status": str_none_type,
-        "accessibility": str_none_type,
-        "busstop_id": str_none_type,
+        "latitude": "Float64",
+        "longitude": "Float64",
+        "dir": "Float32",
+        "speed": "Float32",
+        "angle": "Float32",
+        "captain_id": "Int32",
+        "trip_rev_kind": "Int32",
+        "engine_status": "Int32",
+        "accessibility": "Int32",
+        "busstop_id": "Int32",
     },
-).rename(columns={"bus_no": "bus"})
+).rename(
+    columns={
+        "bus_no": "bus",
+        "trip_rev_kind": "trip_rev",
+        "busstop_id": "bus_stop",
+        "captain_id": "captain",
+    }
+)
 
 
 identifier_detail_abstract_model_input(
