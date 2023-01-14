@@ -71,7 +71,7 @@ def single_fk_range_import(
 ):
     # Sort then assign groupings based on change of value
     print(f"⏩ [{left_key}, {right_key}] Sorting values...")
-    grouped = df.sort_values([left_key, dt_target])
+    grouped = df.sort_values([left_key, dt_target]).dropna(subset=[left_key, right_key])
 
     df_groupings = grouped[left_key].astype(str) + grouped[right_key].astype(str)
     grouped["group"] = df_groupings.ne(df_groupings.shift()).cumsum()
@@ -92,11 +92,11 @@ def single_fk_range_import(
                 pass
 
     left_obj_dict: dict = left_model.objects.filter(
-        identifier__in=df[left_key].unique()
+        identifier__in=df[left_key].dropna().unique()
     ).in_bulk(field_name="identifier")
 
     right_obj_dict: dict = right_model.objects.filter(
-        identifier__in=df[right_key].unique()
+        identifier__in=df[right_key].dropna().unique()
     ).in_bulk(field_name="identifier")
 
     print(f"⏩ [{left_key}, {right_key}] Inserting ranges...")
@@ -106,8 +106,8 @@ def single_fk_range_import(
             to_create.append(
                 range_model(
                     **{
-                        left_key + "_id": left_obj_dict[key[0]].id,
-                        right_key + "_id": right_obj_dict[key[1]].id,
+                        left_key + "_id": left_obj_dict[str(key[0])].id,
+                        right_key + "_id": right_obj_dict[str(key[1])].id,
                     },
                     dt_range=DateTimeTZRange(
                         lower=elem["start_dt"],
