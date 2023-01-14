@@ -24,7 +24,6 @@ from jejak.models import (  # Route,; RouteBusRange,
 from .import_range_utils import (
     aggregate_start_end_dt,
     group_is_close_dt,
-    identifier_detail_abstract_model_input,
     single_fk_range_import,
 )
 
@@ -69,9 +68,10 @@ for (model, identifier) in [
     (BusStop, "bus_stop"),
 ]:
     print(f"⏩ Importing data for {model.__name__}...")
-    identifier_detail_abstract_model_input(
-        model=model,
-        identifiers=list(df[identifier].dropna().unique()),
+    identifiers = list(df[identifier].dropna().unique())
+    model.objects.bulk_create(
+        [model(identifier=identifier) for identifier in identifiers],
+        ignore_conflicts=True,
     )
 
 for (range_model, left_model, right_model, left_key, right_key) in [

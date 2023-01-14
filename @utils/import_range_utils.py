@@ -9,15 +9,6 @@ from psycopg2.extras import DateTimeTZRange
 from jejak.models import IdentifierDetailAbstractModel, RangeAbstractModel
 
 
-def identifier_detail_abstract_model_input(
-    model: IdentifierDetailAbstractModel, identifiers: List[str]
-):
-    return model.objects.bulk_create(
-        [model(identifier=identifier) for identifier in identifiers],
-        ignore_conflicts=True,
-    )
-
-
 # If this end_dt and next start_dt is less than minutes,
 # group them together and return
 def group_is_close_dt(range_group, minutes=5):
