@@ -60,6 +60,7 @@ def aggregate_start_end_dt(
 
 
 # As a best practice, left should be the model that has more values
+# We assume that all values have been created
 def single_fk_range_import(
     df: DataFrame,
     range_model: RangeAbstractModel,
@@ -119,3 +120,72 @@ def single_fk_range_import(
 
     range_model.objects.bulk_create(to_create, ignore_conflicts=True)
     print(f"⏩ [{left_key}, {right_key}] Done.")
+
+
+# We assume that objects that require other objects to be created
+# first are already created
+def multi_fk_row_import(
+    df: DataFrame,
+    groupings,
+    range_target: str,
+    target_model: IdentifierDetailAbstractModel,
+    dt_target: str = "dt_received",
+):
+    # Sort then assign groupings based on change of value
+    print("⏩ Sorting values...")
+    grouped = df.sort_values([*groupings.keys(), dt_target])
+
+    df_groupings = grouped[range_target].astype(str)
+
+    for key in groupings.keys():
+        df_groupings = grouped[key].astype(str) + df_groupings
+
+    grouped["group"] = df_groupings.ne(df_groupings.shift()).cumsum()
+
+    # Separate data based on group
+    print("⏩ Splitting data into dataframes...")
+    dfs = [data for name, data in grouped.groupby("group")]
+
+    # Generate start_dt and end_dt of each group
+    print("⏩ Aggregrating values...")
+    ranges = aggregate_start_end_dt(
+        dfs=dfs,
+        target_key=range_target,
+        grouping_keys=groupings.keys(),
+    )
+
+    print("⏩ Regrouping values...")
+    for key in ranges:
+        if len(ranges[key]) > 1:
+            while group_is_close_dt(ranges[key]):
+                pass
+
+    print("⏩ Obtaining preliminary values...")
+
+    dicts = {
+        key: model.objects.filter(
+            identifier__in=df[key].dropna().unique(),
+        ).in_bulk(field_name="identifier")
+        for (key, model) in groupings.items()
+    }
+
+    to_bulk_create_dict = []
+    for key in ranges.keys():
+        # First key is always identifier
+        data_dict = {"identifier": key[0]}
+
+        counter = 1
+        for fk_key in dicts.keys():
+            data_dict[fk_key + "_id"] = dicts[fk_key][key[counter]].id
+            counter += 1
+
+        to_bulk_create_dict.append(data_dict)
+
+    target_model.objects.bulk_create(
+        [target_model(**elem_dict) for elem_dict in to_bulk_create_dict],
+        ignore_conflicts=True,
+    )
+
+    return {
+        "ranges": ranges,
+    }
