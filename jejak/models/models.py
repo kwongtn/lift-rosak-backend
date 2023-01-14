@@ -1,10 +1,9 @@
 from django.contrib.gis.db import models
 
-from jejak.models.abstracts import RangeAbstractModel
+from jejak.models.abstracts import IdentifierDetailAbstractModel, RangeAbstractModel
 
 
-class Trip(models.Model):
-    identifier = models.CharField(max_length=64, unique=True, null=False)
+class Trip(IdentifierDetailAbstractModel):
     bus = models.ForeignKey(
         to="jejak.Bus",
         on_delete=models.PROTECT,
@@ -41,3 +40,11 @@ class Location(models.Model):
         to="jejak.Bus",
         on_delete=models.PROTECT,
     )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["dt_received", "bus"],
+                name="%(app_label)s_%(class)s_unique_received_time_bus",
+            ),
+        ]
