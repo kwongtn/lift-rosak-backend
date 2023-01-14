@@ -4,15 +4,21 @@ from psycopg2.extras import DateTimeTZRange
 
 from jejak.models import (  # Route,; RouteBusRange,
     Accessibility,
+    AccessibilityBusRange,
     Bus,
     BusProviderRange,
     BusStop,
+    BusStopBusRange,
     Captain,
+    CaptainBusRange,
+    CaptainProviderRange,
     EngineStatus,
+    EngineStatusBusRange,
     Provider,
     Trip,
     TripRange,
     TripRev,
+    TripRevBusRange,
 )
 
 from .import_range_utils import (
@@ -68,14 +74,25 @@ for (model, identifier) in [
         identifiers=list(df[identifier].dropna().unique()),
     )
 
-single_fk_range_import(
-    df=df,
-    range_model=BusProviderRange,
-    left_model=Bus,
-    right_model=Provider,
-    left_key="bus",
-    right_key="provider",
-)
+for (range_model, left_model, right_model, left_key, right_key) in [
+    (BusProviderRange, Bus, Provider, "bus", "provider"),
+    (AccessibilityBusRange, Bus, Accessibility, "bus", "accessibility"),
+    (EngineStatusBusRange, Bus, EngineStatus, "bus", "engine_status"),
+    (TripRevBusRange, Bus, TripRev, "bus", "trip_rev"),
+    # (RouteBusRange, Bus, Route, "bus", "route"),
+    (BusStopBusRange, Bus, BusStop, "bus", "bus_stop"),
+    (CaptainProviderRange, Captain, Provider, "captain", "provider"),
+    (CaptainBusRange, Captain, Bus, "captain", "bus"),
+]:
+    print(f"⏩ Importing ranges for [{left_key}, {right_key}]...")
+    single_fk_range_import(
+        df=df,
+        range_model=range_model,
+        left_model=left_model,
+        right_model=right_model,
+        left_key=left_key,
+        right_key=right_key,
+    )
 
 # Trip No
 
