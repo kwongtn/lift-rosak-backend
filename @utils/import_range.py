@@ -15,6 +15,7 @@ from jejak.models import (  # Route,; RouteBusRange,
     EngineStatus,
     EngineStatusBusRange,
     Provider,
+    Route,
     Trip,
     TripRange,
     TripRev,
@@ -24,6 +25,7 @@ from jejak.models import (  # Route,; RouteBusRange,
 from .import_range_utils import (
     aggregate_start_end_dt,
     group_is_close_dt,
+    multi_fk_row_import,
     single_fk_range_import,
 )
 
@@ -51,6 +53,7 @@ df = pd.read_json(
 ).rename(
     columns={
         "bus_no": "bus",
+        "trip_no": "trip",
         "trip_rev_kind": "trip_rev",
         "busstop_id": "bus_stop",
         "captain_id": "captain",
@@ -95,6 +98,25 @@ for (range_model, left_model, right_model, left_key, right_key) in [
     )
 
 # Trip No
+
+multi_fk_row_import(
+    df=df,
+    groupings={
+        "provider": Provider,
+        "bus": Bus,
+    },
+    target_str="trip",
+    target_model=Trip,
+)
+multi_fk_row_import(
+    df=df,
+    groupings={
+        "provider": Provider,
+    },
+    target_str="route",
+    target_model=Route,
+)
+
 
 groupings = {
     "provider": Provider,

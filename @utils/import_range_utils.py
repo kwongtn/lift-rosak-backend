@@ -117,66 +117,34 @@ def single_fk_range_import(
 # first are already created
 def multi_fk_row_import(
     df: DataFrame,
-    groupings,
-    range_target: str,
+    groupings: dict,
+    target_str: str,
     target_model: IdentifierDetailAbstractModel,
-    dt_target: str = "dt_received",
 ):
-    # Sort then assign groupings based on change of value
-    print("⏩ Sorting values...")
-    grouped = df.sort_values([*groupings.keys(), dt_target])
+    print(f"⏩ [{str(groupings.keys())} -> {target_str}] Aggregrating values...")
+    df2 = df[[target_str, *groupings.keys()]].dropna().drop_duplicates()
 
-    df_groupings = grouped[range_target].astype(str)
-
-    for key in groupings.keys():
-        df_groupings = grouped[key].astype(str) + df_groupings
-
-    grouped["group"] = df_groupings.ne(df_groupings.shift()).cumsum()
-
-    # Separate data based on group
-    print("⏩ Splitting data into dataframes...")
-    dfs = [data for name, data in grouped.groupby("group")]
-
-    # Generate start_dt and end_dt of each group
-    print("⏩ Aggregrating values...")
-    ranges = aggregate_start_end_dt(
-        dfs=dfs,
-        target_key=range_target,
-        grouping_keys=groupings.keys(),
-    )
-
-    print("⏩ Regrouping values...")
-    for key in ranges:
-        if len(ranges[key]) > 1:
-            while group_is_close_dt(ranges[key]):
-                pass
-
-    print("⏩ Obtaining preliminary values...")
-
+    print(f"⏩ [{str(groupings.keys())} -> {target_str}] Obtaining existing values...")
     dicts = {
         key: model.objects.filter(
-            identifier__in=df[key].dropna().unique(),
+            identifier__in=df2[key].dropna().unique(),
         ).in_bulk(field_name="identifier")
         for (key, model) in groupings.items()
     }
 
+    print(
+        f"⏩ [{str(groupings.keys())} -> {target_str}] Iterating & inserting values..."
+    )
     to_bulk_create_dict = []
-    for key in ranges.keys():
-        # First key is always identifier
-        data_dict = {"identifier": key[0]}
+    for index, row in df2.iterrows():
+        data_dict = {"identifier": row[target_str]}
 
-        counter = 1
-        for fk_key in dicts.keys():
-            data_dict[fk_key + "_id"] = dicts[fk_key][key[counter]].id
-            counter += 1
+        for key in groupings.keys():
+            data_dict[key + "_id"] = dicts[key].get(row[key]).id
 
         to_bulk_create_dict.append(data_dict)
 
-    target_model.objects.bulk_create(
+    return target_model.objects.bulk_create(
         [target_model(**elem_dict) for elem_dict in to_bulk_create_dict],
         ignore_conflicts=True,
     )
-
-    return {
-        "ranges": ranges,
-    }
