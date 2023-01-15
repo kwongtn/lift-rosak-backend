@@ -27,17 +27,17 @@ def group_is_close_dt(range_group, minutes=5):
 
 def aggregate_start_end_dt(
     dfs: List[DataFrame],
-    target_key: str,
+    target_keys: List[str],
     grouping_keys: List[str],
     dt_target: str = "dt_gps",
 ):
     ranges = defaultdict(list)
     for elem in dfs:
         operation_dict = {
-            key: elem.loc[:, key].iloc[0] for key in [target_key, *grouping_keys]
+            key: elem.loc[:, key].iloc[0] for key in [*target_keys, *grouping_keys]
         }
 
-        if operation_dict[target_key] is not None:
+        if None not in [operation_dict[target_key] for target_key in target_keys]:
             ranges[
                 tuple([operation_dict[key] for key in operation_dict.keys()])
             ].append(
@@ -73,7 +73,7 @@ def single_fk_range_import(
 
     ranges = aggregate_start_end_dt(
         dfs=dfs,
-        target_key=left_key,
+        target_keys=[left_key],
         grouping_keys=[right_key],
     )
 
