@@ -60,41 +60,34 @@ df = pd.read_json(
     }
 )
 
-for (model, identifier) in [
-    # (Route, "route"),
-    (Bus, "bus"),
-    (Captain, "captain"),
-    (TripRev, "trip_rev"),
-    (EngineStatus, "engine_status"),
-    (Accessibility, "accessibility"),
-    (Provider, "provider"),
-    (BusStop, "bus_stop"),
-]:
-    print(f"⏩ Importing data for {model.__name__}...")
-    identifiers = list(df[identifier].dropna().unique())
+for model in [Bus, Captain, TripRev, EngineStatus, Accessibility, Provider, BusStop]:
+    print(f"⏩ Importing data for {model.__name__.lower()}...")
+    model_name = model.__name__.lower()
+    identifiers = list(df[model_name].dropna().unique())
+
     model.objects.bulk_create(
         [model(identifier=identifier) for identifier in identifiers],
         ignore_conflicts=True,
     )
 
-for (range_model, left_model, right_model, left_key, right_key) in [
-    (BusProviderRange, Bus, Provider, "bus", "provider"),
-    (AccessibilityBusRange, Bus, Accessibility, "bus", "accessibility"),
-    (EngineStatusBusRange, Bus, EngineStatus, "bus", "engine_status"),
-    (TripRevBusRange, Bus, TripRev, "bus", "trip_rev"),
-    # (RouteBusRange, Bus, Route, "bus", "route"),
-    (BusStopBusRange, Bus, BusStop, "bus", "bus_stop"),
-    (CaptainProviderRange, Captain, Provider, "captain", "provider"),
-    (CaptainBusRange, Captain, Bus, "captain", "bus"),
+for (range_model, left_model, right_model) in [
+    (BusProviderRange, Bus, Provider),
+    (AccessibilityBusRange, Bus, Accessibility),
+    (EngineStatusBusRange, Bus, EngineStatus),
+    (TripRevBusRange, Bus, TripRev),
+    # (RouteBusRange, Bus, Route),
+    (BusStopBusRange, Bus, BusStop),
+    (CaptainProviderRange, Captain, Provider),
+    (CaptainBusRange, Captain, Bus),
 ]:
-    print(f"⏩ Importing ranges for [{left_key}, {right_key}]...")
+    print(
+        f"⏩ Importing ranges for [{left_model.__name__.lower()}, {right_model.__name__.lower()}]..."
+    )
     single_fk_range_import(
         df=df,
         range_model=range_model,
         left_model=left_model,
         right_model=right_model,
-        left_key=left_key,
-        right_key=right_key,
     )
 
 # Trip No

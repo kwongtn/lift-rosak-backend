@@ -57,10 +57,11 @@ def single_fk_range_import(
     range_model: RangeAbstractModel,
     left_model: IdentifierDetailAbstractModel,
     right_model: IdentifierDetailAbstractModel,
-    left_key: str,
-    right_key: str,
-    dt_target: str = "dt_gps",
+    dt_target: str = "dt_received",
 ):
+    left_key = left_model.__name__.lower()
+    right_key = right_model.__name__.lower()
+
     # Sort then assign groupings based on change of value
     print(f"⏩ [{left_key}, {right_key}] Sorting values...")
     grouped = df.sort_values([left_key, dt_target]).dropna(subset=[left_key, right_key])
