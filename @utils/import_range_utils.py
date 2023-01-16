@@ -1,8 +1,9 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import List
+from typing import Dict, List
 
 import numpy as np
+from django.db.models import Model
 from pandas import DataFrame
 from psycopg2.extras import DateTimeTZRange
 
@@ -142,14 +143,16 @@ def single_fk_range_import(
 # first are already created
 def multi_fk_row_import(
     df: DataFrame,
-    groupings: dict,
+    groupings: Dict[str, Model],
     target_str: str,
     target_model: IdentifierDetailAbstractModel,
 ):
-    print(f"⏩ [{str(groupings.keys())} -> {target_str}] Aggregrating values...")
+    debug_prefix = f"[{str(groupings.keys())} -> {target_str}]"
+
+    print(f"⏩ {debug_prefix} Aggregrating values...")
     df2 = df[[target_str, *groupings.keys()]].dropna().drop_duplicates()
 
-    print(f"⏩ [{str(groupings.keys())} -> {target_str}] Obtaining existing values...")
+    print(f"⏩ {debug_prefix} Obtaining existing values...")
     dicts = {
         key: model.objects.filter(
             identifier__in=df2[key].dropna().unique(),
@@ -157,9 +160,7 @@ def multi_fk_row_import(
         for (key, model) in groupings.items()
     }
 
-    print(
-        f"⏩ [{str(groupings.keys())} -> {target_str}] Iterating & inserting values..."
-    )
+    print(f"⏩ {debug_prefix} Iterating & inserting values...")
     to_bulk_create_dict = []
     for index, row in df2.iterrows():
         data_dict = {"identifier": row[target_str]}
