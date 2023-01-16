@@ -50,6 +50,22 @@ def aggregate_start_end_dt(
     return ranges
 
 
+def sort_split_dataframes(
+    df: DataFrame,
+    sort_on: List[str],
+    split_on: List[str],
+):
+    grouped = df.sort_values(sort_on)
+
+    df_groupings = grouped[split_on[0]].astype(str)
+    for i in range(1, len(split_on)):
+        df_groupings = grouped[split_on[i]].astype(str) + df_groupings
+
+    grouped["group"] = df_groupings.ne(df_groupings.shift()).cumsum()
+
+    return [data for name, data in grouped.groupby("group")]
+
+
 # As a best practice, left should be the model that has more values
 # We assume that all values have been created
 def single_fk_range_import(
@@ -63,17 +79,13 @@ def single_fk_range_import(
     right_key = right_model.__name__.lower()
 
     # Sort then assign groupings based on change of value
-    print(f"⏩ [{left_key}, {right_key}] Sorting values...")
-    grouped = df.sort_values([left_key, dt_target]).dropna(subset=[left_key, right_key])
-
-    df_groupings = grouped[left_key].astype(str) + grouped[right_key].astype(str)
-    grouped["group"] = df_groupings.ne(df_groupings.shift()).cumsum()
-
-    print(f"⏩ [{left_key}, {right_key}] Splitting data into dataframes...")
-    dfs = [data for name, data in grouped.groupby("group")]
-
+    print(f"⏩ [{left_key}, {right_key}] Sorting & splitting data into dataframes...")
     ranges = aggregate_start_end_dt(
-        dfs=dfs,
+        dfs=sort_split_dataframes(
+            df=df,
+            sort_on=[left_key, dt_target],
+            split_on=[left_key, right_key],
+        ),
         target_keys=[left_key],
         grouping_keys=[right_key],
     )
