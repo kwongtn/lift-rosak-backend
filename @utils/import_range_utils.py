@@ -63,6 +63,15 @@ def sort_split_dataframes(
     return [data for name, data in grouped.groupby("group")]
 
 
+def get_field_name(df_col_name: str) -> str:
+    name_dict = {
+        "triprev": "trip_rev",
+        "busstop": "bus_stop",
+        "enginestatus": "engine_status",
+    }
+    return name_dict.get(df_col_name, df_col_name)
+
+
 # As a best practice, left should be the model that has more values
 # We assume that all values have been created
 def single_fk_range_import(
@@ -102,14 +111,19 @@ def single_fk_range_import(
 
     print(f"⏩ [{left_key}, {right_key}] Inserting ranges...")
     to_create = []
-    for key in ranges:
-        for elem in ranges[key]:
+    for (key, range_item) in ranges.items():
+        if "<NA>" in [str(i) for i in key]:
+            continue
+
+        key_data = {
+            get_field_name(left_key) + "_id": left_obj_dict[str(key[0])].id,
+            get_field_name(right_key) + "_id": right_obj_dict[str(key[1])].id,
+        }
+
+        for elem in range_item:
             to_create.append(
                 range_model(
-                    **{
-                        left_key + "_id": left_obj_dict[str(key[0])].id,
-                        right_key + "_id": right_obj_dict[str(key[1])].id,
-                    },
+                    **key_data,
                     dt_range=DateTimeTZRange(
                         lower=elem["start_dt"],
                         upper=elem["end_dt"],
@@ -118,8 +132,10 @@ def single_fk_range_import(
                 )
             )
 
-    range_model.objects.bulk_create(to_create, ignore_conflicts=True)
+    return_val = range_model.objects.bulk_create(to_create, ignore_conflicts=True)
     print(f"⏩ [{left_key}, {right_key}] Done.")
+
+    return return_val
 
 
 # We assume that objects that require other objects to be created
