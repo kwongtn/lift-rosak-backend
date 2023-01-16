@@ -87,16 +87,22 @@ def single_fk_range_import(
 
     # Sort then assign groupings based on change of value
     print(f"⏩ [{left_key}, {right_key}] Sorting & splitting data into dataframes...")
+    dfs = sort_split_dataframes(
+        df=df,
+        sort_on=[left_key, dt_target],
+        split_on=[left_key, right_key],
+    )
+
+    print(
+        f"⏩ [{left_key}, {right_key}] {len(dfs)} dataframes created, aggregrating values..."
+    )
+
     ranges = aggregate_start_end_dt(
-        dfs=sort_split_dataframes(
-            df=df,
-            sort_on=[left_key, dt_target],
-            split_on=[left_key, right_key],
-        ),
+        dfs=dfs,
         grouping_keys=[left_key, right_key],
     )
 
-    print(f"⏩ [{left_key}, {right_key}] Regrouping values...")
+    print(f"⏩ [{left_key}, {right_key}] Grouping close values...")
     for key in ranges:
         if len(ranges[key]) > 1:
             while group_is_close_dt(ranges[key]):
