@@ -2,7 +2,7 @@ import pandas as pd
 from django.db.models import Q
 from psycopg2.extras import DateTimeTZRange
 
-from jejak.models import (  # Route,; RouteBusRange,
+from jejak.models import (
     Accessibility,
     AccessibilityBusRange,
     Bus,
@@ -75,7 +75,7 @@ for (range_model, left_model, right_model) in [
     (AccessibilityBusRange, Bus, Accessibility),
     (EngineStatusBusRange, Bus, EngineStatus),
     (TripRevBusRange, Bus, TripRev),
-    # (RouteBusRange, Bus, Route),
+    # (BusRouteRange, Bus, Route),
     (BusStopBusRange, Bus, BusStop),
     (CaptainProviderRange, Captain, Provider),
     (CaptainBusRange, Captain, Bus),

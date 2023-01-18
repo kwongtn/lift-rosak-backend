@@ -316,7 +316,7 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.CreateModel(
-            name="RouteBusRange",
+            name="BusRouteRange",
             fields=[
                 (
                     "id",

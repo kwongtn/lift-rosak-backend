@@ -74,7 +74,7 @@ class Route(IdentifierDetailAbstractModel):
         ]
 
 
-class RouteBusRange(RangeAbstractModel):
+class BusRouteRange(RangeAbstractModel):
     route = models.ForeignKey(
         "jejak.Route",
         on_delete=models.PROTECT,
