@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List
 
 import numpy as np
-from django.db.models import Model
+from django.db.models import Model, Q
 from pandas import DataFrame
 from psycopg2.extras import DateTimeTZRange
 
@@ -180,3 +180,91 @@ def multi_fk_row_import(
         [target_model(**elem_dict) for elem_dict in to_bulk_create_dict],
         ignore_conflicts=True,
     )
+
+
+def single_side_multi_fk_range_import(
+    df: DataFrame,
+    range_model: RangeAbstractModel,
+    groupings: Dict[str, Model],
+    side_model: Model,
+    dt_target: str = "dt_received",
+):
+    side_model_key = side_model.__name__.lower()
+    debug_prefix = f"[{str(groupings.keys())} -> {side_model_key}]"
+
+    # Aggregate data based on dt grouping
+    print(f"⏩ {debug_prefix} Sorting & aggregrating values...")
+    dfs = sort_split_dataframes(
+        df=df,
+        sort_on=[*groupings.keys(), dt_target],
+        split_on=[*groupings.keys(), side_model_key],
+    )
+
+    print(f"⏩ {debug_prefix} {len(dfs)} dataframes created, aggregrating values...")
+
+    ranges = aggregate_start_end_dt(
+        dfs=dfs,
+        grouping_keys=[side_model_key, *groupings.keys()],
+    )
+
+    print(f"⏩ {debug_prefix} Grouping close values...")
+    for key in ranges:
+        if len(ranges[key]) > 1:
+            while group_is_close_dt(ranges[key]):
+                pass
+
+    dicts = {
+        key: model.objects.filter(
+            identifier__in=df[key].dropna().unique(),
+        ).in_bulk(field_name="identifier")
+        for (key, model) in groupings.items()
+    }
+
+    print(f"⏩ {debug_prefix} Generating & requesting comparison dict...")
+    criteria = Q()
+    for key in ranges.keys():
+        # First key is always identifier
+        query_dict = {"identifier": key[0]}
+
+        counter = 1
+        for group in groupings.keys():
+            query_dict[group + "_id"] = dicts[group][key[counter]].id
+            counter += 1
+
+        criteria |= Q(**query_dict)
+
+    # Assert criteria is not empty, else it will select everything
+    assert len(criteria) > 0
+
+    instances = side_model.objects.filter(criteria).select_related(*groupings.keys())
+
+    instances_dict = {}
+    for instance in instances:
+        instances_dict[
+            tuple(
+                [
+                    instance.identifier,
+                    *[
+                        getattr(instance, fk_key).identifier
+                        for fk_key in groupings.keys()
+                    ],
+                ]
+            )
+        ] = instance
+
+    print("⏩ Inserting values...")
+    to_create = []
+    for key in ranges:
+        for elem in ranges[key]:
+            to_create.append(
+                range_model(
+                    dt_range=DateTimeTZRange(
+                        lower=elem["start_dt"],
+                        upper=elem["end_dt"],
+                        bounds="[]",
+                    ),
+                    **{side_model_key + "_id": instances_dict[key].id},
+                )
+            )
+
+    range_model.objects.bulk_create(to_create, ignore_conflicts=True)
