@@ -30,8 +30,7 @@ from .import_range_utils import (
 
 INPUT_FILENAME = "./@utils/2022-05-28_dedup.json"
 
-DT_TARGET = "dt_gps"
-RANGE_TARGET = "trip_no"
+DT_TARGET = "dt_received"
 
 print("⏩ Reading data...")
 df = pd.read_json(
@@ -53,9 +52,10 @@ df = pd.read_json(
     columns={
         "bus_no": "bus",
         "trip_no": "trip",
-        "trip_rev_kind": "trip_rev",
-        "busstop_id": "bus_stop",
+        "trip_rev_kind": "triprev",
+        "busstop_id": "busstop",
         "captain_id": "captain",
+        "engine_status": "enginestatus",
     }
 )
 
@@ -87,8 +87,6 @@ for (range_model, left_model, right_model) in [
         left_model=left_model,
         right_model=right_model,
     )
-
-# Trip No
 
 multi_fk_row_import(
     df=df,

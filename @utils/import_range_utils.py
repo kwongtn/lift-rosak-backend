@@ -36,9 +36,7 @@ def aggregate_start_end_dt(
         operation_dict = {key: df.loc[:, key].iloc[0] for key in grouping_keys}
 
         if None not in operation_dict.values():
-            ranges[
-                tuple([operation_dict[key] for key in operation_dict.keys()])
-            ].append(
+            ranges[tuple(operation_dict.values())].append(
                 {
                     "start_dt": df.aggregate(np.min)[dt_target],
                     "end_dt": df.aggregate(np.max)[dt_target],
@@ -153,6 +151,8 @@ def multi_fk_row_import(
     target_str: str,
     target_model: IdentifierDetailAbstractModel,
 ):
+    target_str = target_model.__name__.lower()
+
     debug_prefix = f"[{str(groupings.keys())} -> {target_str}]"
 
     print(f"⏩ {debug_prefix} Aggregrating values...")
