@@ -5,6 +5,7 @@ from jejak.models import (
     AccessibilityBusRange,
     Bus,
     BusProviderRange,
+    BusRouteRange,
     BusStop,
     BusStopBusRange,
     Captain,
@@ -21,6 +22,7 @@ from jejak.models import (
 )
 
 from .import_range_utils import (
+    multi_fk_range_import,
     multi_fk_row_import,
     single_fk_range_import,
     single_side_multi_fk_range_import,
@@ -72,7 +74,6 @@ for (range_model, left_model, right_model) in [
     (AccessibilityBusRange, Bus, Accessibility),
     (EngineStatusBusRange, Bus, EngineStatus),
     (TripRevBusRange, Bus, TripRev),
-    # (BusRouteRange, Bus, Route),
     (BusStopBusRange, Bus, BusStop),
     (CaptainProviderRange, Captain, Provider),
     (CaptainBusRange, Captain, Bus),
@@ -116,4 +117,13 @@ single_side_multi_fk_range_import(
         "provider": Provider,
         "bus": Bus,
     },
+)
+
+multi_fk_range_import(
+    df=df,
+    range_model=BusRouteRange,
+    left_model=Bus,
+    right_model=Route,
+    left_groupings=[],
+    right_groupings=[Provider],
 )

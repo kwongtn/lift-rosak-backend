@@ -268,3 +268,141 @@ def single_side_multi_fk_range_import(
             )
 
     range_model.objects.bulk_create(to_create, ignore_conflicts=True)
+
+
+def multi_fk_range_import(
+    df: DataFrame,
+    range_model: RangeAbstractModel,
+    left_model: Model,
+    right_model: Model,
+    left_groupings: List[Model],
+    right_groupings: List[Model],
+    dt_target: str = "dt_received",
+):
+    left_groupings_keys = [model.__name__.lower() for model in left_groupings]
+    right_groupings_keys = [model.__name__.lower() for model in right_groupings]
+    grouping_keys_set = set([*left_groupings_keys, *right_groupings_keys])
+
+    left_model_key = left_model.__name__.lower()
+    right_model_key = right_model.__name__.lower()
+
+    debug_prefix = (
+        f"[{''.join(left_groupings_keys)} -> {''.join(right_groupings_keys)}]"
+    )
+
+    # Aggregate data based on dt grouping
+    print(f"⏩ {debug_prefix} Sorting & aggregrating values...")
+    dfs = sort_split_dataframes(
+        df=df,
+        sort_on=[*grouping_keys_set, left_model_key, dt_target],
+        split_on=[*grouping_keys_set, left_model_key, right_model_key],
+    )
+
+    print(f"⏩ {debug_prefix} {len(dfs)} dataframes created, aggregrating values...")
+
+    ranges = aggregate_start_end_dt(
+        dfs=dfs,
+        grouping_keys=[left_model_key, right_model_key, *grouping_keys_set],
+    )
+
+    print(f"⏩ {debug_prefix} Grouping close values...")
+    for key in ranges:
+        if len(ranges[key]) > 1:
+            while group_is_close_dt(ranges[key]):
+                pass
+
+    dicts = {
+        model.__name__.lower(): model.objects.filter(
+            identifier__in=df[model.__name__.lower()].dropna().unique(),
+        ).in_bulk(field_name="identifier")
+        for model in set([*left_groupings, *right_groupings])
+    }
+
+    print(f"⏩ {debug_prefix} Generating & requesting comparison dict...")
+
+    def get_criteria(start_num: int, grouping_keys: List[str]):
+        criteria = Q()
+        for key in ranges.keys():
+            # First key is always identifier
+            query_dict = {"identifier": key[start_num]}
+
+            counter = start_num + 1
+            for group in grouping_keys:
+                query_dict[group + "_id"] = dicts[group][key[counter]].id
+                counter += 1
+
+            criteria |= Q(**query_dict)
+
+        return criteria
+
+    left_criteria = get_criteria(0, left_groupings_keys)
+    right_criteria = get_criteria(1 + len(left_groupings), right_groupings_keys)
+
+    # Assert criteria is not empty, else it will select everything
+    assert len(left_criteria) > 0
+    assert len(right_criteria) > 0
+
+    left_instances = left_model.objects.filter(left_criteria).select_related(
+        *left_groupings_keys
+    )
+    right_instances = right_model.objects.filter(right_criteria).select_related(
+        *right_groupings_keys
+    )
+
+    def get_instances_dict(instances, groupings_keys):
+        instances_dict = {}
+        for instance in instances:
+            instances_dict[
+                tuple(
+                    [
+                        instance.identifier,
+                        *[
+                            getattr(instance, grouping_key).identifier
+                            for grouping_key in groupings_keys
+                        ],
+                    ]
+                )
+            ] = instance
+
+        return instances_dict
+
+    left_instances_dict = get_instances_dict(
+        instances=left_instances,
+        groupings_keys=left_groupings_keys,
+    )
+    right_instances_dict = get_instances_dict(
+        instances=right_instances,
+        groupings_keys=right_groupings_keys,
+    )
+
+    print("⏩ Inserting values...")
+    to_create = []
+    for key in ranges:
+        for elem in ranges[key]:
+            to_create.append(
+                range_model(
+                    dt_range=DateTimeTZRange(
+                        lower=elem["start_dt"],
+                        upper=elem["end_dt"],
+                        bounds="[]",
+                    ),
+                    **{
+                        left_model_key
+                        + "_id": left_instances_dict[
+                            key[0 : 1 + len(left_groupings_keys)]
+                        ].id,
+                        right_model_key
+                        + "_id": right_instances_dict[
+                            key[
+                                1
+                                + len(left_groupings_keys) : 1
+                                + len(left_groupings_keys)
+                                + 1
+                                + len(right_groupings_keys)
+                            ]
+                        ].id,
+                    },
+                )
+            )
+
+    range_model.objects.bulk_create(to_create, ignore_conflicts=True)
