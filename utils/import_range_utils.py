@@ -36,10 +36,14 @@ def aggregate_start_end_dt(
         operation_dict = {key: df.loc[:, key].iloc[0] for key in grouping_keys}
 
         if None not in operation_dict.values():
+            start_dt = np.min(df[dt_target])
+            end_dt = np.max(df[dt_target])
+
+            # print(dt_target, start_dt, end_dt)
             ranges[tuple(operation_dict.values())].append(
                 {
-                    "start_dt": df.aggregate(np.min)[dt_target],
-                    "end_dt": df.aggregate(np.max)[dt_target],
+                    "start_dt": start_dt,
+                    "end_dt": end_dt,
                 }
             )
 
@@ -182,7 +186,7 @@ def multi_fk_row_import(
     )
 
 
-def single_side_multi_fk_range_import(
+async def single_side_multi_fk_range_import(
     df: DataFrame,
     range_model: RangeAbstractModel,
     groupings: Dict[str, Model],
@@ -220,9 +224,9 @@ def single_side_multi_fk_range_import(
         for (key, model) in groupings.items()
     }
 
-    print(f"⏩ {debug_prefix} Generating & requesting comparison dict...")
+    print(f"⏩ {debug_prefix} Generating query...")
     criteria = Q()
-    for key in ranges.keys():
+    for key in set(ranges.keys()):
         # First key is always identifier
         query_dict = {"identifier": key[0]}
 
@@ -236,10 +240,15 @@ def single_side_multi_fk_range_import(
     # Assert criteria is not empty, else it will select everything
     assert len(criteria) > 0
 
+    print(f"⏩ {debug_prefix} Requesting from db...")
     instances = side_model.objects.filter(criteria).select_related(*groupings.keys())
 
+    print(f"⏩ {debug_prefix} Generating dict over {len(instances)} values...")
     instances_dict = {}
     for instance in instances:
+        # if counter % 100 == 0:
+        print(".", end="")
+
         instances_dict[
             tuple(
                 [
@@ -250,7 +259,7 @@ def single_side_multi_fk_range_import(
                     ],
                 ]
             )
-        ] = instance
+        ] = instance.id
 
     print("⏩ Inserting values...")
     to_create = []
@@ -263,7 +272,7 @@ def single_side_multi_fk_range_import(
                         upper=elem["end_dt"],
                         bounds="[]",
                     ),
-                    **{side_model_key + "_id": instances_dict[key].id},
+                    **{side_model_key + "_id": instances_dict[key]},
                 )
             )
 
@@ -366,10 +375,12 @@ def multi_fk_range_import(
 
         return instances_dict
 
+    print(f"⏩ {debug_prefix} Requesting left instances...")
     left_instances_dict = get_instances_dict(
         instances=left_instances,
         groupings_keys=left_groupings_keys,
     )
+    print(f"⏩ {debug_prefix} Requesting right instances...")
     right_instances_dict = get_instances_dict(
         instances=right_instances,
         groupings_keys=right_groupings_keys,
