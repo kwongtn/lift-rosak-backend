@@ -2,8 +2,6 @@ import os
 
 import django
 import pandas as pd
-from django.contrib.gis.geos import Point
-from django.db import transaction
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rosak.settings")
 django.setup()
@@ -159,35 +157,3 @@ assert df.columns.tolist() == expected_cols
 #     left_groupings=[],
 #     right_groupings=[Provider],
 # )
-
-# Import location data
-identifiers = list(df["bus"].dropna().unique())
-bus_dict = Bus.objects.filter(identifier__in=identifiers).in_bulk(
-    field_name="identifier"
-)
-
-with transaction.atomic():
-    location_datas = []
-    for i, row in df.iterrows():
-        location_datas.append(
-            Location(
-                dt_received=row["dt_received"],
-                dt_gps=row["dt_gps"],
-                location=Point(
-                    x=row["longitude"],
-                    y=row["latitude"],
-                ),
-                dir=row["dir"] if str(row["dir"]) != "<NA>" else None,
-                speed=row["speed"],
-                angle=row["angle"],
-                bus_id=bus_dict[row["bus"]].id,
-            )
-        )
-
-        if len(location_datas) % 10000 == 0:
-            Location.objects.bulk_create(
-                location_datas,
-                batch_size=1000,
-                ignore_conflicts=True,
-            )
-            location_datas = []
