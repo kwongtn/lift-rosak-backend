@@ -33,9 +33,9 @@ class Location(models.Model):
     dt_received = models.DateTimeField(editable=False)
     dt_gps = models.DateTimeField(editable=False)
     location = models.PointField()
-    dir = models.CharField(max_length=3)
-    speed = models.PositiveSmallIntegerField()
-    angle = models.PositiveSmallIntegerField()
+    dir = models.CharField(max_length=5, null=True, blank=True)
+    speed = models.PositiveSmallIntegerField(null=True, blank=True)
+    angle = models.PositiveSmallIntegerField(null=True, blank=True)
     bus = models.ForeignKey(
         to="jejak.Bus",
         on_delete=models.PROTECT,
@@ -44,7 +44,7 @@ class Location(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["dt_received", "bus"],
-                name="%(app_label)s_%(class)s_unique_received_time_bus",
+                fields=["dt_received", "dt_gps", "bus"],
+                name="%(app_label)s_%(class)s_unique_received_gps_time_bus",
             ),
         ]
