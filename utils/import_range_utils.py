@@ -1,6 +1,6 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import numpy as np
 from django.db.models import Model, Q
@@ -29,7 +29,7 @@ def group_is_close_dt(range_group, minutes=5):
 def aggregate_start_end_dt(
     dfs: List[DataFrame],
     grouping_keys: List[str],
-    dt_target: str = "dt_received",
+    dt_target: str = "dt_gps",
 ):
     ranges = defaultdict(list)
     for df in dfs:
@@ -75,6 +75,30 @@ def get_field_name(df_col_name: str) -> str:
     return name_dict.get(df_col_name, df_col_name)
 
 
+def get_criteria(
+    grouping_keys: List[str],
+    ranges: defaultdict[Any, list],
+    dicts: dict,
+    start_num: int = 0,
+):
+    criteria = Q()
+    for key in ranges.keys():
+        # First key is always identifier
+        query_dict = {"identifier": key[start_num]}
+
+        counter = start_num + 1
+        for group in grouping_keys:
+            query_dict[group + "_id"] = dicts[group][key[counter]].id
+            counter += 1
+
+        criteria |= Q(**query_dict)
+
+    # Assert criteria is not empty, else it will select everything
+    assert len(criteria) > 0
+
+    return criteria
+
+
 # As a best practice, left should be the model that has more values
 # We assume that all values have been created
 def single_fk_range_import(
@@ -82,7 +106,7 @@ def single_fk_range_import(
     range_model: RangeAbstractModel,
     left_model: IdentifierDetailAbstractModel,
     right_model: IdentifierDetailAbstractModel,
-    dt_target: str = "dt_received",
+    dt_target: str = "dt_gps",
 ):
     left_key = left_model.__name__.lower()
     right_key = right_model.__name__.lower()
@@ -186,12 +210,12 @@ def multi_fk_row_import(
     )
 
 
-async def single_side_multi_fk_range_import(
+def single_side_multi_fk_range_import(
     df: DataFrame,
     range_model: RangeAbstractModel,
     groupings: Dict[str, Model],
     side_model: Model,
-    dt_target: str = "dt_received",
+    dt_target: str = "dt_gps",
 ):
     side_model_key = side_model.__name__.lower()
     debug_prefix = f"[{str(groupings.keys())} -> {side_model_key}]"
@@ -225,20 +249,7 @@ async def single_side_multi_fk_range_import(
     }
 
     print(f"⏩ {debug_prefix} Generating query...")
-    criteria = Q()
-    for key in set(ranges.keys()):
-        # First key is always identifier
-        query_dict = {"identifier": key[0]}
-
-        counter = 1
-        for group in groupings.keys():
-            query_dict[group + "_id"] = dicts[group][key[counter]].id
-            counter += 1
-
-        criteria |= Q(**query_dict)
-
-    # Assert criteria is not empty, else it will select everything
-    assert len(criteria) > 0
+    criteria = get_criteria(grouping_keys=groupings.keys(), ranges=ranges, dicts=dicts)
 
     print(f"⏩ {debug_prefix} Requesting from db...")
     instances = side_model.objects.filter(criteria).select_related(*groupings.keys())
@@ -286,7 +297,7 @@ def multi_fk_range_import(
     right_model: Model,
     left_groupings: List[Model],
     right_groupings: List[Model],
-    dt_target: str = "dt_received",
+    dt_target: str = "dt_gps",
 ):
     left_groupings_keys = [model.__name__.lower() for model in left_groupings]
     right_groupings_keys = [model.__name__.lower() for model in right_groupings]
@@ -308,7 +319,6 @@ def multi_fk_range_import(
     )
 
     print(f"⏩ {debug_prefix} {len(dfs)} dataframes created, aggregrating values...")
-
     ranges = aggregate_start_end_dt(
         dfs=dfs,
         grouping_keys=[left_model_key, right_model_key, *grouping_keys_set],
@@ -329,27 +339,18 @@ def multi_fk_range_import(
 
     print(f"⏩ {debug_prefix} Generating & requesting comparison dict...")
 
-    def get_criteria(start_num: int, grouping_keys: List[str]):
-        criteria = Q()
-        for key in ranges.keys():
-            # First key is always identifier
-            query_dict = {"identifier": key[start_num]}
-
-            counter = start_num + 1
-            for group in grouping_keys:
-                query_dict[group + "_id"] = dicts[group][key[counter]].id
-                counter += 1
-
-            criteria |= Q(**query_dict)
-
-        return criteria
-
-    left_criteria = get_criteria(0, left_groupings_keys)
-    right_criteria = get_criteria(1 + len(left_groupings), right_groupings_keys)
-
-    # Assert criteria is not empty, else it will select everything
-    assert len(left_criteria) > 0
-    assert len(right_criteria) > 0
+    left_criteria = get_criteria(
+        start_num=0,
+        grouping_keys=left_groupings_keys,
+        ranges=ranges,
+        dicts=dicts,
+    )
+    right_criteria = get_criteria(
+        start_num=1 + len(left_groupings),
+        grouping_keys=right_groupings_keys,
+        ranges=ranges,
+        dicts=dicts,
+    )
 
     left_instances = left_model.objects.filter(left_criteria).select_related(
         *left_groupings_keys
