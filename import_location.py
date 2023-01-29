@@ -1,8 +1,11 @@
+import argparse
 import os
+import time
 
 import django
 import pandas as pd
 from django.contrib.gis.geos import Point
+from django.db import transaction
 
 from utils.ui import SpinnerFrame
 
@@ -12,9 +15,16 @@ django.setup()
 
 from jejak.models import Bus, Location  # noqa E402
 
-INPUT_FILENAME = "./utils/2022-05_0.json"
+argParser = argparse.ArgumentParser()
+argParser.add_argument("-f", "--file", help="Input filename.")
 
-DT_TARGET = "dt_received"
+args = argParser.parse_args()
+INPUT_FILENAME: str = args.file
+# INPUT_FILENAME = "./@data/to_import/*.json"
+# INPUT_FILENAME = "/mnt/c/Users/tungn/OldDrive/data/workplace/2022-05.json"
+FILENAME = INPUT_FILENAME.split("/")[-1]
+
+sleep_time = 5
 
 DTYPE = {
     "latitude": "Float64",
@@ -39,13 +49,15 @@ COL_RENAME = {
 }
 
 
-print("⏩ Reading data...")
+print(f"{FILENAME} ⏩ Reading data...")
 counter = 0
 bus_dict = {}
 
 spinner_frame = SpinnerFrame()
 
-with pd.read_json(INPUT_FILENAME, lines=True, dtype=DTYPE, chunksize=100000) as reader:
+with transaction.atomic(), pd.read_json(
+    INPUT_FILENAME, lines=True, dtype=DTYPE, chunksize=100000
+) as reader:
     for chunk in reader:
         chunk = chunk.rename(columns=COL_RENAME)
 
@@ -53,19 +65,33 @@ with pd.read_json(INPUT_FILENAME, lines=True, dtype=DTYPE, chunksize=100000) as 
         diff = identifiers.difference(set(bus_dict.keys()))
 
         if diff:
-            print("⏩ Importing data for bus...")
-            Bus.objects.bulk_create(
-                [Bus(identifier=identifier) for identifier in diff],
-                ignore_conflicts=True,
-            )
+            while True:
+                try:
+                    print(f"{FILENAME} 🚌 Importing data for bus...")
+
+                    Bus.objects.bulk_create(
+                        [Bus(identifier=identifier) for identifier in diff],
+                        ignore_conflicts=True,
+                    )
+                    sleep_time = 5
+
+                except Exception as e:
+                    print(e)
+                    print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+                    time.sleep(sleep_time)
+                    sleep_time += 5
+
+                    continue
+
+                break
 
             bus_dict.update(
                 Bus.objects.filter(identifier__in=diff).in_bulk(field_name="identifier")
             )
         else:
-            print("⏩ Bus data populated, skipping...")
+            print(f"{FILENAME} 📜 Bus data populated, skipping...")
 
-        print("⏩ Creating data objects...")
+        print(f"{FILENAME} 💫 Creating data objects...")
         location_datas = []
         for i, row in chunk.iterrows():
             location_datas.append(
@@ -83,17 +109,26 @@ with pd.read_json(INPUT_FILENAME, lines=True, dtype=DTYPE, chunksize=100000) as 
                 )
             )
 
-            if len(location_datas) % 1000 == 0:
-                print(spinner_frame.get_spinner_frame() + " ", end="\r")
+        while True:
+            try:
+                print(f"{FILENAME} ⏩ Inserting to db...")
+                Location.objects.bulk_create(
+                    location_datas,
+                    batch_size=10000,
+                    ignore_conflicts=True,
+                )
+                sleep_time = 5
 
-        print()
-        print("⏩ Inserting to db...")
-        created = Location.objects.bulk_create(
-            location_datas,
-            batch_size=10000,
-            ignore_conflicts=True,
-        )
+            except Exception as e:
+                print(e)
+                print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+                sleep_time += 5
 
-        counter += len(created)
+                continue
 
-        print(f"⏩ Done import {counter} rows...")
+            break
+
+        counter += len(location_datas)
+
+        print(f"{FILENAME} ✅ Done import {counter} rows...")
