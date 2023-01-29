@@ -1,3 +1,4 @@
+import argparse
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
@@ -8,6 +9,12 @@ from pandas import DataFrame
 from psycopg2.extras import DateTimeTZRange
 
 from jejak.models import IdentifierDetailAbstractModel, RangeAbstractModel
+
+argParser = argparse.ArgumentParser()
+argParser.add_argument("-f", "--file", help="Input filename.")
+args = argParser.parse_args()
+INPUT_FILENAME: str = args.file
+FILENAME = INPUT_FILENAME.split("/")[-1]
 
 
 # If this end_dt and next start_dt is less than minutes,
@@ -111,8 +118,10 @@ def single_fk_range_import(
     left_key = left_model.__name__.lower()
     right_key = right_model.__name__.lower()
 
+    debug_prefix = f"[{left_key} -> {right_key}]"
+
     # Sort then assign groupings based on change of value
-    print(f"⏩ [{left_key}, {right_key}] Sorting & splitting data into dataframes...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Sorting & splitting data into dataframes...")
     dfs = sort_split_dataframes(
         df=df,
         sort_on=[left_key, dt_target],
@@ -120,7 +129,7 @@ def single_fk_range_import(
     )
 
     print(
-        f"⏩ [{left_key}, {right_key}] {len(dfs)} dataframes created, aggregrating values..."
+        f"{FILENAME} ⏩ {debug_prefix} {len(dfs)} dataframes created, aggregrating values..."
     )
 
     ranges = aggregate_start_end_dt(
@@ -128,7 +137,7 @@ def single_fk_range_import(
         grouping_keys=[left_key, right_key],
     )
 
-    print(f"⏩ [{left_key}, {right_key}] Grouping close values...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Grouping close values...")
     for key in ranges:
         if len(ranges[key]) > 1:
             while group_is_close_dt(ranges[key]):
@@ -142,7 +151,7 @@ def single_fk_range_import(
         identifier__in=df[right_key].dropna().unique()
     ).in_bulk(field_name="identifier")
 
-    print(f"⏩ [{left_key}, {right_key}] Inserting ranges...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Inserting ranges...")
     to_create = []
     for (key, range_item) in ranges.items():
         if "<NA>" in [str(i) for i in key]:
@@ -166,7 +175,7 @@ def single_fk_range_import(
             )
 
     return_val = range_model.objects.bulk_create(to_create, ignore_conflicts=True)
-    print(f"⏩ [{left_key}, {right_key}] Done.")
+    print(f"{FILENAME} ⏩ {debug_prefix} Done.")
 
     return return_val
 
@@ -183,10 +192,10 @@ def multi_fk_row_import(
 
     debug_prefix = f"[{str(groupings.keys())} -> {target_str}]"
 
-    print(f"⏩ {debug_prefix} Aggregrating values...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Aggregrating values...")
     df2 = df[[target_str, *groupings.keys()]].dropna().drop_duplicates()
 
-    print(f"⏩ {debug_prefix} Obtaining existing values...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Obtaining existing values...")
     dicts = {
         key: model.objects.filter(
             identifier__in=df2[key].dropna().unique(),
@@ -194,7 +203,7 @@ def multi_fk_row_import(
         for (key, model) in groupings.items()
     }
 
-    print(f"⏩ {debug_prefix} Iterating & inserting values...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Iterating & inserting values...")
     to_bulk_create_dict = []
     for index, row in df2.iterrows():
         data_dict = {"identifier": row[target_str]}
@@ -221,21 +230,23 @@ def single_side_multi_fk_range_import(
     debug_prefix = f"[{str(groupings.keys())} -> {side_model_key}]"
 
     # Aggregate data based on dt grouping
-    print(f"⏩ {debug_prefix} Sorting & aggregrating values...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Sorting & aggregrating values...")
     dfs = sort_split_dataframes(
         df=df,
         sort_on=[*groupings.keys(), dt_target],
         split_on=[*groupings.keys(), side_model_key],
     )
 
-    print(f"⏩ {debug_prefix} {len(dfs)} dataframes created, aggregrating values...")
+    print(
+        f"{FILENAME} ⏩ {debug_prefix} {len(dfs)} dataframes created, aggregrating values..."
+    )
 
     ranges = aggregate_start_end_dt(
         dfs=dfs,
         grouping_keys=[side_model_key, *groupings.keys()],
     )
 
-    print(f"⏩ {debug_prefix} Grouping close values...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Grouping close values...")
     for key in ranges:
         if len(ranges[key]) > 1:
             while group_is_close_dt(ranges[key]):
@@ -248,13 +259,15 @@ def single_side_multi_fk_range_import(
         for (key, model) in groupings.items()
     }
 
-    print(f"⏩ {debug_prefix} Generating query...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Generating query...")
     criteria = get_criteria(grouping_keys=groupings.keys(), ranges=ranges, dicts=dicts)
 
-    print(f"⏩ {debug_prefix} Requesting from db...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Requesting from db...")
     instances = side_model.objects.filter(criteria).select_related(*groupings.keys())
 
-    print(f"⏩ {debug_prefix} Generating dict over {len(instances)} values...")
+    print(
+        f"{FILENAME} ⏩ {debug_prefix} Generating dict over {len(instances)} values..."
+    )
     instances_dict = {}
     for instance in instances:
         # if counter % 100 == 0:
@@ -272,7 +285,7 @@ def single_side_multi_fk_range_import(
             )
         ] = instance.id
 
-    print("⏩ Inserting values...")
+    print(f"{FILENAME} ⏩ Inserting values...")
     to_create = []
     for key in ranges:
         for elem in ranges[key]:
@@ -311,20 +324,22 @@ def multi_fk_range_import(
     )
 
     # Aggregate data based on dt grouping
-    print(f"⏩ {debug_prefix} Sorting & aggregrating values...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Sorting & aggregrating values...")
     dfs = sort_split_dataframes(
         df=df,
         sort_on=[*grouping_keys_set, left_model_key, dt_target],
         split_on=[*grouping_keys_set, left_model_key, right_model_key],
     )
 
-    print(f"⏩ {debug_prefix} {len(dfs)} dataframes created, aggregrating values...")
+    print(
+        f"{FILENAME} ⏩ {debug_prefix} {len(dfs)} dataframes created, aggregrating values..."
+    )
     ranges = aggregate_start_end_dt(
         dfs=dfs,
         grouping_keys=[left_model_key, right_model_key, *grouping_keys_set],
     )
 
-    print(f"⏩ {debug_prefix} Grouping close values...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Grouping close values...")
     for key in ranges:
         if len(ranges[key]) > 1:
             while group_is_close_dt(ranges[key]):
@@ -337,7 +352,7 @@ def multi_fk_range_import(
         for model in set([*left_groupings, *right_groupings])
     }
 
-    print(f"⏩ {debug_prefix} Generating & requesting comparison dict...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Generating & requesting comparison dict...")
 
     left_criteria = get_criteria(
         start_num=0,
@@ -376,18 +391,18 @@ def multi_fk_range_import(
 
         return instances_dict
 
-    print(f"⏩ {debug_prefix} Requesting left instances...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Requesting left instances...")
     left_instances_dict = get_instances_dict(
         instances=left_instances,
         groupings_keys=left_groupings_keys,
     )
-    print(f"⏩ {debug_prefix} Requesting right instances...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Requesting right instances...")
     right_instances_dict = get_instances_dict(
         instances=right_instances,
         groupings_keys=right_groupings_keys,
     )
 
-    print("⏩ Inserting values...")
+    print(f"{FILENAME} ⏩ Inserting values...")
     to_create = []
     for key in ranges:
         for elem in ranges[key]:
