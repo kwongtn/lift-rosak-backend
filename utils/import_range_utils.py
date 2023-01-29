@@ -1,4 +1,5 @@
 import argparse
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
@@ -15,6 +16,8 @@ argParser.add_argument("-f", "--file", help="Input filename.")
 args = argParser.parse_args()
 INPUT_FILENAME: str = args.file
 FILENAME = INPUT_FILENAME.split("/")[-1]
+
+sleep_time = 5
 
 
 # If this end_dt and next start_dt is less than minutes,
@@ -115,13 +118,14 @@ def single_fk_range_import(
     right_model: IdentifierDetailAbstractModel,
     dt_target: str = "dt_gps",
 ):
+    global sleep_time
     left_key = left_model.__name__.lower()
     right_key = right_model.__name__.lower()
 
     debug_prefix = f"[{left_key} -> {right_key}]"
 
     # Sort then assign groupings based on change of value
-    print(f"{FILENAME} ⏩ {debug_prefix} Sorting & splitting data into dataframes...")
+    print(f"{FILENAME} 🔪 {debug_prefix} Sorting & splitting data into dataframes...")
     dfs = sort_split_dataframes(
         df=df,
         sort_on=[left_key, dt_target],
@@ -129,7 +133,7 @@ def single_fk_range_import(
     )
 
     print(
-        f"{FILENAME} ⏩ {debug_prefix} {len(dfs)} dataframes created, aggregrating values..."
+        f"{FILENAME} 📦 {debug_prefix} {len(dfs)} dataframes created, aggregrating values..."
     )
 
     ranges = aggregate_start_end_dt(
@@ -143,13 +147,28 @@ def single_fk_range_import(
             while group_is_close_dt(ranges[key]):
                 pass
 
-    left_obj_dict: dict = left_model.objects.filter(
-        identifier__in=df[left_key].dropna().unique()
-    ).in_bulk(field_name="identifier")
+    left_obj_dict: dict = {}
+    right_obj_dict: dict = {}
 
-    right_obj_dict: dict = right_model.objects.filter(
-        identifier__in=df[right_key].dropna().unique()
-    ).in_bulk(field_name="identifier")
+    while True:
+        try:
+            left_obj_dict = left_model.objects.filter(
+                identifier__in=df[left_key].dropna().unique()
+            ).in_bulk(field_name="identifier")
+
+            right_obj_dict = right_model.objects.filter(
+                identifier__in=df[right_key].dropna().unique()
+            ).in_bulk(field_name="identifier")
+
+        except Exception as e:
+            print(e)
+            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
+            sleep_time += 5
+
+            continue
+
+        break
 
     print(f"{FILENAME} ⏩ {debug_prefix} Inserting ranges...")
     to_create = []
@@ -174,10 +193,19 @@ def single_fk_range_import(
                 )
             )
 
-    return_val = range_model.objects.bulk_create(to_create, ignore_conflicts=True)
-    print(f"{FILENAME} ⏩ {debug_prefix} Done.")
+    while True:
+        try:
+            range_model.objects.bulk_create(to_create, ignore_conflicts=True)
 
-    return return_val
+        except Exception as e:
+            print(e)
+            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
+            sleep_time += 5
+
+            continue
+
+        return print(f"{FILENAME} ✅ {debug_prefix} Done.")
 
 
 # We assume that objects that require other objects to be created
@@ -188,20 +216,35 @@ def multi_fk_row_import(
     target_str: str,
     target_model: IdentifierDetailAbstractModel,
 ):
+    global sleep_time
     target_str = target_model.__name__.lower()
 
     debug_prefix = f"[{str(groupings.keys())} -> {target_str}]"
 
-    print(f"{FILENAME} ⏩ {debug_prefix} Aggregrating values...")
+    print(f"{FILENAME} 📦 {debug_prefix} Aggregrating values...")
     df2 = df[[target_str, *groupings.keys()]].dropna().drop_duplicates()
 
-    print(f"{FILENAME} ⏩ {debug_prefix} Obtaining existing values...")
-    dicts = {
-        key: model.objects.filter(
-            identifier__in=df2[key].dropna().unique(),
-        ).in_bulk(field_name="identifier")
-        for (key, model) in groupings.items()
-    }
+    dicts: dict = {}
+
+    while True:
+        try:
+            print(f"{FILENAME} ⏩ {debug_prefix} Obtaining existing values...")
+            dicts = {
+                key: model.objects.filter(
+                    identifier__in=df2[key].dropna().unique(),
+                ).in_bulk(field_name="identifier")
+                for (key, model) in groupings.items()
+            }
+
+        except Exception as e:
+            print(e)
+            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
+            sleep_time += 5
+
+            continue
+
+        break
 
     print(f"{FILENAME} ⏩ {debug_prefix} Iterating & inserting values...")
     to_bulk_create_dict = []
@@ -213,10 +256,22 @@ def multi_fk_row_import(
 
         to_bulk_create_dict.append(data_dict)
 
-    return target_model.objects.bulk_create(
-        [target_model(**elem_dict) for elem_dict in to_bulk_create_dict],
-        ignore_conflicts=True,
-    )
+    while True:
+        try:
+            target_model.objects.bulk_create(
+                [target_model(**elem_dict) for elem_dict in to_bulk_create_dict],
+                ignore_conflicts=True,
+            )
+
+        except Exception as e:
+            print(e)
+            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
+            sleep_time += 5
+
+            continue
+
+        return print(f"{FILENAME} ✅ {debug_prefix} Done.")
 
 
 def single_side_multi_fk_range_import(
@@ -226,11 +281,12 @@ def single_side_multi_fk_range_import(
     side_model: Model,
     dt_target: str = "dt_gps",
 ):
+    global sleep_time
     side_model_key = side_model.__name__.lower()
     debug_prefix = f"[{str(groupings.keys())} -> {side_model_key}]"
 
     # Aggregate data based on dt grouping
-    print(f"{FILENAME} ⏩ {debug_prefix} Sorting & aggregrating values...")
+    print(f"{FILENAME} 📦 {debug_prefix} Sorting & aggregrating values...")
     dfs = sort_split_dataframes(
         df=df,
         sort_on=[*groupings.keys(), dt_target],
@@ -252,18 +308,48 @@ def single_side_multi_fk_range_import(
             while group_is_close_dt(ranges[key]):
                 pass
 
-    dicts = {
-        key: model.objects.filter(
-            identifier__in=df[key].dropna().unique(),
-        ).in_bulk(field_name="identifier")
-        for (key, model) in groupings.items()
-    }
+    dicts: dict = {}
+
+    while True:
+        try:
+            dicts = {
+                key: model.objects.filter(
+                    identifier__in=df[key].dropna().unique(),
+                ).in_bulk(field_name="identifier")
+                for (key, model) in groupings.items()
+            }
+
+        except Exception as e:
+            print(e)
+            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
+            sleep_time += 5
+
+            continue
+
+        break
 
     print(f"{FILENAME} ⏩ {debug_prefix} Generating query...")
     criteria = get_criteria(grouping_keys=groupings.keys(), ranges=ranges, dicts=dicts)
 
     print(f"{FILENAME} ⏩ {debug_prefix} Requesting from db...")
-    instances = side_model.objects.filter(criteria).select_related(*groupings.keys())
+    instances = []
+
+    while True:
+        try:
+            instances = side_model.objects.filter(criteria).select_related(
+                *groupings.keys()
+            )
+
+        except Exception as e:
+            print(e)
+            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
+            sleep_time += 5
+
+            continue
+
+        break
 
     print(
         f"{FILENAME} ⏩ {debug_prefix} Generating dict over {len(instances)} values..."
@@ -300,7 +386,19 @@ def single_side_multi_fk_range_import(
                 )
             )
 
-    range_model.objects.bulk_create(to_create, ignore_conflicts=True)
+    while True:
+        try:
+            range_model.objects.bulk_create(to_create, ignore_conflicts=True)
+
+        except Exception as e:
+            print(e)
+            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
+            sleep_time += 5
+
+            continue
+
+        return print(f"{FILENAME} ✅ {debug_prefix} Done.")
 
 
 def multi_fk_range_import(
@@ -312,6 +410,7 @@ def multi_fk_range_import(
     right_groupings: List[Model],
     dt_target: str = "dt_gps",
 ):
+    global sleep_time
     left_groupings_keys = [model.__name__.lower() for model in left_groupings]
     right_groupings_keys = [model.__name__.lower() for model in right_groupings]
     grouping_keys_set = set([*left_groupings_keys, *right_groupings_keys])
@@ -324,7 +423,7 @@ def multi_fk_range_import(
     )
 
     # Aggregate data based on dt grouping
-    print(f"{FILENAME} ⏩ {debug_prefix} Sorting & aggregrating values...")
+    print(f"{FILENAME} 📦 {debug_prefix} Sorting & aggregrating values...")
     dfs = sort_split_dataframes(
         df=df,
         sort_on=[*grouping_keys_set, left_model_key, dt_target],
@@ -345,12 +444,26 @@ def multi_fk_range_import(
             while group_is_close_dt(ranges[key]):
                 pass
 
-    dicts = {
-        model.__name__.lower(): model.objects.filter(
-            identifier__in=df[model.__name__.lower()].dropna().unique(),
-        ).in_bulk(field_name="identifier")
-        for model in set([*left_groupings, *right_groupings])
-    }
+    dicts: dict = {}
+
+    while True:
+        try:
+            dicts = {
+                model.__name__.lower(): model.objects.filter(
+                    identifier__in=df[model.__name__.lower()].dropna().unique(),
+                ).in_bulk(field_name="identifier")
+                for model in set([*left_groupings, *right_groupings])
+            }
+
+        except Exception as e:
+            print(e)
+            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
+            sleep_time += 5
+
+            continue
+
+        break
 
     print(f"{FILENAME} ⏩ {debug_prefix} Generating & requesting comparison dict...")
 
@@ -367,12 +480,30 @@ def multi_fk_range_import(
         dicts=dicts,
     )
 
-    left_instances = left_model.objects.filter(left_criteria).select_related(
-        *left_groupings_keys
-    )
-    right_instances = right_model.objects.filter(right_criteria).select_related(
-        *right_groupings_keys
-    )
+    left_instances = []
+    right_instances = []
+
+    while True:
+        try:
+            print(f"{FILENAME} ⏩ {debug_prefix} Requesting left instances...")
+            left_instances = left_model.objects.filter(left_criteria).select_related(
+                *left_groupings_keys
+            )
+
+            print(f"{FILENAME} ⏩ {debug_prefix} Requesting right instances...")
+            right_instances = right_model.objects.filter(right_criteria).select_related(
+                *right_groupings_keys
+            )
+
+        except Exception as e:
+            print(e)
+            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
+            sleep_time += 5
+
+            continue
+
+        break
 
     def get_instances_dict(instances, groupings_keys):
         instances_dict = {}
@@ -391,12 +522,12 @@ def multi_fk_range_import(
 
         return instances_dict
 
-    print(f"{FILENAME} ⏩ {debug_prefix} Requesting left instances...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Compiling left instances...")
     left_instances_dict = get_instances_dict(
         instances=left_instances,
         groupings_keys=left_groupings_keys,
     )
-    print(f"{FILENAME} ⏩ {debug_prefix} Requesting right instances...")
+    print(f"{FILENAME} ⏩ {debug_prefix} Compiling right instances...")
     right_instances_dict = get_instances_dict(
         instances=right_instances,
         groupings_keys=right_groupings_keys,
@@ -432,4 +563,16 @@ def multi_fk_range_import(
                 )
             )
 
-    range_model.objects.bulk_create(to_create, ignore_conflicts=True)
+    while True:
+        try:
+            range_model.objects.bulk_create(to_create, ignore_conflicts=True)
+
+        except Exception as e:
+            print(e)
+            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
+            sleep_time += 5
+
+            continue
+
+        return print(f"{FILENAME} ✅ {debug_prefix} Done.")
