@@ -7,6 +7,7 @@ import pandas as pd
 from django.contrib.gis.geos import Point
 from django.db import transaction
 
+from utils.constants import COL_RENAME, DTYPE
 from utils.ui import SpinnerFrame
 
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -25,28 +26,6 @@ INPUT_FILENAME: str = args.file
 FILENAME = INPUT_FILENAME.split("/")[-1]
 
 sleep_time = 5
-
-DTYPE = {
-    "latitude": "Float64",
-    "longitude": "Float64",
-    "dir": "Float32",
-    "speed": "Float32",
-    "angle": "Float32",
-    "captain_id": "Int32",
-    "trip_rev_kind": "Int32",
-    "engine_status": "Int32",
-    "accessibility": "Int32",
-    "busstop_id": "Int32",
-}
-
-COL_RENAME = {
-    "bus_no": "bus",
-    "trip_no": "trip",
-    "trip_rev_kind": "triprev",
-    "busstop_id": "busstop",
-    "captain_id": "captain",
-    "engine_status": "enginestatus",
-}
 
 
 print(f"{FILENAME} ⏩ Reading data...")
