@@ -4,6 +4,8 @@ import django
 import pandas as pd
 from django.contrib.gis.geos import Point
 
+from utils.ui import SpinnerFrame
+
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rosak.settings")
 django.setup()
@@ -35,16 +37,6 @@ COL_RENAME = {
     "captain_id": "captain",
     "engine_status": "enginestatus",
 }
-
-
-class SpinnerFrame:
-    candidates = ["▁", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃"]
-    current_index = -1
-
-    def get_spinner_frame(self):
-        self.current_index += 1
-
-        return self.candidates[self.current_index % len(self.candidates)]
 
 
 print("⏩ Reading data...")
