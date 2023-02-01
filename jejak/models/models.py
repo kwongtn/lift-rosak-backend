@@ -1,9 +1,12 @@
 from django.contrib.gis.db import models
 
-from jejak.models.abstracts import IdentifierDetailAbstractModel, RangeAbstractModel
+from jejak.models.abstracts import (
+    ForeignKeyCompositeIdentifierDetailAbstractModel,
+    RangeAbstractModel,
+)
 
 
-class Trip(IdentifierDetailAbstractModel):
+class Trip(ForeignKeyCompositeIdentifierDetailAbstractModel):
     bus = models.ForeignKey(
         to="jejak.Bus",
         on_delete=models.PROTECT,

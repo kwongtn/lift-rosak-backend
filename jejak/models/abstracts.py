@@ -15,3 +15,10 @@ class IdentifierDetailAbstractModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+class ForeignKeyCompositeIdentifierDetailAbstractModel(IdentifierDetailAbstractModel):
+    identifier = models.CharField(max_length=64, null=False)
+
+    class Meta:
+        abstract = True
