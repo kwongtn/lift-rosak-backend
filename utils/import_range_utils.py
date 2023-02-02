@@ -18,6 +18,7 @@ INPUT_FILENAME: str = args.file
 FILENAME = INPUT_FILENAME.split("/")[-1]
 
 sleep_time = 5
+chunk_size = int(1e5)
 
 
 # If this end_dt and next start_dt is less than minutes,
@@ -283,7 +284,7 @@ def single_side_multi_fk_range_import(
 ):
     global sleep_time
     side_model_key = side_model.__name__.lower()
-    debug_prefix = f"[{str(groupings.keys())} -> {side_model_key}]"
+    debug_prefix = f"[{list(groupings.keys())} -> {side_model_key}]"
 
     # Aggregate data based on dt grouping
     print(f"{FILENAME} 📦 {debug_prefix} Sorting & aggregrating values...")
@@ -312,6 +313,7 @@ def single_side_multi_fk_range_import(
 
     while True:
         try:
+            print(f"{FILENAME} ⏩ {debug_prefix} Querying dicts...")
             dicts = {
                 key: model.objects.filter(
                     identifier__in=df[key].dropna().unique(),
@@ -329,76 +331,99 @@ def single_side_multi_fk_range_import(
 
         break
 
-    print(f"{FILENAME} ⏩ {debug_prefix} Generating query...")
-    criteria = get_criteria(grouping_keys=groupings.keys(), ranges=ranges, dicts=dicts)
+    ranges_size = len(ranges)
+    progress_size = 0
+    while ranges:
+        chunk = defaultdict(list)
+        if chunk_size > len(ranges.keys()):
+            chunk = ranges
+            ranges = defaultdict(list)
 
-    print(f"{FILENAME} ⏩ {debug_prefix} Requesting from db...")
-    instances = []
+        else:
+            for key in list(ranges.keys())[:chunk_size]:
+                chunk[key] = ranges[key]
+                ranges.pop(key)
 
-    while True:
-        try:
-            instances = side_model.objects.filter(criteria).select_related(
-                *groupings.keys()
-            )
+        progress_size += len(chunk)
 
-        except Exception as e:
-            print(e)
-            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
-            time.sleep(sleep_time)
-            sleep_time += 5
+        progress_suffix = f"[{progress_size}/{ranges_size}]"
 
-            continue
+        print(f"{FILENAME} ⏩ {debug_prefix} Generating query... {progress_suffix}")
+        criteria = get_criteria(
+            grouping_keys=groupings.keys(),
+            ranges=chunk,
+            dicts=dicts,
+        )
 
-        break
+        print(f"{FILENAME} ⏩ {debug_prefix} Requesting from db... {progress_suffix}")
+        instances = []
+        instances_dict = {}
 
-    print(
-        f"{FILENAME} ⏩ {debug_prefix} Generating dict over {len(instances)} values..."
-    )
-    instances_dict = {}
-    for instance in instances:
-        # if counter % 100 == 0:
-        print(".", end="")
-
-        instances_dict[
-            tuple(
-                [
-                    instance.identifier,
-                    *[
-                        getattr(instance, fk_key).identifier
-                        for fk_key in groupings.keys()
-                    ],
-                ]
-            )
-        ] = instance.id
-
-    print(f"{FILENAME} ⏩ Inserting values...")
-    to_create = []
-    for key in ranges:
-        for elem in ranges[key]:
-            to_create.append(
-                range_model(
-                    dt_range=DateTimeTZRange(
-                        lower=elem["start_dt"],
-                        upper=elem["end_dt"],
-                        bounds="[]",
-                    ),
-                    **{side_model_key + "_id": instances_dict[key]},
+        while True:
+            try:
+                instances = side_model.objects.filter(criteria).select_related(
+                    *groupings.keys()
                 )
-            )
 
-    while True:
-        try:
-            range_model.objects.bulk_create(to_create, ignore_conflicts=True)
+                print(f"{FILENAME} ⏩ {debug_prefix} Generating dict...")
+                for instance in instances:
+                    instances_dict[
+                        tuple(
+                            [
+                                instance.identifier,
+                                *[
+                                    getattr(instance, fk_key).identifier
+                                    for fk_key in groupings.keys()
+                                ],
+                            ]
+                        )
+                    ] = instance.id
 
-        except Exception as e:
-            print(e)
-            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
-            time.sleep(sleep_time)
-            sleep_time += 5
+            except Exception as e:
+                print(e)
+                print(
+                    f"{FILENAME} ❗ {debug_prefix} Error, retrying in {sleep_time} seconds..."
+                )
+                time.sleep(sleep_time)
+                sleep_time += 5
 
-            continue
+                continue
 
-        return print(f"{FILENAME} ✅ {debug_prefix} Done.")
+            break
+
+        print(f"{FILENAME} ⏩ {debug_prefix} Inserting values... {progress_suffix}")
+        to_create = []
+        for key in chunk:
+            for elem in chunk[key]:
+                to_create.append(
+                    range_model(
+                        dt_range=DateTimeTZRange(
+                            lower=elem["start_dt"],
+                            upper=elem["end_dt"],
+                            bounds="[]",
+                        ),
+                        **{side_model_key + "_id": instances_dict[key]},
+                    )
+                )
+
+        while True:
+            try:
+                range_model.objects.bulk_create(
+                    to_create, batch_size=10000, ignore_conflicts=True
+                )
+
+            except Exception as e:
+                print(e)
+                print(
+                    f"{FILENAME} ❗ {debug_prefix} Error, retrying in {sleep_time} seconds..."
+                )
+                time.sleep(sleep_time)
+                sleep_time += 5
+
+                continue
+
+            print(f"{FILENAME} ✅ {debug_prefix} Done. {progress_suffix}")
+            break
 
 
 def multi_fk_range_import(
