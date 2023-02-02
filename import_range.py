@@ -95,7 +95,6 @@ multi_fk_row_import(
         "provider": Provider,
         "bus": Bus,
     },
-    target_str="trip",
     target_model=Trip,
 )
 multi_fk_row_import(
@@ -103,7 +102,6 @@ multi_fk_row_import(
     groupings={
         "provider": Provider,
     },
-    target_str="route",
     target_model=Route,
 )
 

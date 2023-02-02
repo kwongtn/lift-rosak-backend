@@ -214,7 +214,6 @@ def single_fk_range_import(
 def multi_fk_row_import(
     df: DataFrame,
     groupings: Dict[str, Model],
-    target_str: str,
     target_model: IdentifierDetailAbstractModel,
 ):
     global sleep_time
