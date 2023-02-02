@@ -40,3 +40,5 @@ EXPECTED_COLS = set(
         "busstop",
     ]
 )
+
+DT_TARGET = "dt_gps"

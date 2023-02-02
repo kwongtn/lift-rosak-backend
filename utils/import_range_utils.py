@@ -10,6 +10,7 @@ from pandas import DataFrame
 from psycopg2.extras import DateTimeTZRange
 
 from jejak.models import IdentifierDetailAbstractModel, RangeAbstractModel
+from utils.constants import DT_TARGET
 from utils.db import wrap_errors
 
 argParser = argparse.ArgumentParser()
@@ -41,7 +42,7 @@ def group_is_close_dt(range_group, minutes=5):
 def aggregate_start_end_dt(
     dfs: List[DataFrame],
     grouping_keys: List[str],
-    dt_target: str = "dt_gps",
+    dt_target: str = DT_TARGET,
 ):
     ranges = defaultdict(list)
     for df in dfs:
@@ -142,7 +143,7 @@ def single_fk_range_import(
     range_model: RangeAbstractModel,
     left_model: IdentifierDetailAbstractModel,
     right_model: IdentifierDetailAbstractModel,
-    dt_target: str = "dt_gps",
+    dt_target: str = DT_TARGET,
 ):
     global sleep_time
     left_key = left_model.__name__.lower()
@@ -289,7 +290,7 @@ def single_side_multi_fk_range_import(
     range_model: RangeAbstractModel,
     groupings: Dict[str, Model],
     side_model: Model,
-    dt_target: str = "dt_gps",
+    dt_target: str = DT_TARGET,
 ):
     global sleep_time
     side_model_key = side_model.__name__.lower()
@@ -408,7 +409,7 @@ def multi_fk_range_import(
     right_model: Model,
     left_groupings: List[Model],
     right_groupings: List[Model],
-    dt_target: str = "dt_gps",
+    dt_target: str = DT_TARGET,
 ):
     global sleep_time
     left_groupings_keys = [model.__name__.lower() for model in left_groupings]
