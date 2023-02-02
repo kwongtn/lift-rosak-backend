@@ -10,6 +10,7 @@ from pandas import DataFrame
 from psycopg2.extras import DateTimeTZRange
 
 from jejak.models import IdentifierDetailAbstractModel, RangeAbstractModel
+from utils.db import wrap_errors
 
 argParser = argparse.ArgumentParser()
 argParser.add_argument("-f", "--file", help="Input filename.")
@@ -110,6 +111,30 @@ def get_criteria(
     return criteria
 
 
+def instance_mapping_fn(
+    criteria, groupings, side_model: Model, debug_prefix="", progress_suffix=""
+):
+    instances_dict = {}
+
+    instances = side_model.objects.filter(criteria).select_related(*groupings.keys())
+
+    print(f"{FILENAME} ⏩ {debug_prefix} Generating dict... {progress_suffix}")
+    for instance in instances:
+        instances_dict[
+            tuple(
+                [
+                    instance.identifier,
+                    *[
+                        getattr(instance, fk_key).identifier
+                        for fk_key in groupings.keys()
+                    ],
+                ]
+            )
+        ] = instance.id
+
+    return instances_dict
+
+
 # As a best practice, left should be the model that has more values
 # We assume that all values have been created
 def single_fk_range_import(
@@ -194,19 +219,13 @@ def single_fk_range_import(
                 )
             )
 
-    while True:
-        try:
-            range_model.objects.bulk_create(to_create, ignore_conflicts=True)
-
-        except Exception as e:
-            print(e)
-            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
-            time.sleep(sleep_time)
-            sleep_time += 5
-
-            continue
-
-        return print(f"{FILENAME} ✅ {debug_prefix} Done.")
+    wrap_errors(
+        fn=range_model.objects.bulk_create,
+        debug_prefix=debug_prefix,
+        objs=to_create,
+        batch_size=10000,
+        ignore_conflicts=True,
+    )
 
 
 # We assume that objects that require other objects to be created
@@ -256,22 +275,13 @@ def multi_fk_row_import(
 
         to_bulk_create_dict.append(data_dict)
 
-    while True:
-        try:
-            target_model.objects.bulk_create(
-                [target_model(**elem_dict) for elem_dict in to_bulk_create_dict],
-                ignore_conflicts=True,
-            )
-
-        except Exception as e:
-            print(e)
-            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
-            time.sleep(sleep_time)
-            sleep_time += 5
-
-            continue
-
-        return print(f"{FILENAME} ✅ {debug_prefix} Done.")
+    wrap_errors(
+        fn=target_model.objects.bulk_create,
+        objs=[target_model(**elem_dict) for elem_dict in to_bulk_create_dict],
+        debug_prefix=debug_prefix,
+        batch_size=10000,
+        ignore_conflicts=True,
+    )
 
 
 def single_side_multi_fk_range_import(
@@ -355,40 +365,15 @@ def single_side_multi_fk_range_import(
         )
 
         print(f"{FILENAME} ⏩ {debug_prefix} Requesting from db... {progress_suffix}")
-        instances = []
-        instances_dict = {}
 
-        while True:
-            try:
-                instances = side_model.objects.filter(criteria).select_related(
-                    *groupings.keys()
-                )
-
-                print(f"{FILENAME} ⏩ {debug_prefix} Generating dict...")
-                for instance in instances:
-                    instances_dict[
-                        tuple(
-                            [
-                                instance.identifier,
-                                *[
-                                    getattr(instance, fk_key).identifier
-                                    for fk_key in groupings.keys()
-                                ],
-                            ]
-                        )
-                    ] = instance.id
-
-            except Exception as e:
-                print(e)
-                print(
-                    f"{FILENAME} ❗ {debug_prefix} Error, retrying in {sleep_time} seconds..."
-                )
-                time.sleep(sleep_time)
-                sleep_time += 5
-
-                continue
-
-            break
+        instances_dict = wrap_errors(
+            fn=instance_mapping_fn,
+            debug_prefix=debug_prefix,
+            progress_suffix=progress_suffix,
+            criteria=criteria,
+            groupings=groupings,
+            side_model=side_model,
+        )
 
         print(f"{FILENAME} ⏩ {debug_prefix} Inserting values... {progress_suffix}")
         to_create = []
@@ -405,24 +390,15 @@ def single_side_multi_fk_range_import(
                     )
                 )
 
-        while True:
-            try:
-                range_model.objects.bulk_create(
-                    to_create, batch_size=10000, ignore_conflicts=True
-                )
+        debug_prefix(
+            fn=range_model.objects.bulk_create,
+            objs=to_create,
+            batch_size=10000,
+            ignore_conflicts=True,
+            debug_prefix=debug_prefix,
+        )
 
-            except Exception as e:
-                print(e)
-                print(
-                    f"{FILENAME} ❗ {debug_prefix} Error, retrying in {sleep_time} seconds..."
-                )
-                time.sleep(sleep_time)
-                sleep_time += 5
-
-                continue
-
-            print(f"{FILENAME} ✅ {debug_prefix} Done. {progress_suffix}")
-            break
+        print(f"{FILENAME} ✅ {debug_prefix} Done. {progress_suffix}")
 
 
 def multi_fk_range_import(
@@ -547,12 +523,17 @@ def multi_fk_range_import(
         return instances_dict
 
     print(f"{FILENAME} ⏩ {debug_prefix} Compiling left instances...")
-    left_instances_dict = get_instances_dict(
+    left_instances_dict: dict = wrap_errors(
+        fn=get_instances_dict,
+        debug_prefix=debug_prefix,
         instances=left_instances,
         groupings_keys=left_groupings_keys,
     )
+
     print(f"{FILENAME} ⏩ {debug_prefix} Compiling right instances...")
-    right_instances_dict = get_instances_dict(
+    right_instances_dict: dict = wrap_errors(
+        fn=get_instances_dict,
+        debug_prefix=debug_prefix,
         instances=right_instances,
         groupings_keys=right_groupings_keys,
     )
@@ -587,16 +568,12 @@ def multi_fk_range_import(
                 )
             )
 
-    while True:
-        try:
-            range_model.objects.bulk_create(to_create, ignore_conflicts=True)
+    wrap_errors(
+        fn=range_model.objects.bulk_create,
+        debug_prefix=debug_prefix,
+        objs=to_create,
+        batch_size=1000,
+        ignore_conflicts=True,
+    )
 
-        except Exception as e:
-            print(e)
-            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
-            time.sleep(sleep_time)
-            sleep_time += 5
-
-            continue
-
-        return print(f"{FILENAME} ✅ {debug_prefix} Done.")
+    print(f"{FILENAME} ✅ {debug_prefix} Done.")
