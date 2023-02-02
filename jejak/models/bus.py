@@ -1,6 +1,10 @@
 from django.db import models
 
-from jejak.models.abstracts import IdentifierDetailAbstractModel, RangeAbstractModel
+from jejak.models.abstracts import (
+    ForeignKeyCompositeIdentifierDetailAbstractModel,
+    IdentifierDetailAbstractModel,
+    RangeAbstractModel,
+)
 
 
 class BusType(models.Model):
@@ -59,7 +63,7 @@ class TripRevBusRange(RangeAbstractModel):
     )
 
 
-class Route(IdentifierDetailAbstractModel):
+class Route(ForeignKeyCompositeIdentifierDetailAbstractModel):
     provider = models.ForeignKey(
         to="jejak.Provider",
         on_delete=models.PROTECT,
