@@ -466,115 +466,137 @@ def multi_fk_range_import(
 
         break
 
-    print(f"{FILENAME} ⏩ {debug_prefix} Generating & requesting comparison dict...")
+    print(dicts)
 
-    left_criteria = get_criteria(
-        start_num=0,
-        grouping_keys=left_groupings_keys,
-        ranges=ranges,
-        dicts=dicts,
-    )
-    right_criteria = get_criteria(
-        start_num=1 + len(left_groupings),
-        grouping_keys=right_groupings_keys,
-        ranges=ranges,
-        dicts=dicts,
-    )
+    ranges_size = len(ranges)
+    progress_size = 0
+    while ranges:
+        chunk = defaultdict(list)
+        if chunk_size > len(ranges.keys()):
+            chunk = ranges
+            ranges = defaultdict(list)
 
-    left_instances = []
-    right_instances = []
+        else:
+            for key in list(ranges.keys())[:chunk_size]:
+                chunk[key] = ranges[key]
+                ranges.pop(key)
 
-    while True:
-        try:
-            print(f"{FILENAME} ⏩ {debug_prefix} Requesting left instances...")
-            left_instances = left_model.objects.filter(left_criteria).select_related(
-                *left_groupings_keys
-            )
+        progress_size += len(chunk)
 
-            print(f"{FILENAME} ⏩ {debug_prefix} Requesting right instances...")
-            right_instances = right_model.objects.filter(right_criteria).select_related(
-                *right_groupings_keys
-            )
+        progress_suffix = f"[{progress_size}/{ranges_size}]"
 
-        except Exception as e:
-            print(e)
-            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
-            time.sleep(sleep_time)
-            sleep_time += 5
+        print(
+            f"{FILENAME} ⏩ {debug_prefix} Generating & requesting comparison dict... {progress_suffix}"
+        )
 
-            continue
+        left_criteria = get_criteria(
+            start_num=0,
+            grouping_keys=left_groupings_keys,
+            ranges=chunk,
+            dicts=dicts,
+        )
+        right_criteria = get_criteria(
+            start_num=1 + len(left_groupings),
+            grouping_keys=right_groupings_keys,
+            ranges=chunk,
+            dicts=dicts,
+        )
 
-        break
+        def request_instances(model, criteria, grouping_keys):
+            return model.objects.filter(criteria).select_related(*grouping_keys)
 
-    def get_instances_dict(instances, groupings_keys):
-        instances_dict = {}
-        for instance in instances:
-            instances_dict[
-                tuple(
-                    [
-                        instance.identifier,
-                        *[
-                            getattr(instance, grouping_key).identifier
-                            for grouping_key in groupings_keys
-                        ],
-                    ]
+        print(
+            f"{FILENAME} ⏩ {debug_prefix} Requesting left instances... {progress_suffix}"
+        )
+        left_instances = wrap_errors(
+            fn=request_instances,
+            model=left_model,
+            criteria=left_criteria,
+            grouping_keys=left_groupings_keys,
+        )
+        print(
+            f"{FILENAME} ⏩ {debug_prefix} Requesting right instances... {progress_suffix}"
+        )
+        right_instances = wrap_errors(
+            fn=request_instances,
+            model=right_model,
+            criteria=right_criteria,
+            grouping_keys=right_groupings_keys,
+        )
+
+        def get_instances_dict(instances, groupings_keys):
+            instances_dict = {}
+            for instance in instances:
+                instances_dict[
+                    tuple(
+                        [
+                            instance.identifier,
+                            *[
+                                getattr(instance, grouping_key).identifier
+                                for grouping_key in groupings_keys
+                            ],
+                        ]
+                    )
+                ] = instance
+
+            return instances_dict
+
+        print(
+            f"{FILENAME} ⏩ {debug_prefix} Compiling left instances... {progress_suffix}"
+        )
+        left_instances_dict: dict = wrap_errors(
+            fn=get_instances_dict,
+            debug_prefix=debug_prefix,
+            instances=left_instances,
+            groupings_keys=left_groupings_keys,
+        )
+
+        print(
+            f"{FILENAME} ⏩ {debug_prefix} Compiling right instances... {progress_suffix}"
+        )
+        right_instances_dict: dict = wrap_errors(
+            fn=get_instances_dict,
+            debug_prefix=debug_prefix,
+            instances=right_instances,
+            groupings_keys=right_groupings_keys,
+        )
+
+        print(f"{FILENAME} ⏩ Inserting values... {progress_suffix}")
+        to_create = []
+        for key in chunk:
+            for elem in chunk[key]:
+                to_create.append(
+                    range_model(
+                        dt_range=DateTimeTZRange(
+                            lower=elem["start_dt"],
+                            upper=elem["end_dt"],
+                            bounds="[]",
+                        ),
+                        **{
+                            left_model_key
+                            + "_id": left_instances_dict[
+                                key[0 : 1 + len(left_groupings_keys)]
+                            ].id,
+                            right_model_key
+                            + "_id": right_instances_dict[
+                                key[
+                                    1
+                                    + len(left_groupings_keys) : 1
+                                    + len(left_groupings_keys)
+                                    + 1
+                                    + len(right_groupings_keys)
+                                ]
+                            ].id,
+                        },
+                    )
                 )
-            ] = instance
 
-        return instances_dict
+        wrap_errors(
+            fn=range_model.objects.bulk_create,
+            debug_prefix=debug_prefix,
+            objs=to_create,
+            batch_size=1000,
+            ignore_conflicts=True,
+        )
 
-    print(f"{FILENAME} ⏩ {debug_prefix} Compiling left instances...")
-    left_instances_dict: dict = wrap_errors(
-        fn=get_instances_dict,
-        debug_prefix=debug_prefix,
-        instances=left_instances,
-        groupings_keys=left_groupings_keys,
-    )
-
-    print(f"{FILENAME} ⏩ {debug_prefix} Compiling right instances...")
-    right_instances_dict: dict = wrap_errors(
-        fn=get_instances_dict,
-        debug_prefix=debug_prefix,
-        instances=right_instances,
-        groupings_keys=right_groupings_keys,
-    )
-
-    print(f"{FILENAME} ⏩ Inserting values...")
-    to_create = []
-    for key in ranges:
-        for elem in ranges[key]:
-            to_create.append(
-                range_model(
-                    dt_range=DateTimeTZRange(
-                        lower=elem["start_dt"],
-                        upper=elem["end_dt"],
-                        bounds="[]",
-                    ),
-                    **{
-                        left_model_key
-                        + "_id": left_instances_dict[
-                            key[0 : 1 + len(left_groupings_keys)]
-                        ].id,
-                        right_model_key
-                        + "_id": right_instances_dict[
-                            key[
-                                1
-                                + len(left_groupings_keys) : 1
-                                + len(left_groupings_keys)
-                                + 1
-                                + len(right_groupings_keys)
-                            ]
-                        ].id,
-                    },
-                )
-            )
-
-    wrap_errors(
-        fn=range_model.objects.bulk_create,
-        debug_prefix=debug_prefix,
-        objs=to_create,
-        batch_size=1000,
-        ignore_conflicts=True,
-    )
-
-    print(f"{FILENAME} ✅ {debug_prefix} Done.")
+        print(f"{FILENAME} ✅ {debug_prefix} Done. {progress_suffix}")
