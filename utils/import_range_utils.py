@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 import numpy as np
+from django.db import transaction
 from django.db.models import Model, Q
 from pandas import DataFrame
 from psycopg2.extras import DateTimeTZRange
@@ -285,6 +286,7 @@ def multi_fk_row_import(
     )
 
 
+@transaction.atomic
 def single_side_multi_fk_range_import(
     df: DataFrame,
     range_model: RangeAbstractModel,
@@ -391,7 +393,7 @@ def single_side_multi_fk_range_import(
                     )
                 )
 
-        debug_prefix(
+        wrap_errors(
             fn=range_model.objects.bulk_create,
             objs=to_create,
             batch_size=10000,
@@ -419,9 +421,7 @@ def multi_fk_range_import(
     left_model_key = left_model.__name__.lower()
     right_model_key = right_model.__name__.lower()
 
-    debug_prefix = (
-        f"[{''.join(left_groupings_keys)} -> {''.join(right_groupings_keys)}]"
-    )
+    debug_prefix = f"[{str(left_groupings_keys)} -> {str(right_groupings_keys)}]"
 
     # Aggregate data based on dt grouping
     print(f"{FILENAME} 📦 {debug_prefix} Sorting & aggregrating values...")

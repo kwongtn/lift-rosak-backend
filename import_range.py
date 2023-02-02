@@ -55,10 +55,13 @@ df = pd.read_json(
     dtype=DTYPE,
 ).rename(columns=COL_RENAME)
 
-print(
-    f"{FILENAME} Not-expected columns: ",
-    EXPECTED_COLS.difference(set(df.columns.tolist())),
-)
+expected_diff = EXPECTED_COLS.difference(set(df.columns.tolist()))
+if expected_diff:
+    print(
+        f"{FILENAME} Not-expected columns: ",
+        EXPECTED_COLS.difference(set(df.columns.tolist())),
+    )
+
 assert set(df.columns.tolist()) == EXPECTED_COLS
 
 for model in [Bus, Captain, TripRev, EngineStatus, Accessibility, Provider, BusStop]:
@@ -82,7 +85,7 @@ for (range_model, left_model, right_model) in [
     (CaptainBusRange, Captain, Bus),
 ]:
     print(
-        f"⏩ Importing ranges for [{left_model.__name__.lower()}, {right_model.__name__.lower()}]..."
+        f"{FILENAME} ⏩ Importing ranges for [{left_model.__name__.lower()}, {right_model.__name__.lower()}]..."
     )
     single_fk_range_import(
         df=df,
