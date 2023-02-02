@@ -1,6 +1,5 @@
 import argparse
 import os
-import time
 
 import django
 import pandas as pd
@@ -8,6 +7,7 @@ from django.contrib.gis.geos import Point
 from django.db import transaction
 
 from utils.constants import COL_RENAME, DTYPE
+from utils.db import wrap_errors
 from utils.ui import SpinnerFrame
 
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -35,7 +35,7 @@ bus_dict = {}
 spinner_frame = SpinnerFrame()
 
 with transaction.atomic(), pd.read_json(
-    INPUT_FILENAME, lines=True, dtype=DTYPE, chunksize=100000
+    INPUT_FILENAME, lines=True, dtype=DTYPE, chunksize=50000
 ) as reader:
     for chunk in reader:
         chunk = chunk.rename(columns=COL_RENAME)
@@ -44,25 +44,12 @@ with transaction.atomic(), pd.read_json(
         diff = identifiers.difference(set(bus_dict.keys()))
 
         if diff:
-            while True:
-                try:
-                    print(f"{FILENAME} 🚌 Importing data for bus...")
-
-                    Bus.objects.bulk_create(
-                        [Bus(identifier=identifier) for identifier in diff],
-                        ignore_conflicts=True,
-                    )
-                    sleep_time = 5
-
-                except Exception as e:
-                    print(e)
-                    print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
-                    time.sleep(sleep_time)
-                    sleep_time += 5
-
-                    continue
-
-                break
+            print(f"{FILENAME} 🚌 Importing data for bus...")
+            wrap_errors(
+                fn=Bus.objects.bulk_create,
+                objs=[Bus(identifier=identifier) for identifier in diff],
+                ignore_conflicts=True,
+            )
 
             bus_dict.update(
                 Bus.objects.filter(identifier__in=diff).in_bulk(field_name="identifier")
@@ -88,26 +75,14 @@ with transaction.atomic(), pd.read_json(
                 )
             )
 
-        while True:
-            try:
-                print(f"{FILENAME} ⏩ Inserting to db...")
-                Location.objects.bulk_create(
-                    location_datas,
-                    batch_size=10000,
-                    ignore_conflicts=True,
-                )
-                sleep_time = 5
-
-            except Exception as e:
-                print(e)
-                print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
-                time.sleep(sleep_time)
-                sleep_time += 5
-
-                continue
-
-            break
+        print(f"{FILENAME} ⏩ Inserting to db...")
+        wrap_errors(
+            fn=Location.objects.bulk_create,
+            objs=location_datas,
+            ignore_conflicts=True,
+            batch_size=5000,
+        )
 
         counter += len(location_datas)
 
-        print(f"{FILENAME} ✅ Done import {counter} rows...")
+        print(f"{FILENAME} ✅ Done import {counter:,} rows...")
