@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import time
 from typing import Any, Callable
 
@@ -23,7 +24,16 @@ def wrap_errors(
 
     while True:
         try:
-            fn_return = fn(debug_prefix=debug_prefix, *args, **kwargs)
+            argspec = inspect.getfullargspec(fn)
+
+            if "debug_prefix" in getattr(
+                argspec, "args", []
+            ) or "debug_prefix" in getattr(argspec, "kwargs", []):
+                fn_return = fn(debug_prefix=debug_prefix, *args, **kwargs)
+
+            else:
+                fn_return = fn(*args, **kwargs)
+
             sleep_time = 5
 
             return fn_return
