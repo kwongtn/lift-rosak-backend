@@ -5,6 +5,7 @@ import django
 import pandas as pd
 
 from utils.constants import COL_RENAME, DTYPE, EXPECTED_COLS
+from utils.db import wrap_errors
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rosak.settings")
 django.setup()
@@ -65,8 +66,9 @@ for model in [Bus, Captain, TripRev, EngineStatus, Accessibility, Provider, BusS
     identifiers = list(df[model_name].dropna().unique())
 
     print(f"⏩ Importing data for {model.__name__.lower()}...")
-    model.objects.bulk_create(
-        [model(identifier=identifier) for identifier in identifiers],
+    wrap_errors(
+        fn=model.objects.bulk_create,
+        objs=[model(identifier=identifier) for identifier in identifiers],
         ignore_conflicts=True,
     )
 
