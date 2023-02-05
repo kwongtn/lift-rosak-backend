@@ -4,7 +4,6 @@ import os
 import django
 import pandas as pd
 from django.contrib.gis.geos import Point
-from django.db import transaction
 
 from utils.constants import COL_RENAME, DTYPE
 from utils.db import wrap_errors
@@ -34,9 +33,14 @@ bus_dict = {}
 
 spinner_frame = SpinnerFrame()
 
-with transaction.atomic(), pd.read_json(
-    INPUT_FILENAME, lines=True, dtype=DTYPE, chunksize=50000
-) as reader:
+
+def get_objs_and_identifier(model, identifiers):
+    return model.objects.filter(identifier__in=identifiers).in_bulk(
+        field_name="identifier"
+    )
+
+
+with pd.read_json(INPUT_FILENAME, lines=True, dtype=DTYPE, chunksize=20000) as reader:
     for chunk in reader:
         chunk = chunk.rename(columns=COL_RENAME)
 
@@ -52,7 +56,11 @@ with transaction.atomic(), pd.read_json(
             )
 
             bus_dict.update(
-                Bus.objects.filter(identifier__in=diff).in_bulk(field_name="identifier")
+                wrap_errors(
+                    fn=get_objs_and_identifier,
+                    model=Bus,
+                    identifiers=diff,
+                )
             )
         else:
             print(f"{FILENAME} 📜 Bus data populated, skipping...")
