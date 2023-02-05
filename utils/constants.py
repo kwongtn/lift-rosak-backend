@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 DTYPE = {
     "latitude": "Float64",
     "longitude": "Float64",
@@ -42,3 +44,16 @@ EXPECTED_COLS = set(
 )
 
 DT_TARGET = "dt_gps"
+
+
+GROUP_THRESHOLDS = {
+    "AccessibilityBusRange": timedelta(hours=1),
+    "BusProviderRange": timedelta(hours=1),
+    "BusRouteRange": timedelta(minutes=5),
+    "BusStopBusRange": timedelta(minutes=3),
+    "CaptainBusRange": timedelta(minutes=5),
+    "CaptainProviderRange": timedelta(hours=1),
+    "EngineStatusBusRange": timedelta(minutes=3),
+    "TripRange": timedelta(minutes=3),
+    "TripRevBusRange": timedelta(minutes=3),
+}

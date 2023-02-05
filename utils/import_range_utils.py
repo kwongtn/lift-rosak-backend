@@ -1,7 +1,7 @@
 import argparse
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List
 
 import numpy as np
@@ -11,7 +11,7 @@ from pandas import DataFrame
 from psycopg2.extras import DateTimeTZRange
 
 from jejak.models import IdentifierDetailAbstractModel, RangeAbstractModel
-from utils.constants import DT_TARGET
+from utils.constants import DT_TARGET, GROUP_THRESHOLDS
 from utils.db import wrap_errors
 
 argParser = argparse.ArgumentParser()
@@ -26,12 +26,14 @@ chunk_size = int(1e5)
 
 # If this end_dt and next start_dt is less than minutes,
 # group them together and return
-def group_is_close_dt(range_group, minutes=5):
+def group_is_close_dt(range_group, model_str: str):
     for index in range(0, len(range_group) - 1):
-        if datetime.fromisoformat(
-            range_group[index + 1]["start_dt"]
-        ) - datetime.fromisoformat(range_group[index]["end_dt"]) < timedelta(
-            minutes=minutes
+        threshold = GROUP_THRESHOLDS[model_str]
+
+        if (
+            datetime.fromisoformat(range_group[index + 1]["start_dt"])
+            - datetime.fromisoformat(range_group[index]["end_dt"])
+            < threshold
         ):
             range_group[index]["end_dt"] = range_group[index + 1]["end_dt"]
             del range_group[index + 1]
@@ -172,7 +174,7 @@ def single_fk_range_import(
     print(f"{FILENAME} ⏩ {debug_prefix} Grouping close values...")
     for key in ranges:
         if len(ranges[key]) > 1:
-            while group_is_close_dt(ranges[key]):
+            while group_is_close_dt(ranges[key], range_model.__name__):
                 pass
 
     left_obj_dict: dict = {}
@@ -318,7 +320,7 @@ def single_side_multi_fk_range_import(
     print(f"{FILENAME} ⏩ {debug_prefix} Grouping close values...")
     for key in ranges:
         if len(ranges[key]) > 1:
-            while group_is_close_dt(ranges[key]):
+            while group_is_close_dt(ranges[key], range_model.__name__):
                 pass
 
     dicts: dict = {}
@@ -442,7 +444,7 @@ def multi_fk_range_import(
     print(f"{FILENAME} ⏩ {debug_prefix} Grouping close values...")
     for key in ranges:
         if len(ranges[key]) > 1:
-            while group_is_close_dt(ranges[key]):
+            while group_is_close_dt(ranges[key], range_model.__name__):
                 pass
 
     dicts: dict = {}
