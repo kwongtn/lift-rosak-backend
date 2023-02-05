@@ -8,10 +8,10 @@ class TimescaleRouter:
 
     def db_for_read(self, model, **hints):
         """
-        Attempts to read timescale models go to timescale_db.
+        Attempts to read timescale models go to timescale_db read replicas.
         """
         if model._meta.app_label in self.route_app_labels:
-            return "timescale"
+            return "timescale_read"
         return None
 
     def db_for_write(self, model, **hints):
@@ -26,6 +26,10 @@ class TimescaleRouter:
         """
         Allow relations if databases are same.
         """
+        db_set = {"timescale", "timescale_read"}
+        if obj1._state.db in db_set and obj2._state.db in db_set:
+            return True
+
         return None
 
     def allow_migrate(self, db, app_label, model_name=None, **hints):
