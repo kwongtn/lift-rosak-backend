@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 import numpy as np
-from django.db import transaction
 from django.db.models import Model, Q
 from pandas import DataFrame
 from psycopg2.extras import DateTimeTZRange
@@ -21,7 +20,7 @@ INPUT_FILENAME: str = args.file
 FILENAME = INPUT_FILENAME.split("/")[-1]
 
 sleep_time = 5
-chunk_size = int(1e5)
+chunk_size = int(1e4)
 
 
 # If this end_dt and next start_dt is less than minutes,
@@ -227,7 +226,7 @@ def single_fk_range_import(
         fn=range_model.objects.bulk_create,
         debug_prefix=debug_prefix,
         objs=to_create,
-        batch_size=10000,
+        batch_size=2000,
         ignore_conflicts=True,
     )
 
@@ -283,12 +282,11 @@ def multi_fk_row_import(
         fn=target_model.objects.bulk_create,
         objs=[target_model(**elem_dict) for elem_dict in to_bulk_create_dict],
         debug_prefix=debug_prefix,
-        batch_size=10000,
+        batch_size=2000,
         ignore_conflicts=True,
     )
 
 
-@transaction.atomic
 def single_side_multi_fk_range_import(
     df: DataFrame,
     range_model: RangeAbstractModel,
@@ -398,7 +396,7 @@ def single_side_multi_fk_range_import(
         wrap_errors(
             fn=range_model.objects.bulk_create,
             objs=to_create,
-            batch_size=10000,
+            batch_size=2000,
             ignore_conflicts=True,
             debug_prefix=debug_prefix,
         )
