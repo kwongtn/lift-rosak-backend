@@ -286,6 +286,8 @@ def multi_fk_row_import(
         ignore_conflicts=True,
     )
 
+    print(f"{FILENAME} ✅ {debug_prefix} Done import.")
+
 
 def single_side_multi_fk_range_import(
     df: DataFrame,
@@ -465,8 +467,6 @@ def multi_fk_range_import(
             continue
 
         break
-
-    print(dicts)
 
     ranges_size = len(ranges)
     progress_size = 0

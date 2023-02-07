@@ -68,12 +68,13 @@ for model in [Bus, Captain, TripRev, EngineStatus, Accessibility, Provider, BusS
     model_name = model.__name__.lower()
     identifiers = list(df[model_name].dropna().unique())
 
-    print(f"⏩ Importing data for {model.__name__.lower()}...")
+    print(f"{FILENAME} ⏩ Importing data for {model_name}...")
     wrap_errors(
         fn=model.objects.bulk_create,
         objs=[model(identifier=identifier) for identifier in identifiers],
         ignore_conflicts=True,
     )
+    print(f"{FILENAME} ✅ Done import for {model_name}...")
 
 for (range_model, left_model, right_model) in [
     (BusProviderRange, Bus, Provider),
@@ -92,6 +93,9 @@ for (range_model, left_model, right_model) in [
         range_model=range_model,
         left_model=left_model,
         right_model=right_model,
+    )
+    print(
+        f"{FILENAME} ✅ Done import [{left_model.__name__.lower()}, {right_model.__name__.lower()}]..."
     )
 
 multi_fk_row_import(
