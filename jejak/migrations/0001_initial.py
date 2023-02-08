@@ -593,8 +593,8 @@ class Migration(migrations.Migration):
         ),
         migrations.RunSQL(
             sql="""
-                ALTER TABLE public.jejak_location DROP CONSTRAINT jejak_location_pkey;
-                ALTER TABLE public.jejak_location ADD CONSTRAINT jejak_location_pkey PRIMARY KEY (id, dt_gps);
+                ALTER TABLE jejak_location DROP CONSTRAINT jejak_location_pkey;
+                ALTER TABLE jejak_location ADD CONSTRAINT jejak_location_pkey PRIMARY KEY (id, dt_gps);
             """,
             reverse_sql=migrations.RunSQL.noop,
         ),
@@ -603,5 +603,200 @@ class Migration(migrations.Migration):
                 SELECT create_hypertable('jejak_location', 'dt_gps', chunk_time_interval => INTERVAL '1 day');
             """,
             reverse_sql=migrations.RunSQL.noop,
+        ),
+        migrations.RunSQL(
+            sql="""
+                CREATE OR REPLACE VIEW view_captainbusrange AS (
+                    SELECT
+                        bus_id,
+                        dt_range,
+                        U10.identifier AS "bus",
+                        U11.identifier AS "captain"
+                    FROM
+                        jejak_captainbusrange U01
+                    INNER JOIN jejak_bus U10 ON
+                        U01."bus_id" = U10."id"
+                    INNER JOIN jejak_captain U11 ON
+                        U01."captain_id" = U11."id"
+                );
+            """,
+            reverse_sql="DROP VIEW view_captainbusrange;",
+        ),
+        migrations.RunSQL(
+            sql="""
+                CREATE OR REPLACE VIEW view_accessibilitybusrange AS (
+                    SELECT
+                        bus_id,
+                        dt_range,
+                        U11.identifier AS "bus",
+                        U10."identifier"::bool AS "is_oku_friendly"
+                    FROM
+                        jejak_accessibilitybusrange U01
+                    INNER JOIN jejak_accessibility U10 ON
+                        U01."accessibility_id" = U10."id"
+                    INNER JOIN jejak_bus U11 ON
+                        U01."bus_id" = U11."id"
+                );
+            """,
+            reverse_sql="DROP VIEW view_accessibilitybusrange;",
+        ),
+        migrations.RunSQL(
+            sql="""
+                CREATE OR REPLACE VIEW view_busstopbusrange AS (
+                    SELECT
+                        bus_id,
+                        dt_range,
+                        U10.identifier AS "bus",
+                        U11.identifier AS "busstop"
+                    FROM
+                        jejak_busstopbusrange U01
+                    INNER JOIN jejak_bus U10 ON
+                        U01."bus_id" = U10."id"
+                    INNER JOIN jejak_busstop U11 ON
+                        U01."bus_stop_id" = U11."id"
+                );
+            """,
+            reverse_sql="DROP VIEW view_busstopbusrange;",
+        ),
+        migrations.RunSQL(
+            sql="""
+                CREATE OR REPLACE VIEW view_busproviderrange AS (
+                    SELECT
+                        bus_id,
+                        dt_range,
+                        U10.identifier AS "bus",
+                        U11.identifier AS "provider"
+                    FROM
+                        jejak_busproviderrange U01
+                    INNER JOIN jejak_bus U10 ON
+                        U01."bus_id" = U10."id"
+                    INNER JOIN jejak_provider U11 ON
+                        U01."provider_id" = U11."id"
+                );
+            """,
+            reverse_sql="DROP VIEW view_busproviderrange;",
+        ),
+        migrations.RunSQL(
+            sql="""
+                CREATE OR REPLACE VIEW view_busrouterange AS (
+                    SELECT
+                        bus_id,
+                        dt_range,
+                        U10.identifier AS "bus",
+                        U11.identifier AS "route"
+                    FROM
+                        jejak_busrouterange U01
+                    INNER JOIN jejak_bus U10 ON
+                        U01."bus_id" = U10."id"
+                    INNER JOIN jejak_route U11 ON
+                        U01."route_id" = U11."id"
+                );
+            """,
+            reverse_sql="DROP VIEW view_busrouterange;",
+        ),
+        migrations.RunSQL(
+            sql="""
+                CREATE OR REPLACE VIEW view_captainproviderrange AS (
+                    SELECT
+                            captain_id,
+                            provider_id,
+                            dt_range,
+                            U10.identifier AS "captain",
+                            U11.identifier AS "provider"
+                    FROM
+                            jejak_captainproviderrange U01
+                    INNER JOIN jejak_captain U10 ON
+                            U01."captain_id" = U10."id"
+                    INNER JOIN jejak_provider U11 ON
+                            U01."provider_id" = U11."id"
+                );
+            """,
+            reverse_sql="DROP VIEW view_captainproviderrange;",
+        ),
+        migrations.RunSQL(
+            sql="""
+                CREATE OR REPLACE VIEW view_enginestatusbusrange AS (
+                    SELECT
+                        bus_id,
+                        dt_range,
+                        U10.identifier AS "bus",
+                        U11.identifier AS "engine_status"
+                    FROM
+                        jejak_enginestatusbusrange U01
+                    INNER JOIN jejak_bus U10 ON
+                        U01."bus_id" = U10."id"
+                    INNER JOIN jejak_enginestatus U11 ON
+                        U01."engine_status_id" = U11."id"
+                );
+            """,
+            reverse_sql="DROP VIEW view_enginestatusbusrange;",
+        ),
+        migrations.RunSQL(
+            sql="""
+                CREATE OR REPLACE VIEW view_triprevbusrange AS (
+                    SELECT
+                        bus_id,
+                        dt_range,
+                        U10.identifier AS "bus",
+                        U11.identifier AS "trip_rev"
+                    FROM
+                        jejak_triprevbusrange U01
+                    INNER JOIN jejak_bus U10 ON
+                        U01."bus_id" = U10."id"
+                    INNER JOIN jejak_triprev U11 ON
+                        U01."trip_rev_id" = U11."id"
+                );
+            """,
+            reverse_sql="DROP VIEW view_triprevbusrange;",
+        ),
+        migrations.RunSQL(
+            sql="""
+                CREATE OR REPLACE VIEW view_location AS (
+                    SELECT
+                        U0."id",
+                        U0."dt_gps",
+                        U1."bus",
+                        U1."bus_id",
+                        U0."location",
+                        U0."dir",
+                        U0."speed",
+                        U0."angle",
+                        U1."is_oku_friendly",
+                        U2."provider",
+                        U3."route",
+                        U4."busstop",
+                        U5."captain",
+                        U6."engine_status"
+                    FROM
+                        jejak_location U0
+                    LEFT JOIN view_accessibilitybusrange U1
+                    ON
+                        U0."bus_id" = U1."bus_id"
+                        AND U1."dt_range"::tstzrange @> U0."dt_gps"::timestamptz
+                    LEFT JOIN view_busproviderrange U2
+                    ON
+                        U0."bus_id" = U2."bus_id"
+                        AND U2."dt_range"::tstzrange @> U0."dt_gps"::timestamptz
+                    LEFT JOIN view_busrouterange U3
+                    ON
+                        U0."bus_id" = U3."bus_id"
+                        AND U3."dt_range"::tstzrange @> U0."dt_gps"::timestamptz
+                    LEFT JOIN view_busstopbusrange U4
+                    ON
+                        U0."bus_id" = U4."bus_id"
+                        AND U4."dt_range"::tstzrange @> U0."dt_gps"::timestamptz
+                    LEFT JOIN view_captainbusrange U5
+                    ON
+                        U0."bus_id" = U5."bus_id"
+                        AND U5."dt_range"::tstzrange @> U0."dt_gps"::timestamptz
+                    LEFT JOIN view_enginestatusbusrange U6
+                    ON
+                        U0."bus_id" = U6."bus_id"
+                        AND U6."dt_range"::tstzrange @> U0."dt_gps"::timestamptz
+                    ORDER BY
+                        U0."dt_gps" ASC
+                );
+            """,
+            reverse_sql="DROP VIEW view_location;",
         ),
     ]
