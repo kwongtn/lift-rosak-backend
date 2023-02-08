@@ -85,7 +85,7 @@ for (model, distinct_on) in [
             for curr in range_list:
                 if prev is not None and (
                     curr.dt_range.lower < prev.dt_range.upper
-                    or prev.dt_range.upper - curr.dt_range.lower
+                    or curr.dt_range.lower - prev.dt_range.upper
                     < GROUP_THRESHOLDS[model_key]
                 ):
                     if curr.dt_range.upper > prev.dt_range.upper:
