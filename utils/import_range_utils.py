@@ -162,7 +162,7 @@ def single_fk_range_import(
     )
 
     print(
-        f"{FILENAME} 📦 {debug_prefix} {len(dfs)} dataframes created, aggregrating values..."
+        f"{FILENAME} 📦 {debug_prefix} {len(dfs):,} dataframes created, aggregrating values..."
     )
 
     ranges = aggregate_start_end_dt(
@@ -309,7 +309,7 @@ def single_side_multi_fk_range_import(
     )
 
     print(
-        f"{FILENAME} ⏩ {debug_prefix} {len(dfs)} dataframes created, aggregrating values..."
+        f"{FILENAME} ⏩ {debug_prefix} {len(dfs):,} dataframes created, aggregrating values..."
     )
 
     ranges = aggregate_start_end_dt(
@@ -360,7 +360,7 @@ def single_side_multi_fk_range_import(
 
         progress_size += len(chunk)
 
-        progress_suffix = f"[{progress_size}/{ranges_size}]"
+        progress_suffix = f"[{progress_size:,}/{ranges_size:,}]"
 
         print(f"{FILENAME} ⏩ {debug_prefix} Generating query... {progress_suffix}")
         criteria = get_criteria(
@@ -434,7 +434,7 @@ def multi_fk_range_import(
     )
 
     print(
-        f"{FILENAME} ⏩ {debug_prefix} {len(dfs)} dataframes created, aggregrating values..."
+        f"{FILENAME} ⏩ {debug_prefix} {len(dfs):,} dataframes created, aggregrating values..."
     )
     ranges = aggregate_start_end_dt(
         dfs=dfs,
@@ -483,7 +483,7 @@ def multi_fk_range_import(
 
         progress_size += len(chunk)
 
-        progress_suffix = f"[{progress_size}/{ranges_size}]"
+        progress_suffix = f"[{progress_size:,}/{ranges_size:,}]"
 
         print(
             f"{FILENAME} ⏩ {debug_prefix} Generating & requesting comparison dict... {progress_suffix}"
