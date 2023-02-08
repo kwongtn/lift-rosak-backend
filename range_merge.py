@@ -111,8 +111,7 @@ for (model, distinct_on) in [
 
             wrap_errors(model.objects.bulk_update, to_update, ["dt_range"])
 
-            print(f"📜 [{model_key}] Updated {len(to_update):,} {model_key}s")
-
+        print(f"📜 [{model_key}] Updated {len(to_update):,} {model_key}s")
         print(f"✅ [{model_key}] Done deduplication... {debug_suffix}")
 
     print(f"📜 [{model_key}] Updated in total {len(to_update):,} {model_key}s")
