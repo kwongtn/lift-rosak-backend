@@ -6,6 +6,7 @@ from django.db.models import Q
 from psycopg2.extras import DateTimeTZRange
 
 from utils.constants import GROUP_THRESHOLDS
+from utils.db import wrap_errors
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rosak.settings")
 django.setup()
@@ -36,7 +37,7 @@ for (model, distinct_on) in [
     (BusRouteRange, ("bus_id", "route_id")),
 ]:
     model_key = model.__name__
-    distincts = model.objects.distinct(*distinct_on)
+    distincts = wrap_errors(model.objects.distinct, *distinct_on)
 
     uniques = set()
     for elem in distincts:
@@ -47,12 +48,18 @@ for (model, distinct_on) in [
         uniques.add(tuple(to_add))
 
     to_delete = set()
-    to_update = set()
+    update_count = 0
+    current_count = 0
     while uniques:
+        to_update_ids = set()
+        to_update = []
+        debug_suffix: str = f"({current_count:,} / {len(distincts):,})"
+
         curr_iterator: list[tuple] = []
         while len(curr_iterator) < batch_size and uniques:
             curr_iterator.append(uniques.pop())
 
+        current_count += len(curr_iterator)
         query = Q()
         for ids in curr_iterator:
             sub_query = Q()
@@ -87,14 +94,14 @@ for (model, distinct_on) in [
                             upper=curr.dt_range.upper,
                             bounds="[]",
                         )
-                        prev.save()
-                        # to_update.add(prev.id)
+                        if prev.id not in to_update_ids:
+                            to_update.append(prev)
+                            to_update_ids.add(prev.id)
 
                     to_delete.add(curr.id)
 
                 else:
                     prev = curr
 
-    print(f"Updated {len(to_update)} {model_key}s")
-    print(f"Deleting {len(to_delete)} {model_key}s")
+            wrap_errors(model.objects.bulk_update, to_update, ["dt_range"])
     model.objects.filter(id__in=to_delete).delete()
