@@ -37,6 +37,9 @@ for (model, distinct_on) in [
     (BusRouteRange, ("bus_id", "route_id")),
 ]:
     model_key = model.__name__
+    print(f"⏩ [{model_key}] Deduplicating ranges...")
+
+    print(f"⏩ [{model_key}] Requesting unique values...")
     distincts = wrap_errors(model.objects.distinct, *distinct_on)
 
     uniques = set()
@@ -60,6 +63,7 @@ for (model, distinct_on) in [
             curr_iterator.append(uniques.pop())
 
         current_count += len(curr_iterator)
+        print(f"⏩ [{model_key}] Generating unique key query... {debug_suffix}")
         query = Q()
         for ids in curr_iterator:
             sub_query = Q()
@@ -72,10 +76,12 @@ for (model, distinct_on) in [
 
         assert len(query) > 0
 
+        print(f"⏩ [{model_key}] Generating dedup key tuple... {debug_suffix}")
         objs = defaultdict(list)
         for obj in model.objects.filter(query).order_by("dt_range"):
             objs[tuple([getattr(obj, key) for key in distinct_on])].append(obj)
 
+        print(f"⏩ [{model_key}] Deduplicating... {debug_suffix}")
         for range_list in objs.values():
             if len(range_list) == 1:
                 continue
@@ -104,4 +110,14 @@ for (model, distinct_on) in [
                     prev = curr
 
             wrap_errors(model.objects.bulk_update, to_update, ["dt_range"])
+
+            print(f"📜 [{model_key}] Updated {len(to_update):,} {model_key}s")
+
+        print(f"✅ [{model_key}] Done deduplication... {debug_suffix}")
+
+    print(f"📜 [{model_key}] Updated in total {len(to_update):,} {model_key}s")
+
+    print(f"📜 [{model_key}] Deleting {len(to_delete):,} {model_key}s")
     model.objects.filter(id__in=to_delete).delete()
+
+    print(f"✅ [{model_key}] Done.")
