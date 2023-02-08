@@ -83,7 +83,7 @@ for (range_model, left_model, right_model) in [
     (TripRevBusRange, Bus, TripRev),
     (BusStopBusRange, Bus, BusStop),
     (CaptainProviderRange, Captain, Provider),
-    (CaptainBusRange, Captain, Bus),
+    (CaptainBusRange, Bus, Captain),
 ]:
     print(
         f"{FILENAME} ⏩ Importing ranges for [{left_model.__name__.lower()}, {right_model.__name__.lower()}]..."
