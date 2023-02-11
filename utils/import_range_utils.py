@@ -241,7 +241,7 @@ def multi_fk_row_import(
     global sleep_time
     target_str = target_model.__name__.lower()
 
-    debug_prefix = f"[{str(groupings.keys())} -> {target_str}]"
+    debug_prefix = f"[{list(groupings.keys())} -> {target_str}]"
 
     print(f"{FILENAME} 📦 {debug_prefix} Aggregrating values...")
     df2 = df[[target_str, *groupings.keys()]].dropna().drop_duplicates()

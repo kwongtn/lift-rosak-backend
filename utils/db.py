@@ -58,6 +58,9 @@ def wrap_errors(
             return fn_return
 
         except (InterfaceError, OperationalError):
+            print(
+                f"{FILENAME} ❗ {debug_prefix} Database connection broke, reconnecting..."
+            )
             reconnect()
 
         except Exception as e:
