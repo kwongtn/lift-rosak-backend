@@ -57,3 +57,27 @@ GROUP_THRESHOLDS = {
     "TripRange": timedelta(minutes=3),
     "TripRevBusRange": timedelta(minutes=3),
 }
+
+DE_RANGE_THRESHOLDS = {
+    "AccessibilityBusRange": timedelta(days=30),
+    "BusProviderRange": timedelta(days=30),
+    "BusRouteRange": timedelta(days=1),
+    "BusStopBusRange": timedelta(hours=1),
+    "CaptainBusRange": timedelta(days=1),
+    "CaptainProviderRange": timedelta(days=30),
+    "EngineStatusBusRange": timedelta(days=30),
+    "TripRange": timedelta(days=1),
+    "TripRevBusRange": timedelta(days=1),
+}
+
+RANGE_WARN_THRESHOLDS = {
+    "AccessibilityBusRange": timedelta(days=365),
+    "BusProviderRange": timedelta(days=365),
+    "BusRouteRange": timedelta(days=1),
+    "BusStopBusRange": timedelta(hours=1),
+    "CaptainBusRange": timedelta(days=1),
+    "CaptainProviderRange": timedelta(days=30),
+    "EngineStatusBusRange": timedelta(days=30),
+    "TripRange": timedelta(days=1),
+    "TripRevBusRange": timedelta(days=1),
+}

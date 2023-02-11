@@ -1,11 +1,12 @@
 import os
 from collections import defaultdict
+from datetime import datetime
 
 import django
 from django.db.models import Q
 from psycopg2.extras import DateTimeTZRange
 
-from utils.constants import GROUP_THRESHOLDS
+from utils.constants import DE_RANGE_THRESHOLDS, GROUP_THRESHOLDS, RANGE_WARN_THRESHOLDS
 from utils.db import wrap_errors
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rosak.settings")
@@ -24,11 +25,11 @@ from jejak.models import (  # noqa E402
 )
 
 batch_size = 1000
+dt_lower_threshold = datetime(2022, 5, 21)
+is_merge = ""
+is_derange = ""
 
-for (model, distinct_on) in [
-    (BusProviderRange, ("bus_id", "provider_id")),
-    (AccessibilityBusRange, ("bus_id", "accessibility_id")),
-    (EngineStatusBusRange, ("bus_id", "engine_status_id")),
+for (model, distinct_on) in [  # noqa C901
     (TripRevBusRange, ("bus_id", "trip_rev_id")),
     (BusStopBusRange, ("bus_id", "bus_stop_id")),
     (CaptainProviderRange, ("captain_id", "provider_id")),
@@ -54,8 +55,7 @@ for (model, distinct_on) in [
     update_count = 0
     current_count = 0
     while uniques:
-        to_update_ids = set()
-        to_update = []
+        to_update = {}
         debug_suffix: str = f"({current_count:,} / {len(distincts):,})"
 
         curr_iterator: list[tuple] = []
@@ -89,34 +89,103 @@ for (model, distinct_on) in [
             prev = None
 
             for curr in range_list:
-                if prev is not None and (
-                    curr.dt_range.lower < prev.dt_range.upper
-                    or curr.dt_range.lower - prev.dt_range.upper
-                    < GROUP_THRESHOLDS[model_key]
+                if (
+                    prev is not None
+                    and prev.dt_range.lower < dt_lower_threshold
+                    and curr.dt_range.lower < prev.dt_range.upper
+                    and abs(prev.dt_range.lower - prev.dt_range.upper)
+                    > DE_RANGE_THRESHOLDS[model_key]
                 ):
+                    if is_derange != "a":
+                        print()
+                        for fk in distinct_on:
+                            fk_str = fk[:-3]
+                            print(
+                                f"{fk_str}\t: {getattr(prev, fk_str).identifier}",
+                                f"({getattr(prev, fk)})",
+                            )
+
+                        print(
+                            f"Prev: {prev.dt_range} -> [{prev.dt_range.lower}, {curr.dt_range.lower})"
+                        )
+                        print(f"Curr: {curr.dt_range} -> Unchanged")
+                        is_derange = input("De-range? [y]/n/a : ")
+                        if is_derange not in ["a", "y", ""]:
+                            print("Not de-ranging")
+                            continue
+
+                        prev.dt_range = DateTimeTZRange(
+                            lower=prev.dt_range.lower,
+                            upper=curr.dt_range.lower,
+                            bounds="[)",
+                        )
+                        if prev.id not in to_update.keys():
+                            to_update[prev.id] = prev
+
+                        if is_derange != "a":
+                            print("Updated prev: ", to_update[prev.id].dt_range)
+
+                        prev = curr
+
+                elif (
+                    prev is not None
+                    and (
+                        curr.dt_range.lower < prev.dt_range.upper
+                        or abs(curr.dt_range.lower - prev.dt_range.upper)
+                        < GROUP_THRESHOLDS[model_key]
+                    )
+                    and abs(prev.dt_range.lower - prev.dt_range.upper)
+                    < RANGE_WARN_THRESHOLDS[model_key]
+                ):
+                    if is_merge != "a":
+                        print()
+                        for fk in distinct_on:
+                            fk_str = fk[:-3]
+                            print(
+                                f"{fk_str}\t: {getattr(prev, fk_str).identifier}",
+                                f"({getattr(prev, fk)})",
+                            )
+
+                        print("Prev: ", prev.dt_range)
+                        print("Curr: ", curr.dt_range)
+                        is_merge = input("Merge? [y]/n/a : ")
+                        if is_merge not in ["a", "y", ""]:
+                            print("Not merging")
+                            continue
+
                     if curr.dt_range.upper > prev.dt_range.upper:
                         prev.dt_range = DateTimeTZRange(
                             lower=prev.dt_range.lower,
                             upper=curr.dt_range.upper,
                             bounds="[]",
                         )
-                        if prev.id not in to_update_ids:
-                            to_update.append(prev)
-                            to_update_ids.add(prev.id)
+                        if prev.id not in to_update.keys():
+                            to_update[prev.id] = prev
+
+                        if is_merge != "a":
+                            print("Updated prev: ", to_update[prev.id].dt_range)
 
                     to_delete.add(curr.id)
 
                 else:
                     prev = curr
 
-            wrap_errors(model.objects.bulk_update, to_update, ["dt_range"])
+                if is_merge != "a" and to_update:
+                    print("To update: ", to_update)
 
-        print(f"📜 [{model_key}] Updated {len(to_update):,} {model_key}s")
+        wrap_errors(model.objects.bulk_update, to_update.values(), ["dt_range"])
+        update_count += len(to_update)
+
+        if to_update:
+            print(f"📜 [{model_key}] Updated {len(to_update):,} {model_key}s")
+
         print(f"✅ [{model_key}] Done deduplication... {debug_suffix}")
 
-    print(f"📜 [{model_key}] Updated in total {len(to_update):,} {model_key}s")
+    if update_count:
+        print(f"📜 [{model_key}] Updated in total {update_count:,} {model_key}s")
 
-    print(f"📜 [{model_key}] Deleting {len(to_delete):,} {model_key}s")
-    model.objects.filter(id__in=to_delete).delete()
+    if to_delete:
+        print(f"📜 [{model_key}] Deleting {len(to_delete):,} {model_key}s")
+        model.objects.filter(id__in=to_delete).delete()
 
     print(f"✅ [{model_key}] Done.")
