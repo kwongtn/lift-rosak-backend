@@ -12,6 +12,7 @@ class EventInput:
     spotting_date: date
     vehicle: gql.ID
     notes: Optional[str]
+    run_number: Optional[str]
     status: gql.auto
     type: gql.auto
     origin_station: Optional[gql.ID]

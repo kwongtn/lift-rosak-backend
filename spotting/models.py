@@ -41,6 +41,13 @@ class Event(TimeStampedModel):
         choices=VehicleStatus.choices,
     )
 
+    run_number = models.CharField(
+        max_length=32,
+        blank=True,
+        null=True,
+        default=None,
+    )
+
     type = models.CharField(
         max_length=32,
         choices=SpottingEventType.choices,
@@ -96,6 +103,7 @@ class Event(TimeStampedModel):
         ]
         indexes = [
             BTreeIndex(fields=["vehicle", "-spotting_date"]),
+            BTreeIndex(fields=["vehicle", "run_number", "-spotting_date"]),
         ]
 
 

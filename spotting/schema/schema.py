@@ -95,6 +95,7 @@ class SpottingMutations:
             origin_station_id=origin_station_id,
             destination_station_id=destination_station_id,
             is_anonymous=is_anonymous,
+            run_number=input.run_number,
         )
 
         if input.location != gql.UNSET:
