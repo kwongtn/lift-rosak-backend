@@ -1,5 +1,7 @@
 from advanced_filters.admin import AdminAdvancedFiltersMixin
 from django.contrib import admin
+from django.db import models
+from django.forms import Textarea, TextInput
 
 from generic.views import GeometricForm
 from spotting.models import Event, LocationEvent
@@ -13,6 +15,10 @@ class LocationEventForm(GeometricForm):
 
 
 class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
+    formfield_overrides = {
+        models.CharField: {"widget": TextInput(attrs={"size": "20"})},
+        models.TextField: {"widget": Textarea(attrs={"rows": 1, "cols": 20})},
+    }
     list_display = [
         "id",
         "reporter",
