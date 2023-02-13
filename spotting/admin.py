@@ -23,6 +23,8 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "origin_station",
         "destination_station",
         "is_anonymous",
+        "run_number",
+        "notes",
     ]
     list_filter = [
         "type",
@@ -40,8 +42,8 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "spotting_date",
     ]
     list_editable = [
-        "status",
-        "type",
+        "run_number",
+        "notes",
     ]
 
     advanced_filter_fields = [
