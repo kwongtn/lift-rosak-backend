@@ -610,6 +610,7 @@ class Migration(migrations.Migration):
                     SELECT
                         bus_id,
                         dt_range,
+                        captain_id,
                         U10.identifier AS "bus",
                         U11.identifier AS "captain"
                     FROM
@@ -627,6 +628,7 @@ class Migration(migrations.Migration):
                 CREATE OR REPLACE VIEW view_accessibilitybusrange AS (
                     SELECT
                         bus_id,
+                        accessibility_id,
                         dt_range,
                         U11.identifier AS "bus",
                         U10."identifier"::bool AS "is_oku_friendly"
@@ -646,8 +648,9 @@ class Migration(migrations.Migration):
                     SELECT
                         bus_id,
                         dt_range,
+                        bus_stop_id,
                         U10.identifier AS "bus",
-                        U11.identifier AS "busstop"
+                        U11.identifier AS "bus_stop"
                     FROM
                         jejak_busstopbusrange U01
                     INNER JOIN jejak_bus U10 ON
@@ -664,6 +667,7 @@ class Migration(migrations.Migration):
                     SELECT
                         bus_id,
                         dt_range,
+                        provider_id,
                         U10.identifier AS "bus",
                         U11.identifier AS "provider"
                     FROM
@@ -682,6 +686,7 @@ class Migration(migrations.Migration):
                     SELECT
                         bus_id,
                         dt_range,
+                        route_id,
                         U10.identifier AS "bus",
                         U11.identifier AS "route"
                     FROM
@@ -698,17 +703,17 @@ class Migration(migrations.Migration):
             sql="""
                 CREATE OR REPLACE VIEW view_captainproviderrange AS (
                     SELECT
-                            captain_id,
-                            provider_id,
-                            dt_range,
-                            U10.identifier AS "captain",
-                            U11.identifier AS "provider"
+                        captain_id,
+                        provider_id,
+                        dt_range,
+                        U10.identifier AS "captain",
+                        U11.identifier AS "provider"
                     FROM
-                            jejak_captainproviderrange U01
+                        jejak_captainproviderrange U01
                     INNER JOIN jejak_captain U10 ON
-                            U01."captain_id" = U10."id"
+                        U01."captain_id" = U10."id"
                     INNER JOIN jejak_provider U11 ON
-                            U01."provider_id" = U11."id"
+                        U01."provider_id" = U11."id"
                 );
             """,
             reverse_sql="DROP VIEW view_captainproviderrange;",
@@ -719,6 +724,7 @@ class Migration(migrations.Migration):
                     SELECT
                         bus_id,
                         dt_range,
+                        engine_status_id,
                         U10.identifier AS "bus",
                         U11.identifier AS "engine_status"
                     FROM
@@ -737,6 +743,7 @@ class Migration(migrations.Migration):
                     SELECT
                         bus_id,
                         dt_range,
+                        trip_rev_id,
                         U10.identifier AS "bus",
                         U11.identifier AS "trip_rev"
                     FROM
