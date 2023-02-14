@@ -6,6 +6,7 @@ from strawberry_django_plus.optimizer import DjangoOptimizerExtension
 
 from common.schema.schema import CommonMutations, CommonScalars
 from incident.schema.schema import IncidentMutations, IncidentScalars
+from jejak.schema.schema import JejakMutations, JejakScalars
 from operation.schema.schema import OperationMutations, OperationScalars
 from reporting.schema.schema import ReportingMutations, ReportingScalars
 from spotting.schema.schema import SpottingMutations, SpottingScalars
@@ -18,6 +19,7 @@ class Query(
     CommonScalars,
     SpottingScalars,
     IncidentScalars,
+    JejakScalars,
 ):
     pass
 
@@ -29,6 +31,7 @@ class Mutation(
     CommonMutations,
     SpottingMutations,
     IncidentMutations,
+    JejakMutations,
 ):
     pass
 
