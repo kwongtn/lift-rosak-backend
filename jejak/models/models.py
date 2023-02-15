@@ -51,3 +51,6 @@ class Location(models.Model):
                 name="%(app_label)s_%(class)s_unique_received_gps_time_bus",
             ),
         ]
+
+    def __str__(self) -> str:
+        return f"Loc. - {self.id:,}"

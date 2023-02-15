@@ -16,7 +16,7 @@ class LocationAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
     show_full_result_count = False
     paginator = LocationPaginator
     list_display = [
-        "id",
+        "__str__",
         "dt_received",
         "dt_gps",
         "location",
@@ -27,6 +27,10 @@ class LocationAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
     ]
     search_fields = [
         "bus__identifier",
+    ]
+    list_filter = [
+        "dt_received",
+        "dt_gps",
     ]
     # advanced_filter_fields = [
     #     "code",
