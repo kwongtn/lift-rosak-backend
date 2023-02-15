@@ -17,6 +17,12 @@ class Bus(IdentifierDetailAbstractModel):
         "jejak.BusType", on_delete=models.CASCADE, null=True, blank=True
     )
 
+    def __str__(self) -> str:
+        return self.identifier
+
+    class Meta:
+        verbose_name_plural = "Buses"
+
 
 class Accessibility(IdentifierDetailAbstractModel):
     pass
