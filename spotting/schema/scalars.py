@@ -26,6 +26,7 @@ class EventScalar:
     notes: str
     status: gql.auto
     type: gql.auto
+    run_number: Optional[str]
     origin_station: Optional["Station"]
     destination_station: Optional["Station"]
 

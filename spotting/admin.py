@@ -1,5 +1,7 @@
 from advanced_filters.admin import AdminAdvancedFiltersMixin
 from django.contrib import admin
+from django.db import models
+from django.forms import Textarea, TextInput
 
 from generic.views import GeometricForm
 from spotting.models import Event, LocationEvent
@@ -13,6 +15,10 @@ class LocationEventForm(GeometricForm):
 
 
 class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
+    formfield_overrides = {
+        models.CharField: {"widget": TextInput(attrs={"size": "20"})},
+        models.TextField: {"widget": Textarea(attrs={"rows": 1, "cols": 20})},
+    }
     list_display = [
         "id",
         "reporter",
@@ -23,6 +29,8 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "origin_station",
         "destination_station",
         "is_anonymous",
+        "run_number",
+        "notes",
     ]
     list_filter = [
         "type",
@@ -40,8 +48,8 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "spotting_date",
     ]
     list_editable = [
-        "status",
-        "type",
+        "run_number",
+        "notes",
     ]
 
     advanced_filter_fields = [
