@@ -8,3 +8,9 @@ class LocationOrder:
     id: gql.auto
     dt_received: gql.auto
     dt_gps: gql.auto
+
+
+@gql.django.ordering.order(models.Bus)
+class BusOrder:
+    id: gql.auto
+    identifier: gql.auto
