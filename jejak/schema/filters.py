@@ -1,3 +1,6 @@
+from datetime import datetime
+from typing import List
+
 from strawberry_django_plus import gql
 
 from jejak import models
@@ -7,3 +10,11 @@ from jejak import models
 class LocationFilter:
     id: gql.ID
     bus_id: gql.ID
+    dt_received_range: List[datetime]
+    dt_gps_range: List[datetime]
+
+    def filter_dt_received_range(self, queryset):
+        return queryset.filter(dt_received__range=self.dt_received_range)
+
+    def filter_gps_range(self, queryset):
+        return queryset.filter(dt_gps__range=self.dt_gps_range)
