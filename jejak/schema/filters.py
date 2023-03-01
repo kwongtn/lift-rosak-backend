@@ -14,7 +14,17 @@ class LocationFilter:
     dt_gps_range: List[datetime]
 
     def filter_dt_received_range(self, queryset):
-        return queryset.filter(dt_received__range=self.dt_received_range)
+        return queryset.filter(
+            dt_received__range=(
+                min(self.dt_received_range),
+                max(self.dt_received_range),
+            )
+        )
 
     def filter_gps_range(self, queryset):
-        return queryset.filter(dt_gps__range=self.dt_gps_range)
+        return queryset.filter(
+            dt_gps__range=(
+                min(self.dt_gps_range),
+                max(self.dt_gps_range),
+            )
+        )
