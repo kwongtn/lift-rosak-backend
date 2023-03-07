@@ -21,7 +21,7 @@ class LocationFilter:
             )
         )
 
-    def filter_gps_range(self, queryset):
+    def filter_dt_gps_range(self, queryset):
         return queryset.filter(
             dt_gps__range=(
                 min(self.dt_gps_range),
