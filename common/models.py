@@ -1,4 +1,6 @@
+from asgiref.sync import sync_to_async
 from django.db import models
+from django.db.models import Q
 from model_utils.models import SoftDeletableModel, TimeStampedModel, UUIDModel
 
 from common.enums import CreditType, UserJejakTransactionCategory
@@ -30,6 +32,38 @@ class User(TimeStampedModel):
             return 0
         else:
             return balance
+
+    @property
+    def free_credit_balance(self) -> int:
+        balance = self.userjejaktransaction_set.filter(
+            credit_type=CreditType.FREE
+        ).aggregate(sum=models.Sum("credit_change"))["sum"]
+
+        if balance is None:
+            return 0
+        else:
+            return balance
+
+    @property
+    @sync_to_async
+    def afree_credit_balance(self) -> int:
+        return self.free_credit_balance
+
+    @property
+    def non_free_credit_balance(self) -> int:
+        balance = self.userjejaktransaction_set.filter(
+            ~Q(credit_type=CreditType.FREE)
+        ).aggregate(sum=models.Sum("credit_change"))["sum"]
+
+        if balance is None:
+            return 0
+        else:
+            return balance
+
+    @property
+    @sync_to_async
+    def anon_free_credit_balance(self) -> int:
+        return self.non_free_credit_balance
 
     def __str__(self) -> str:
         return self.firebase_id[:8]

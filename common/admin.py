@@ -25,7 +25,11 @@ class UserAdmin(admin.ModelAdmin):
     search_fields = [
         "firebase_id",
     ]
-    readonly_fields = ["credit_balance"]
+    readonly_fields = [
+        "credit_balance",
+        "free_credit_balance",
+        "non_free_credit_balance",
+    ]
 
 
 class UserJejakTransactionAdmin(admin.ModelAdmin):
