@@ -275,3 +275,14 @@ DEBUG_TOOLBAR_PANELS = [
 # Recaptcha Configuration
 RECAPTCHA_KEY = os.environ.get("RECAPTCHA_SECRET")
 RECAPTCHA_MIN_SCORE = 0.85
+
+################################
+#    Jejak Credit Multiplier   #
+################################
+COUNT_ROWS_MULTIPLIER = 1
+
+# 1 credit per 1000 rows
+BUS_LOCATION_HISTORY_MULTIPLIER = 0.01
+
+# 1 credit per 200kb
+BANDWIDTH_MULTIPLIER = 0.005

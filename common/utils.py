@@ -6,7 +6,8 @@ from asgiref.sync import sync_to_async
 from django.http import HttpRequest
 from firebase_admin import auth
 
-from common.models import User
+from common.enums import CreditType, UserJejakTransactionCategory
+from common.models import User, UserJejakTransaction
 from generic.schema.enums import DateGroupings
 
 
@@ -101,3 +102,64 @@ def get_result_comparison_tuple(
         return_results.append(to_append)
 
     return return_results
+
+
+async def get_charge_credits_objs(
+    user: User,
+    category: UserJejakTransactionCategory,
+    amount: int,
+    details: str | None = None,
+    free_credit_balance_modifier: int = 0,
+) -> Tuple[List[UserJejakTransaction], int]:
+    free_credit_balance = free_credit_balance_modifier + (
+        await user.afree_credit_balance
+    )
+
+    if free_credit_balance <= 0:
+        return (
+            [
+                UserJejakTransaction(
+                    user_id=user.id,
+                    category=category,
+                    credit_type=CreditType.PAID,
+                    credit_change=amount,
+                    details=details,
+                )
+            ],
+            0,
+        )
+
+    elif abs(amount) < free_credit_balance:
+        return (
+            [
+                UserJejakTransaction(
+                    user_id=user.id,
+                    category=category,
+                    credit_type=CreditType.FREE,
+                    credit_change=amount,
+                    details=details,
+                )
+            ],
+            amount,
+        )
+
+    else:
+        return (
+            [
+                UserJejakTransaction(
+                    user_id=user.id,
+                    category=category,
+                    credit_type=CreditType.FREE,
+                    credit_change=-1 * free_credit_balance,
+                    details=details,
+                ),
+                UserJejakTransaction(
+                    user_id=user.id,
+                    category=category,
+                    credit_type=CreditType.PAID,
+                    credit_change=-1 * (abs(amount) - free_credit_balance),
+                    details=details,
+                ),
+            ],
+            -1 * free_credit_balance,
+        )
