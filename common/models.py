@@ -1,7 +1,7 @@
 from django.db import models
 from model_utils.models import SoftDeletableModel, TimeStampedModel, UUIDModel
 
-from common.enums import UserJejakTransactionCategory
+from common.enums import CreditType, UserJejakTransactionCategory
 
 
 class Media(TimeStampedModel, UUIDModel, SoftDeletableModel):
@@ -43,6 +43,10 @@ class UserJejakTransaction(TimeStampedModel):
     category = models.CharField(
         choices=UserJejakTransactionCategory.choices,
         max_length=32,
+    )
+    credit_type = models.CharField(
+        choices=CreditType.choices,
+        max_length=16,
     )
     credit_change = models.IntegerField()
     details = models.TextField(

@@ -8,3 +8,9 @@ class UserJejakTransactionCategory(models.TextChoices):
     COUNT_ROWS = "COUNT_ROWS"
     BUS_LOCATION_HISTORY = "BUS_LOCATION_HISTORY"
     BANDWIDTH = "BANDWIDTH"
+
+
+class CreditType(models.TextChoices):
+    PAID = "PAID"
+    FREE = "FREE"
+    SPECIAL = "SPECIAL"
