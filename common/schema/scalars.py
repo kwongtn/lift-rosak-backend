@@ -37,6 +37,9 @@ class UserScalar:
         from spotting.schema.scalars import EventScalar
 
     firebase_id: str = gql.django.field(permission_classes=[IsAdmin])
+    credit_balance: int
+    free_credit_balance: int
+    non_free_credit_balance: int
 
     @gql.django.field
     def short_id(self) -> str:
