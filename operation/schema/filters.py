@@ -25,13 +25,6 @@ class LineFilter:
     code: str
     display_name: str
     display_color: str
-    first_only: bool
-
-    def filter_first_only(self, queryset):
-        if self.first_only:
-            return queryset[:1]
-        else:
-            return queryset
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)

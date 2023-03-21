@@ -24,7 +24,7 @@ from operation.schema.scalars import (
 @gql.type
 class OperationScalars:
     # TODO: Add back filters
-    lines: List[Line] = gql.django.field(filters=LineFilter)
+    lines: List[Line] = gql.django.field(filters=LineFilter, pagination=True)
     assets: List[Asset] = gql.django.field()
     stations: List[Station] = gql.django.field(filters=StationFilter)
     stationLines: List[StationLine] = gql.django.field(filters=StationLineFilter)
