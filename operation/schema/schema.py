@@ -27,11 +27,11 @@ class OperationScalars:
     lines: List[Line] = gql.django.field(filters=LineFilter, pagination=True)
     assets: List[Asset] = gql.django.field()
     stations: List[Station] = gql.django.field(filters=StationFilter)
-    stationLines: List[StationLine] = gql.django.field(filters=StationLineFilter)
+    station_lines: List[StationLine] = gql.django.field(filters=StationLineFilter)
     vehicles: List[Vehicle] = gql.django.field(
         filters=VehicleFilter, order=VehicleOrder
     )
-    vehicleTypes: List[VehicleType] = gql.django.field(filters=VehicleTypeFilter)
+    vehicle_types: List[VehicleType] = gql.django.field(filters=VehicleTypeFilter)
     assets: List[Asset] = gql.django.field(filters=AssetFilter)
 
 
