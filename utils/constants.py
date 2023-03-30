@@ -43,7 +43,7 @@ EXPECTED_COLS = set(
     ]
 )
 
-DT_TARGET = "dt_gps"
+DT_TARGET = "dt_received"
 
 
 GROUP_THRESHOLDS = {
