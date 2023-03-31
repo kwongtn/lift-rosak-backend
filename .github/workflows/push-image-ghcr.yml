@@ -33,10 +33,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
       - name: Run Buildx (push image)
         run: |
           docker buildx build \
             --platform ${{ matrix.platform }} \
-            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA }} \
+            --tag ${{ steps.meta.outputs.tags }} \
             --file ./Dockerfile \
             --output type=image,push=true .
