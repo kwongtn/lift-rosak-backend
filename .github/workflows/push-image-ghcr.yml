@@ -16,6 +16,12 @@ jobs:
       contents: read
       packages: write
 
+    strategy:
+      matrix:
+        platform:
+          - aarch64
+          - x86
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -30,7 +36,7 @@ jobs:
       - name: Run Buildx (push image)
         run: |
           docker buildx build \
-            --platform ${{ DOCKER_TARGET_PLATFORM }} \
-            --tag ${{ REGISTRY }}/${{ IMAGE_NAME }}:${{ GITHUB_SHA }}_${{ DOCKER_TARGET_PLATFORM }} \
+            --platform ${{ matrix.platform }} \
+            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA }} \
             --file ./Dockerfile \
             --output type=image,push=true .
