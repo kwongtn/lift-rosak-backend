@@ -38,6 +38,8 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,enable=true,priority=100,prefix=,suffix=,format=short
 
       - name: Run Buildx (push image)
         run: |
