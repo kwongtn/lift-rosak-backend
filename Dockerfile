@@ -11,10 +11,6 @@ WORKDIR /code
 
 COPY Pipfile /code/Pipfile
 COPY Pipfile.lock /code/Pipfile.lock
-RUN if [ "$ENVIRONMENT" = "dev" ]; then \
-        pipenv install --system --deploy --ignore-pipfile --dev \
-    ; else \
-        pipenv install --system --deploy --ignore-pipfile \
-    ; fi
+RUN if [ "$ENVIRONMENT" = "dev" ]; then pipenv install --deploy --ignore-pipfile --dev ; else pipenv install --deploy --ignore-pipfile; fi
 
 COPY . /code/
