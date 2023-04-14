@@ -1,7 +1,10 @@
+from datetime import datetime
+
 from advanced_filters.admin import AdminAdvancedFiltersMixin
 from django.contrib import admin
 from django.db import models
 from django.forms import Textarea, TextInput
+from rangefilter.filters import DateRangeFilterBuilder, DateTimeRangeFilterBuilder
 
 from generic.views import GeometricForm
 from spotting.models import Event, LocationEvent
@@ -33,6 +36,30 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "notes",
     ]
     list_filter = [
+        (
+            "spotting_date",
+            DateRangeFilterBuilder(
+                title="Created",
+                default_start=datetime(2020, 1, 1),
+                default_end=datetime(2030, 1, 1),
+            ),
+        ),
+        (
+            "created",
+            DateTimeRangeFilterBuilder(
+                title="Created",
+                default_start=datetime(2020, 1, 1),
+                default_end=datetime(2030, 1, 1),
+            ),
+        ),
+        # (
+        #     "modified",
+        #     DateTimeRangeFilterBuilder(
+        #         title="Modified",
+        #         default_start=datetime(2020, 1, 1),
+        #         default_end=datetime(2030, 1, 1),
+        #     ),
+        # ),
         "type",
         "status",
         "is_anonymous",

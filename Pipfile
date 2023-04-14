@@ -5,6 +5,7 @@ name = "pypi"
 
 [packages]
 django = ">=4.2,<4.3"
+django-admin-rangefilter = "*"
 django-advanced-filters = "*"
 django-choices-field = "*"
 django-colorfield = "*"

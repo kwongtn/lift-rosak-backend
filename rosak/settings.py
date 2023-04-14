@@ -101,6 +101,7 @@ INSTALLED_APPS = [
     "hijack.contrib.admin",
     "colorfield",
     "advanced_filters",
+    "rangefilter",
     "strawberry.django",
     "corsheaders",
     "django_extensions",
