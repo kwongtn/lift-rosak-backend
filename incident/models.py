@@ -53,7 +53,7 @@ class VehicleIncident(IncidentAbstractModel):
 
     order_with_respect_to = "vehicle"
 
-    class Meta:
+    class Meta(OrderedModel.Meta):
         constraints = [
             models.UniqueConstraint(
                 fields=["is_last", "vehicle"],
@@ -75,7 +75,7 @@ class StationIncident(IncidentAbstractModel):
 
     order_with_respect_to = "station"
 
-    class Meta:
+    class Meta(OrderedModel.Meta):
         constraints = [
             models.UniqueConstraint(
                 fields=["is_last", "station"],
