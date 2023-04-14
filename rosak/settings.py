@@ -80,6 +80,7 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "kwongnet.ddns.net",
     "lift-rosak.ddns.net",
+    "api-community.mlptf.org.my",
 ]
 
 LOGIN_REDIRECT_URL = os.getenv("LOGIN_REDIRECT_URL", "admin/")
@@ -131,7 +132,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://lift-rosak.ddns.net:8000",
     "https://rosak-7223b--pr8-ng-zorro-antd-l1wpy6qj.web.app",
     "https://community.mlptf.org.my",
-    "https://api.mlptf.org.my",
+    "https://api-community.mlptf.org.my",
     "http://localhost:8000",
 ]
 
