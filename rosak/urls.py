@@ -16,7 +16,7 @@ Including another URLconf
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
 from django.views.decorators.csrf import csrf_exempt
 
 from rosak.context import CustomGraphQLView
@@ -29,7 +29,7 @@ urlpatterns = (
         path("health-check/", include("health_check.urls")),
         path("admin/", admin.site.urls),
         path("hijack/", include("hijack.urls")),
-        path(r"^advanced_filters/", include("advanced_filters.urls")),
+        re_path("^advanced_filters/", include("advanced_filters.urls")),
         path(
             "graphql/",
             CustomGraphQLView.as_view(
@@ -59,3 +59,7 @@ if settings.DEBUG:
         path("__debug__/", include(debug_toolbar.urls)),
         path("sentry-debug/", trigger_error),
     ]
+
+urlpatterns += [
+    re_path("/?", csrf_exempt(custom_view.redirect_view)),
+]

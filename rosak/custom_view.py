@@ -5,6 +5,7 @@ import urllib
 
 import requests
 from django.http import HttpRequest, HttpResponse
+from django.shortcuts import redirect
 
 sentry_host = "o1331817.ingest.sentry.io"
 known_project_ids = ["6596136"]
@@ -46,3 +47,7 @@ def git_version(request: HttpRequest):
             }
         )
     )
+
+
+def redirect_view(request: HttpRequest):
+    return redirect("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
