@@ -81,6 +81,7 @@ ALLOWED_HOSTS = [
     "kwongnet.ddns.net",
     "lift-rosak.ddns.net",
     "api-community.mlptf.org.my",
+    "*.rosak",
 ]
 
 LOGIN_REDIRECT_URL = os.getenv("LOGIN_REDIRECT_URL", "admin/")
