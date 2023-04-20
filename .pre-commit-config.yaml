@@ -3,7 +3,7 @@ repos:
     rev: v4.4.0
     hooks:
       - id: check-yaml
-        exclude: ".k8s/deploy/templates/*"
+        exclude: ".k8s/charts/templates/*"
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: mixed-line-ending
