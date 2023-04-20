@@ -1,35 +1,35 @@
-version: v1.0
-name: Docker
-agent:
-  machine:
-    type: e1-standard-2
-    os_image: ubuntu2004
-auto_cancel:
-  running:
-    when: "true"
-blocks:
-  - name: Build & Push
-    task:
-      jobs:
-        - name: docker build
-          commands:
-            - checkout
-            - echo $DOCKER_HUB_ACCESS_TOKEN | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
-            - "docker build --tag=$DOCKERHUB_USERNAME/$IMAGE_NAME:latest --tag=$DOCKERHUB_USERNAME/$IMAGE_NAME:$(date +%Y%m%d-%H%M) ."
-            - "docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:latest"
-      secrets:
-        - name: Rosak
-      env_vars:
-        - name: ENVIRONMENT
-          value: prod
-        - name: IMAGE_NAME
-          value: rosak_backend
-        - name: SENTRY_ORG
-          value: kwongtn
-        - name: SENTRY_PROJECT
-          value: python-django
-    run:
-      when: branch = 'main'
-promotions:
-  - name: Deploy to Prod
-    pipeline_file: pipeline_2.yml
+# version: v1.0
+# name: Docker
+# agent:
+#   machine:
+#     type: e1-standard-2
+#     os_image: ubuntu2004
+# auto_cancel:
+#   running:
+#     when: "true"
+# blocks:
+#   - name: Build & Push
+#     task:
+#       jobs:
+#         - name: docker build
+#           commands:
+#             - checkout
+#             - echo $DOCKER_HUB_ACCESS_TOKEN | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+#             - "docker build --tag=$DOCKERHUB_USERNAME/$IMAGE_NAME:latest --tag=$DOCKERHUB_USERNAME/$IMAGE_NAME:$(date +%Y%m%d-%H%M) ."
+#             - "docker push $DOCKERHUB_USERNAME/$IMAGE_NAME:latest"
+#       secrets:
+#         - name: Rosak
+#       env_vars:
+#         - name: ENVIRONMENT
+#           value: prod
+#         - name: IMAGE_NAME
+#           value: rosak_backend
+#         - name: SENTRY_ORG
+#           value: kwongtn
+#         - name: SENTRY_PROJECT
+#           value: python-django
+#     run:
+#       when: branch = 'main'
+# promotions:
+#   - name: Deploy to Prod
+#     pipeline_file: pipeline_2.yml
