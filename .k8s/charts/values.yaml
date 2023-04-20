@@ -19,15 +19,14 @@ containers:
     dbPassword:
       secret: postgres-django-postgresql-ha-postgresql
       key: password
+    env:
+      configMap: backend-django-cm
+      secret: backend-django-sec
 
 volumes:
   web:
     configMap: backend-django-nginx-cm
   app:
-    env:
-      configMap: backend-django-cm
-      secret: backend-django-sec
-
     firebaseAdminKeySecret: firebase-admin
 
 topologySpreadConstraints:
