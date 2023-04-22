@@ -19,6 +19,11 @@ spec:
   service:
     port: {{ .Values.containers.web.containerPort }}
   analysis:
+    alerts:
+      - name: "Discord"
+        severity: info
+        providerRef:
+          name: discord
     # schedule interval (default 60s)
     interval: 30s
     # max number of failed metric checks before rollback

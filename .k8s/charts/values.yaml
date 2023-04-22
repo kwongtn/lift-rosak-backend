@@ -11,10 +11,10 @@ podAnnotations: {}
 
 containers:
   web:
-    image: nginx:alpine
+    image: nginx:1.24.0-alpine
     containerPort: 8000
   app:
-    image: ghcr.io/kwongtn/lift-rosak-backend:1dc9838-16
+    image: ghcr.io/kwongtn/lift-rosak-backend:aeaa758-31
     containerPort: 8001
     dbPassword:
       secret: postgres-django-postgresql-ha-postgresql
