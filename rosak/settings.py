@@ -37,6 +37,7 @@ if DEBUG is not True:
 
     sentry_sdk.init(
         dsn=os.environ.get("SENTRY_DSN", None),
+        environment=os.environ.get("ENVIRONMENT", None),
         integrations=[
             DjangoIntegration(),
         ],
