@@ -76,15 +76,7 @@ if DEBUG is not True:
 #     },
 # }
 
-ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    "kwongnet.ddns.net",
-    "lift-rosak.ddns.net",
-    "api-community.mlptf.org.my",
-    "*.rosak",
-    "*.kwongtn.xyz",
-]
+ALLOWED_HOSTS = ["*"]
 
 LOGIN_REDIRECT_URL = os.getenv("LOGIN_REDIRECT_URL", "admin/")
 
