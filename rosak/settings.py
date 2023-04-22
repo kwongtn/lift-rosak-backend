@@ -83,6 +83,7 @@ ALLOWED_HOSTS = [
     "lift-rosak.ddns.net",
     "api-community.mlptf.org.my",
     "*.rosak",
+    "*.kwongtn.xyz",
 ]
 
 LOGIN_REDIRECT_URL = os.getenv("LOGIN_REDIRECT_URL", "admin/")
@@ -137,12 +138,17 @@ CSRF_TRUSTED_ORIGINS = [
     "https://community.mlptf.org.my",
     "https://api-community.mlptf.org.my",
     "http://localhost:8000",
+    "https://*.kwongtn.xyz",
 ]
 
 CORS_ALLOWED_ORIGINS = [
     "https://rosak-7223b--pr8-ng-zorro-antd-l1wpy6qj.web.app",
     "https://community.mlptf.org.my",
     "http://localhost:4200",
+]
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    "^https://.*\\.kwongtn\\.xyz$",
 ]
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
