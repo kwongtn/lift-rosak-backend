@@ -145,6 +145,7 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
+    "^https://rosak-7223b--staging-.*\\.web\\.app$",
     "^https://.*\\.kwongtn\\.xyz$",
 ]
 
