@@ -14,6 +14,7 @@ class AssetStatus(models.TextChoices):
 class VehicleStatus(models.TextChoices):
     IN_SERVICE = "IN_SERVICE"
     NOT_SPOTTED = "NOT_SPOTTED"
+    OUT_OF_SERVICE = "OUT_OF_SERVICE"
     DECOMMISSIONED = "DECOMMISSIONED"
     MARRIED = "MARRIED"
     TESTING = "TESTING"

@@ -81,6 +81,12 @@ class VehicleType:
         ].load((self.id, VehicleStatus.NOT_SPOTTED))
 
     @gql.field
+    async def vehicle_status_out_of_service_count(self, info: Info) -> int:
+        return await info.context.loaders["operation"][
+            "vehicle_status_count_from_vehicle_type_loader"
+        ].load((self.id, VehicleStatus.OUT_OF_SERVICE))
+
+    @gql.field
     async def vehicle_status_decommissioned_count(self, info: Info) -> int:
         return await info.context.loaders["operation"][
             "vehicle_status_count_from_vehicle_type_loader"
@@ -140,7 +146,6 @@ class Vehicle:
     async def spottingCount(
         self, info: Info, after: Optional[date] = None, before: Optional[date] = None
     ) -> int:
-
         filter = Q(vehicle_id=self.id)
 
         if after is not None:
