@@ -15,6 +15,8 @@ from pathlib import Path
 
 from corsheaders.defaults import default_headers
 
+from rosak.sentry import filter_transactions
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -45,6 +47,8 @@ if DEBUG is not True:
         # of transactions for performance monitoring.
         # We recommend adjusting this value in production.
         traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLING_RATE", "1.0")),
+        # Refer: https://docs.sentry.io/platforms/python/guides/django/configuration/filtering/#using-platformidentifier-namebefore-send-transaction-
+        before_send_transaction=filter_transactions,
         # If you wish to associate users to errors (assuming you are using
         # django.contrib.auth) you may enable sending PII data.
         send_default_pii=True,
