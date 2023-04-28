@@ -27,7 +27,7 @@ from .schema import schema
 urlpatterns = (
     [
         path("health-check/", include("health_check.urls")),
-        path("admin/", admin.site.urls),
+        re_path("admin/?", admin.site.urls),
         path("hijack/", include("hijack.urls")),
         re_path("^advanced_filters/", include("advanced_filters.urls")),
         path(
@@ -61,5 +61,5 @@ if settings.DEBUG:
     ]
 
 urlpatterns += [
-    re_path("/?", csrf_exempt(custom_view.redirect_view)),
+    re_path("", csrf_exempt(custom_view.redirect_view)),
 ]
