@@ -4,8 +4,7 @@ from django.db.models import F, Q
 from model_utils.models import TimeStampedModel
 
 from generic.models import WebLocationModel
-from operation.enums import VehicleStatus
-from spotting.enums import SpottingEventType
+from spotting.enums import SpottingEventType, SpottingVehicleStatus
 
 
 class LocationEvent(WebLocationModel):
@@ -38,7 +37,7 @@ class Event(TimeStampedModel):
     )
     status = models.CharField(
         max_length=32,
-        choices=VehicleStatus.choices,
+        choices=SpottingVehicleStatus.choices,
     )
 
     run_number = models.CharField(
