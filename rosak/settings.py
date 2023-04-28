@@ -76,6 +76,9 @@ if DEBUG is not True:
 #     },
 # }
 
+# OpenTelemetry
+OTEL_PYTHON_DJANGO_EXCLUDED_URLS = "healthcheck"
+
 ALLOWED_HOSTS = ["*"]
 
 LOGIN_REDIRECT_URL = os.getenv("LOGIN_REDIRECT_URL", "admin/")
