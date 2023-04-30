@@ -20,9 +20,11 @@ class UserAdmin(admin.ModelAdmin):
     inlines = [UserBadgeStackedInline]
     list_display = [
         "__str__",
+        "nickname",
         "firebase_id",
     ]
     search_fields = [
+        "nickname",
         "firebase_id",
     ]
 
