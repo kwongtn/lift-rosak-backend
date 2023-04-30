@@ -52,13 +52,13 @@ spec:
     webhooks:
       - name: acceptance-test
         type: pre-rollout
-        url: http://flagger-loadtester.linkerd/
+        url: {{ .Values.loadtesterUrl }}
         timeout: 30s
         metadata:
           type: bash
           cmd: "curl -o /dev/null -s -w \"%{http_code}\n\" http://{{ include "deploy.fullname" . }}-canary.{{ .Release.Namespace }}:8000/health-check/ | grep 200"
       - name: load-test
-        url: http://flagger-loadtester.linkerd/
+        url: {{ .Values.loadtesterUrl }}
         timeout: 10s
         metadata:
           cmd: "hey -z 1m -q 10 -c 2 http://{{ include "deploy.fullname" . }}-canary.{{ .Release.Namespace }}:8000/health-check/"

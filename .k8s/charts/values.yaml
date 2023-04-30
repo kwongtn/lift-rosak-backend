@@ -5,9 +5,7 @@ fullnameOverride: ""
 
 podAnnotations: {}
 
-#################################
-#################################
-#################################
+loadtesterUrl: http://flagger-loadtester.linkerd/
 
 containers:
   web:
