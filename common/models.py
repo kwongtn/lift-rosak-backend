@@ -15,7 +15,7 @@ class Media(TimeStampedModel, UUIDModel, SoftDeletableModel):
 
 class User(TimeStampedModel):
     firebase_id = models.TextField(unique=True)
-    nickname = models.CharField(max_length=255, default="")
+    nickname = models.CharField(max_length=255, default="", blank=True)
 
     badges = models.ManyToManyField(to="mlptf.Badge", through="mlptf.UserBadge")
 

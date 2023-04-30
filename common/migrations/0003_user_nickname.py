@@ -12,6 +12,10 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="user",
             name="nickname",
-            field=models.CharField(default="", max_length=255),
+            field=models.CharField(
+                blank=True,
+                default="",
+                max_length=255,
+            ),
         ),
     ]
