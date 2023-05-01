@@ -33,7 +33,7 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "destination_station",
         "is_anonymous",
         "run_number",
-        "notes",
+        "get_notes",
     ]
     list_filter = [
         (
@@ -89,6 +89,13 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "destination_station",
         "is_anonymous",
     ]
+
+    @admin.display(description="Notes")
+    def get_notes(self, obj):
+        if len(obj.notes) > 32:
+            return obj.notes[:29] + "..."
+        else:
+            return obj.notes
 
 
 class LocationEventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
