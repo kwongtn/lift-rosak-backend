@@ -74,10 +74,10 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "destination_station__display_name",
         "spotting_date",
     ]
-    list_editable = [
-        "run_number",
-        "notes",
-    ]
+    # list_editable = [
+    #     "run_number",
+    #     "notes",
+    # ]
 
     advanced_filter_fields = [
         "reporter",

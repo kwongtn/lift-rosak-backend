@@ -197,7 +197,6 @@ class VehicleAdmin(OrderedInlineModelAdminMixin, admin.ModelAdmin):
         "vehicle_type__display_name",
     ]
     list_editable = [
-        "identification_no",
         "status",
     ]
 
