@@ -1,5 +1,6 @@
 from datetime import date
 
+from django.db.models import Q
 from strawberry_django_plus import gql
 
 from incident import models
@@ -38,3 +39,16 @@ class StationIncidentFilter(IncidentAbstractFilter):
 
     def filter_station_id(self, queryset):
         return queryset.filter(station_id=self.station_id)
+
+
+@gql.django.filters.filter(models.CalendarIncident)
+class CalendarIncidentFilter:
+    id: gql.ID
+    severity: str
+    date: date
+
+    def filter_date(self, queryset):
+        return queryset.filter(
+            Q(start_datetime__date__lte=self.date)
+            | Q(end_datetime__date__gte=self.date)
+        )
