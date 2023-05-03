@@ -39,6 +39,7 @@ urlpatterns = (
         ),
         path("sentry/", csrf_exempt(custom_view.sentry)),
         path("version/", csrf_exempt(custom_view.git_version)),
+        path("mdeditor/", include("mdeditor.urls")),
         # path("oauth2/v1/", include("oauth2.urls", namespace="oauth2_v1")),
     ]
     # These are served in debug mode only

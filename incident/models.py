@@ -4,7 +4,7 @@ from django.utils.translation import gettext_lazy as _
 from model_utils.models import TimeStampedModel
 from ordered_model.models import OrderedModel
 
-from incident.enums import IncidentSeverity
+from incident.enums import CalendarIncidentSeverity, IncidentSeverity
 
 
 class IncidentAbstractModel(TimeStampedModel, OrderedModel):
@@ -84,11 +84,60 @@ class StationIncident(IncidentAbstractModel):
         ]
 
 
-# class LineIncident(IncidentAbstractModel):
-#     line = models.ForeignKey(
-#         to="operation.Line",
-#         on_delete=models.CASCADE,
-#     )
-#     medias = models.ManyToManyField(
-#         to="common.Media",
-#     )
+class CalendarIncidentCategory(models.Model):
+    name = models.CharField(
+        max_length=64,
+        unique=True,
+    )
+
+
+class CalendarIncident(TimeStampedModel, OrderedModel):
+    start_datetime = models.DateTimeField()
+    end_datetime = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    severity = models.CharField(
+        max_length=16,
+        choices=CalendarIncidentSeverity.choices,
+    )
+
+    title = models.CharField(
+        blank=False,
+        null=False,
+        default=None,
+        max_length=64,
+    )
+    brief = models.CharField(
+        blank=False,
+        null=False,
+        default=None,
+        max_length=256,
+    )
+
+    details = models.TextField(blank=True, default="")
+
+    line = models.ManyToManyField(
+        to="operation.Line",
+        blank=True,
+    )
+    vehicle = models.ManyToManyField(
+        to="operation.Vehicle",
+        blank=True,
+    )
+    station = models.ManyToManyField(
+        to="operation.Station",
+        blank=True,
+    )
+    medias = models.ManyToManyField(
+        to="common.Media",
+        blank=True,
+    )
+    categories = models.ManyToManyField(
+        to="incident.CalendarIncidentCategory",
+        blank=True,
+    )
+
+    class Meta(OrderedModel.Meta):
+        pass

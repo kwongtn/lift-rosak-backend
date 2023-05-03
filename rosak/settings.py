@@ -105,6 +105,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "django_extensions",
     "ordered_model",
+    "mdeditor",
     "health_check",  # required
     "health_check.db",  # stock Django health checkers
     "health_check.cache",
@@ -226,7 +227,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "Asia/Kuala_Lumpur"
 
 USE_I18N = True
 

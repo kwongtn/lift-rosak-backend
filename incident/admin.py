@@ -1,8 +1,10 @@
 from django.contrib.gis import admin, forms
+from django.contrib.gis.db import models
+from mdeditor.widgets import MDEditorWidget
 from ordered_model.admin import OrderedModelAdmin, OrderedTabularInline
 
 from generic.views import GeometricForm
-from incident.models import StationIncident, VehicleIncident
+from incident.models import CalendarIncident, StationIncident, VehicleIncident
 
 incident_list_display = [
     "__str__",
@@ -71,5 +73,29 @@ class StationIncidentInlineAdmin(OrderedTabularInline):
     extra = 1
 
 
+class CalendarIncidentAdmin(OrderedModelAdmin):
+    list_display = [
+        "__str__",
+        "severity",
+        "title",
+        "start_datetime",
+        "end_datetime",
+        "move_up_down_links",
+        "order",
+    ]
+    list_filter = ["severity"]
+    filter_horizontal = (
+        "line",
+        "vehicle",
+        "station",
+        "categories",
+        "medias",
+    )
+    formfield_overrides = {
+        models.TextField: {"widget": MDEditorWidget},
+    }
+
+
 admin.site.register(VehicleIncident, VehicleIncidentAdmin)
 admin.site.register(StationIncident, StationIncidentAdmin)
+admin.site.register(CalendarIncident, CalendarIncidentAdmin)
