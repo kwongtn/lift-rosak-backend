@@ -85,9 +85,9 @@ class CalendarIncidentAdmin(OrderedModelAdmin):
     ]
     list_filter = ["severity"]
     filter_horizontal = (
-        "line",
-        "vehicle",
-        "station",
+        "lines",
+        "vehicles",
+        "stations",
         "categories",
         "medias",
     )

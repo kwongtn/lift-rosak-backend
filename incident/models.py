@@ -118,15 +118,15 @@ class CalendarIncident(TimeStampedModel, OrderedModel):
 
     details = models.TextField(blank=True, default="")
 
-    line = models.ManyToManyField(
+    lines = models.ManyToManyField(
         to="operation.Line",
         blank=True,
     )
-    vehicle = models.ManyToManyField(
+    vehicles = models.ManyToManyField(
         to="operation.Vehicle",
         blank=True,
     )
-    station = models.ManyToManyField(
+    stations = models.ManyToManyField(
         to="operation.Station",
         blank=True,
     )
