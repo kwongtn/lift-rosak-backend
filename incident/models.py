@@ -102,6 +102,13 @@ class CalendarIncident(TimeStampedModel, OrderedModel):
         max_length=16,
         choices=CalendarIncidentSeverity.choices,
     )
+    impact_factor = models.DecimalField(
+        default=0,
+        blank=True,
+        decimal_places=2,
+        max_digits=5,
+        help_text="Scores to deduct from full score of 100 per day. Will be prorated based on usual service hours when consolidating.",
+    )
 
     title = models.CharField(
         blank=False,

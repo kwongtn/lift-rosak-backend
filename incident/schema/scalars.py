@@ -53,6 +53,8 @@ class CalendarIncidentScalar(IncidentAbstractScalar):
     brief: str
     details: str
 
+    impact_factor: float
+
     lines: List[Line]
     vehicles: List[Vehicle]
     stations: List[Station]

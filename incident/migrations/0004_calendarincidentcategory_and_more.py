@@ -105,6 +105,16 @@ class Migration(migrations.Migration):
                     "vehicles",
                     models.ManyToManyField(blank=True, to="operation.vehicle"),
                 ),
+                (
+                    "impact_factor",
+                    models.DecimalField(
+                        blank=True,
+                        decimal_places=2,
+                        default=0,
+                        help_text="Scores to deduct from full score of 100 per day. Will be prorated based on usual service hours when consolidating.",
+                        max_digits=5,
+                    ),
+                ),
             ],
             options={
                 "ordering": ("order",),
