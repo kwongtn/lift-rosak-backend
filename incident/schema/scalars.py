@@ -30,6 +30,13 @@ class StationIncident(IncidentAbstractScalar):
     # medias: List["Media"]
 
 
+@gql.type
+class CalendarIncidentGroupByDateSeverityScalar:
+    severity: str
+    date: date
+    count: int
+
+
 @gql.django.type(models.CalendarIncidentCategory)
 class CalendarIncidentCategoryScalar:
     name: str
