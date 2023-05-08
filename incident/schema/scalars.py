@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from strawberry_django_plus import gql
 
+from common.schema.scalars import Media
 from incident import models
 from operation.schema.scalars import Line, Station, Vehicle
 
@@ -59,6 +60,7 @@ class CalendarIncidentScalar(IncidentAbstractScalar):
     vehicles: List[Vehicle]
     stations: List[Station]
     categories: List[CalendarIncidentCategoryScalar]
+    medias: List["Media"]
 
     # medias: List["Media"]
     # TODO: Dataloaders
