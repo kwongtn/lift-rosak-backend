@@ -7,6 +7,7 @@ from incident.schema.filters import (
     StationIncidentFilter,
     VehicleIncidentFilter,
 )
+from incident.schema.orderings import CalendarIncidentOrder
 from incident.schema.resolvers import get_calendar_incidents_by_severity_count
 from incident.schema.scalars import (
     CalendarIncidentGroupByDateSeverityScalar,
@@ -26,7 +27,8 @@ class IncidentScalars:
     )
 
     calendar_incidents: List[CalendarIncidentScalar] = gql.django.field(
-        filters=CalendarIncidentFilter
+        filters=CalendarIncidentFilter,
+        order=CalendarIncidentOrder,
     )
 
     calendar_incidents_by_severity_count: List[
