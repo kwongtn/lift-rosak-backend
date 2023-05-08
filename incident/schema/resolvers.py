@@ -45,6 +45,9 @@ async def get_calendar_incidents_by_severity_count(
     min = (await qs.aaggregate(min=Min("start_datetime__date")))["min"]
     today = date.today()
 
+    if min is None:
+        return []
+
     period = pendulum.period(
         min if start_date > min else start_date,
         today if today < end_date else end_date,
