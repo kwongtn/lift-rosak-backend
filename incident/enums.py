@@ -10,8 +10,8 @@ class IncidentSeverity(models.TextChoices):
 class CalendarIncidentSeverity(models.TextChoices):
     # Entire / parts of line being broken
     # Train crashes
-    CRITICAL = "CRITICAL"
+    MAJOR = "MAJOR"
 
     # Single vehicle disruptions etc.
     MINOR = "MINOR"
-    MILESTONE = "MILESTONE"
+    OTHERS = "OTHERS"
