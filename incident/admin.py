@@ -75,11 +75,10 @@ class StationIncidentInlineAdmin(OrderedTabularInline):
 
 class CalendarIncidentAdmin(OrderedModelAdmin):
     list_display = [
-        "__str__",
-        "severity",
-        "title",
         "start_datetime",
         "end_datetime",
+        "severity",
+        "title",
         "move_up_down_links",
         "order",
     ]
