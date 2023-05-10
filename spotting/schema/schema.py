@@ -16,6 +16,7 @@ from spotting.enums import SpottingEventType
 from spotting.schema.filters import EventFilter
 from spotting.schema.inputs import DeleteEventInput, EventInput, MarkEventAsReadInput
 from spotting.schema.orderings import EventOrder
+from spotting.schema.resolvers import get_events_count
 from spotting.schema.scalars import EventRelay, EventScalar
 
 
@@ -23,6 +24,10 @@ from spotting.schema.scalars import EventRelay, EventScalar
 class SpottingScalars:
     events: typing.List[EventScalar] = gql.django.field(
         filters=EventFilter, pagination=True, order=EventOrder
+    )
+    events_count: int = gql.django.field(
+        resolver=get_events_count,
+        description="Number of events",
     )
     # event_relay: typing.Optional[EventRelay] = relay.node()
     event_relay_connection: relay.Connection[EventRelay] = relay.connection()
