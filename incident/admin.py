@@ -91,6 +91,7 @@ class CalendarIncidentAdmin(OrderedModelAdmin):
         "categories",
         "medias",
     )
+    ordering = ("-start_datetime",)
     formfield_overrides = {
         models.TextField: {"widget": MDEditorWidget},
     }
