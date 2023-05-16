@@ -51,14 +51,9 @@ class CalendarIncidentFilter:
     end_date: date
 
     def filter_date(self, queryset):
-        today = date.today()
-
         return queryset.filter(
             Q(start_datetime__date__lte=self.date)
-            & Q(
-                Q(end_datetime__date__gte=self.date)
-                | Q(end_datetime__isnull=self.date <= today)
-            )
+            & Q(Q(end_datetime__date__gte=self.date) | Q(end_datetime__isnull=True))
         )
 
     def filter_start_date(self, queryset):
