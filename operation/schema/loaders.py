@@ -5,8 +5,8 @@ from django.db.models import Count, Max, Q
 from strawberry.dataloader import DataLoader
 
 from incident.models import VehicleIncident
-from operation.enums import VehicleStatus
 from operation.models import Vehicle, VehicleLine
+from spotting.enums import SpottingVehicleStatus
 from spotting.models import Event
 
 
@@ -57,9 +57,9 @@ async def batch_load_last_spotting_date_from_vehicle_id(keys):
     event_object = await Event.objects.filter(
         ~Q(
             status__in=[
-                VehicleStatus.NOT_SPOTTED,
-                VehicleStatus.DECOMMISSIONED,
-                VehicleStatus.UNKNOWN,
+                SpottingVehicleStatus.NOT_SPOTTED,
+                SpottingVehicleStatus.DECOMMISSIONED,
+                SpottingVehicleStatus.UNKNOWN,
             ]
         )
     ).aaggregate(
