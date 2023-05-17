@@ -88,12 +88,10 @@ class CalendarIncidentChronologyInlineAdmin(OrderedTabularInline):
 
 class CalendarIncidentAdmin(OrderedModelAdmin):
     list_display = [
+        "__str__",
         "start_datetime",
         "end_datetime",
         "severity",
-        "title",
-        "move_up_down_links",
-        "order",
     ]
     list_filter = ["severity"]
     filter_horizontal = (

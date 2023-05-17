@@ -177,7 +177,7 @@ class CalendarIncident(TimeStampedModel, OrderedModel):
     )
 
     def __str__(self):
-        return f"{self.id} - {self.title[:32]}"
+        return f"{self.id} - {self.title[:48]}"
 
     class Meta(OrderedModel.Meta):
         pass
