@@ -4,7 +4,11 @@ from django.utils.translation import gettext_lazy as _
 from model_utils.models import TimeStampedModel
 from ordered_model.models import OrderedModel
 
-from incident.enums import CalendarIncidentSeverity, IncidentSeverity
+from incident.enums import (
+    CalendarIncidentChronologyIndicator,
+    CalendarIncidentSeverity,
+    IncidentSeverity,
+)
 
 
 class IncidentAbstractModel(TimeStampedModel, OrderedModel):
@@ -91,6 +95,32 @@ class CalendarIncidentCategory(models.Model):
     )
 
 
+class CalendarIncidentChronology(TimeStampedModel, OrderedModel):
+    calendar_incident = models.ForeignKey(
+        to="incident.CalendarIncident",
+        on_delete=models.CASCADE,
+    )
+
+    indicator = models.CharField(
+        max_length=16,
+        choices=CalendarIncidentChronologyIndicator.choices,
+        help_text="Set the color of circles. Green means completed or success status, Red means warning or error, and Blue means ongoing or other default status, Gray for unfinished or disabled status, Loading for in progress status.",
+    )
+    datetime = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+    content = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    order_with_respect_to = "calendar_incident"
+
+    class Meta(OrderedModel.Meta):
+        verbose_name_plural = "CalendarIncidentChronologies"
+
+
 class CalendarIncident(TimeStampedModel, OrderedModel):
     start_datetime = models.DateTimeField()
     end_datetime = models.DateTimeField(
@@ -145,6 +175,9 @@ class CalendarIncident(TimeStampedModel, OrderedModel):
         to="incident.CalendarIncidentCategory",
         blank=True,
     )
+
+    def __str__(self):
+        return f"{self.id} - {self.title[:32]}"
 
     class Meta(OrderedModel.Meta):
         pass

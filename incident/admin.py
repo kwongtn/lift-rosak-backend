@@ -4,7 +4,12 @@ from mdeditor.widgets import MDEditorWidget
 from ordered_model.admin import OrderedModelAdmin, OrderedTabularInline
 
 from generic.views import GeometricForm
-from incident.models import CalendarIncident, StationIncident, VehicleIncident
+from incident.models import (
+    CalendarIncident,
+    CalendarIncidentChronology,
+    StationIncident,
+    VehicleIncident,
+)
 
 incident_list_display = [
     "__str__",
@@ -73,6 +78,13 @@ class StationIncidentInlineAdmin(OrderedTabularInline):
     extra = 1
 
 
+class CalendarIncidentChronologyInlineAdmin(OrderedTabularInline):
+    model = CalendarIncidentChronology
+    readonly_fields = ("move_up_down_links",)
+    ordering = ("order",)
+    extra = 1
+
+
 class CalendarIncidentAdmin(OrderedModelAdmin):
     list_display = [
         "start_datetime",
@@ -94,8 +106,38 @@ class CalendarIncidentAdmin(OrderedModelAdmin):
     formfield_overrides = {
         models.TextField: {"widget": MDEditorWidget},
     }
+    inlines = [
+        CalendarIncidentChronologyInlineAdmin,
+    ]
+    search_fields = (
+        "id",
+        "title",
+        "brief",
+        "details",
+    )
+
+
+class CalendarIncidentChronologyAdmin(OrderedModelAdmin):
+    list_display = [
+        "__str__",
+        "indicator",
+        "datetime",
+        "content",
+        "move_up_down_links",
+        "order",
+    ]
+    list_filter = [
+        "indicator",
+        "datetime",
+    ]
+    ordering = (
+        "calendar_incident",
+        "-datetime",
+    )
+    autocomplete_fields = ("calendar_incident",)
 
 
 admin.site.register(VehicleIncident, VehicleIncidentAdmin)
 admin.site.register(StationIncident, StationIncidentAdmin)
 admin.site.register(CalendarIncident, CalendarIncidentAdmin)
+admin.site.register(CalendarIncidentChronology, CalendarIncidentChronologyAdmin)

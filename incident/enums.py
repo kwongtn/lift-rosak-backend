@@ -15,3 +15,11 @@ class CalendarIncidentSeverity(models.TextChoices):
     # Single vehicle disruptions etc.
     MINOR = "MINOR"
     OTHERS = "OTHERS"
+
+
+class CalendarIncidentChronologyIndicator(models.TextChoices):
+    GREEN = "GREEN"
+    RED = "RED"
+    BLUE = "BLUE"
+    GRAY = "GRAY"
+    LOADING = "LOADING"
