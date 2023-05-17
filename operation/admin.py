@@ -81,16 +81,13 @@ class StationLineStackedInline(admin.StackedInline):
 class StationLineTabularInline(admin.TabularInline):
     model = StationLine
     classes = ["collapse"]
-
-
-class VehicleLineStackedInline(admin.StackedInline):
-    model = VehicleLine
-    classes = ["collapse"]
+    autocomplete_fields = ("line",)
 
 
 class VehicleLineTabularInline(admin.TabularInline):
     model = VehicleLine
     classes = ["collapse"]
+    autocomplete_fields = ("line",)
 
 
 class LineAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
@@ -199,6 +196,7 @@ class VehicleAdmin(OrderedInlineModelAdminMixin, admin.ModelAdmin):
     list_editable = [
         "status",
     ]
+    autocomplete_fields = ("vehicle_type",)
 
 
 class VehicleTypeAdmin(admin.ModelAdmin):

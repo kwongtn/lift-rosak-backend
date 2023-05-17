@@ -44,6 +44,7 @@ class VehicleIncidentAdmin(OrderedModelAdmin):
     search_fields = [
         "vehicle__identification_no",
     ]
+    autocomplete_fields = ("vehicle",)
 
 
 class VehicleIncidentInlineAdmin(OrderedTabularInline):

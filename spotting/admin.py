@@ -89,6 +89,11 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "destination_station",
         "is_anonymous",
     ]
+    autocomplete_fields = (
+        "vehicle",
+        "origin_station",
+        "destination_station",
+    )
 
     @admin.display(description="Notes")
     def get_notes(self, obj):
@@ -120,6 +125,7 @@ class LocationEventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "heading",
         "speed",
     ]
+    autocomplete_fields = ("event",)
 
 
 admin.site.register(Event, EventAdmin)
