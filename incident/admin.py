@@ -1,7 +1,11 @@
 from django.contrib.gis import admin, forms
 from django.contrib.gis.db import models
 from mdeditor.widgets import MDEditorWidget
-from ordered_model.admin import OrderedModelAdmin, OrderedTabularInline
+from ordered_model.admin import (
+    OrderedInlineModelAdminMixin,
+    OrderedModelAdmin,
+    OrderedTabularInline,
+)
 
 from generic.views import GeometricForm
 from incident.models import (
@@ -86,7 +90,7 @@ class CalendarIncidentChronologyInlineAdmin(OrderedTabularInline):
     extra = 1
 
 
-class CalendarIncidentAdmin(OrderedModelAdmin):
+class CalendarIncidentAdmin(OrderedInlineModelAdminMixin, OrderedModelAdmin):
     list_display = [
         "__str__",
         "start_datetime",
