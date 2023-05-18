@@ -1,5 +1,4 @@
 from django.contrib.gis import admin, forms
-from django.contrib.gis.db import models
 from mdeditor.widgets import MDEditorWidget
 from ordered_model.admin import (
     OrderedInlineModelAdminMixin,
@@ -90,7 +89,17 @@ class CalendarIncidentChronologyInlineAdmin(OrderedTabularInline):
     extra = 1
 
 
+class CalendarIncidentAdminForm(forms.ModelForm):
+    class Meta:
+        model = CalendarIncident
+        widgets = {
+            "details": MDEditorWidget(),
+        }
+        fields = "__all__"
+
+
 class CalendarIncidentAdmin(OrderedInlineModelAdminMixin, OrderedModelAdmin):
+    form = CalendarIncidentAdminForm
     list_display = [
         "__str__",
         "start_datetime",
@@ -106,9 +115,6 @@ class CalendarIncidentAdmin(OrderedInlineModelAdminMixin, OrderedModelAdmin):
         "medias",
     )
     ordering = ("-start_datetime",)
-    formfield_overrides = {
-        models.TextField: {"widget": MDEditorWidget},
-    }
     inlines = [
         CalendarIncidentChronologyInlineAdmin,
     ]
