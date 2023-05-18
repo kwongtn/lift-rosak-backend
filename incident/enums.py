@@ -22,4 +22,3 @@ class CalendarIncidentChronologyIndicator(models.TextChoices):
     RED = "RED"
     BLUE = "BLUE"
     GRAY = "GRAY"
-    LOADING = "LOADING"
