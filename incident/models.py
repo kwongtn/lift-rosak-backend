@@ -149,7 +149,7 @@ class CalendarIncident(TimeStampedModel, OrderedModel):
         default=None,
         max_length=64,
     )
-    brief = models.CharField(
+    brief = models.TextField(
         blank=False,
         null=False,
         default=None,
