@@ -116,6 +116,8 @@ class CalendarIncidentChronology(TimeStampedModel, OrderedModel):
         default="",
     )
 
+    order = models.PositiveIntegerField(_("order"), editable=True, db_index=True)
+
     order_with_respect_to = "calendar_incident"
 
     class Meta(OrderedModel.Meta):
