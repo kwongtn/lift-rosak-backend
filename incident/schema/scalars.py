@@ -61,6 +61,17 @@ class CalendarIncidentScalar(IncidentAbstractScalar):
     stations: List[Station]
     categories: List[CalendarIncidentCategoryScalar]
     medias: List["Media"]
+    chronologies: List["CalendarIncidentChronologyScalar"]
 
     # medias: List["Media"]
     # TODO: Dataloaders
+
+
+@gql.django.type(models.CalendarIncidentChronology)
+class CalendarIncidentChronologyScalar:
+    id: gql.auto
+    order: int
+    calendar_incident: "CalendarIncidentScalar"
+    indicator: str
+    datetime: datetime
+    content: str

@@ -99,6 +99,7 @@ class CalendarIncidentChronology(TimeStampedModel, OrderedModel):
     calendar_incident = models.ForeignKey(
         to="incident.CalendarIncident",
         on_delete=models.CASCADE,
+        related_name="chronologies",
     )
 
     indicator = models.CharField(
