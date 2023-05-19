@@ -75,3 +75,4 @@ class CalendarIncidentChronologyScalar:
     indicator: str
     datetime: datetime
     content: str
+    source_url: str
