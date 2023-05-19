@@ -111,6 +111,12 @@ class CalendarIncidentChronology(TimeStampedModel, OrderedModel):
         blank=True,
         null=True,
     )
+    source_url = models.URLField(
+        blank=True,
+        null=True,
+        default="",
+        unique_for_date="datetime",
+    )
     content = models.TextField(
         blank=True,
         default="",
