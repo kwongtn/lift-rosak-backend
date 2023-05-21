@@ -56,6 +56,9 @@ class CalendarIncidentScalar(IncidentAbstractScalar):
 
     impact_factor: float
 
+    long_term: bool
+    inaccurate: bool
+
     lines: List[Line]
     vehicles: List[Vehicle]
     stations: List[Station]

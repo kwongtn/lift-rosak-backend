@@ -137,6 +137,15 @@ class CalendarIncident(TimeStampedModel, OrderedModel):
         null=True,
     )
 
+    long_term = models.BooleanField(
+        default=False,
+        help_text="If the incident is long-term, only start date will be shown in the month calendar view.",
+    )
+    inaccurate = models.BooleanField(
+        default=False,
+        help_text="Displays the 'inaccurate' indicator.",
+    )
+
     severity = models.CharField(
         max_length=16,
         choices=CalendarIncidentSeverity.choices,
