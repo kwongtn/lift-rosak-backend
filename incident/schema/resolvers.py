@@ -86,28 +86,40 @@ async def get_calendar_incidents_by_severity_count(
                         date=date(int(year), int(month), 1),
                         severity=severity,
                         count=value,
+                        is_long_term=None,
                     )
                 )
 
     elif group_by == GroupByEnum.DAY:
         range = period.range("days")
         for range_date in range:
-            for severity in CalendarIncidentSeverity.values:
-                aggregations[f"{range_date}_{severity}"] = Count(
-                    "id",
-                    filter=Q(
-                        Q(start_datetime__date__lte=range_date)
-                        & Q(
-                            Q(end_datetime__date__gte=range_date)
-                            | Q(end_datetime__isnull=True)
-                        )
-                        & Q(severity=severity)
-                    ),
+            long_term_filter = Q(Q(long_term=True) & Q(start_datetime__date=range_date))
+
+            short_term_filter = Q(
+                Q(long_term=False)
+                & Q(start_datetime__date__lte=range_date)
+                & Q(
+                    Q(end_datetime__date__gte=range_date) | Q(end_datetime__isnull=True)
                 )
+            )
+
+            for term in ["long", "short"]:
+                for severity in CalendarIncidentSeverity.values:
+                    aggregations[f"{range_date}_{severity}_{term}"] = Count(
+                        "id",
+                        filter=Q(
+                            Q(severity=severity)
+                            & Q(
+                                long_term_filter
+                                if term == "long"
+                                else short_term_filter
+                            )
+                        ),
+                    )
 
         for key, value in (await qs.aaggregate(**aggregations)).items():
             if value > 0:
-                incident_date, severity = key.split("_")
+                incident_date, severity, term = key.split("_")
                 year, month, day = incident_date.split("-")
 
                 return_list.append(
@@ -115,6 +127,7 @@ async def get_calendar_incidents_by_severity_count(
                         date=date(int(year), int(month), int(day)),
                         severity=severity,
                         count=value,
+                        is_long_term=True if term == "long" else False,
                     )
                 )
     else:

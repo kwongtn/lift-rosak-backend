@@ -36,6 +36,7 @@ class CalendarIncidentGroupByDateSeverityScalar:
     severity: str
     date: date
     count: int
+    is_long_term: Optional[bool]
 
 
 @gql.django.type(models.CalendarIncidentCategory)
