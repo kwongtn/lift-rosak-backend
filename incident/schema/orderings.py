@@ -8,3 +8,5 @@ class CalendarIncidentOrder:
     id: gql.auto
     order: gql.auto
     impact_factor: gql.auto
+    start_datetime: gql.auto
+    end_datetime: gql.auto
