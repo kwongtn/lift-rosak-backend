@@ -121,6 +121,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # This must be the first
+    "django.middleware.cache.UpdateCacheMiddleware",
     "strawberry_django_plus.middlewares.debug_toolbar.DebugToolbarMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
@@ -131,6 +133,8 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "hijack.middleware.HijackUserMiddleware",
+    # This must be the last
+    "django.middleware.cache.FetchFromCacheMiddleware",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -199,6 +203,19 @@ DATABASES = {
         "PASSWORD": os.environ.get("DATABASE_PASSWORD", None),
         "PORT": os.environ.get("DATABASE_PORT", 5432),
         "TEST": {"SERIALIZE": False},
+    }
+}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.memcached.PyMemcacheCache",
+        "LOCATION": os.environ.get("MEMCACHED_LOCATION", "localhost:11211"),
+        "OPTIONS": {
+            "no_delay": True,
+            "ignore_exc": True,
+            "max_pool_size": 4,
+            "use_pooling": True,
+        },
     }
 }
 

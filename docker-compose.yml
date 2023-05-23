@@ -24,6 +24,12 @@ services:
       - app
     restart: always
 
+  memcached:
+    image: memcached:1.6.20-alpine
+    expose:
+      - "11211"
+    restart: always
+
   app:
     build:
       context: .
@@ -39,4 +45,5 @@ services:
       - "8001"
     depends_on:
       - db
+      - memcached
     restart: always
