@@ -45,7 +45,7 @@ class CalendarIncidentCategoryScalar:
 
 
 @gql.django.type(models.CalendarIncident)
-class CalendarIncidentScalar(IncidentAbstractScalar):
+class CalendarIncidentScalar:
     id: gql.auto
     start_datetime: datetime
     end_datetime: Optional[datetime]
