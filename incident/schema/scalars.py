@@ -70,6 +70,10 @@ class CalendarIncidentScalar:
     # medias: List["Media"]
     # TODO: Dataloaders
 
+    @gql.field
+    def has_details(self) -> bool:
+        return self.details not in [None, ""]
+
 
 @gql.django.type(models.CalendarIncidentChronology)
 class CalendarIncidentChronologyScalar:
