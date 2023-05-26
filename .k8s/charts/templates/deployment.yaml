@@ -71,6 +71,11 @@ spec:
           args:
             - run_app.sh
 
+        - name: memcached
+          image: {{ .Values.containers.memcached.image }}
+          ports:
+            - containerPort: {{ .Values.containers.memcached.containerPort }}
+
       volumes:
         - name: static
         - name: firebase-admin-key

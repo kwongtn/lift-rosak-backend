@@ -20,6 +20,9 @@ containers:
     env:
       configMap: backend-django-cm
       secret: backend-django-sec
+  memcached:
+    image: memcached:1.6.20-alpine
+    containerPort: 11211
 
 volumes:
   web:
