@@ -74,6 +74,14 @@ class CalendarIncidentScalar:
     def has_details(self) -> bool:
         return self.details not in [None, ""]
 
+    @gql.field
+    def last_updated(self) -> datetime:
+        db_obj = models.CalendarIncident.objects.get(id=self.id)
+        return max(
+            db_obj.modified,
+            db_obj.chronologies.order_by("-modified")[0].modified,
+        )
+
 
 @gql.django.type(models.CalendarIncidentChronology)
 class CalendarIncidentChronologyScalar:
