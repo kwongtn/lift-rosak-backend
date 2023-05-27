@@ -116,10 +116,6 @@ class VehicleType:
             "vehicle_count_from_vehicle_type_loader"
         ].load(self.id)
 
-    @gql.field
-    def info(self, info: Info):
-        return str(info)
-
 
 @gql.django.type(models.Vehicle)
 class Vehicle:
@@ -171,3 +167,15 @@ class Vehicle:
         return await info.context.loaders["operation"][
             "incident_count_from_vehicle_loader"
         ].load(self.id)
+
+    @gql.field
+    async def can_expand(self, info: Info) -> bool:
+        return (
+            await info.context.loaders["operation"][
+                "incident_count_from_vehicle_loader"
+            ].load(self.id)
+        ) > 0 or (
+            await info.context.loaders["operation"][
+                "spotting_count_from_vehicle_loader"
+            ].load((self.id, Q(vehicle_id=self.id)))
+        ) > 0
