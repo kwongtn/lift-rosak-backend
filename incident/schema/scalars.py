@@ -79,7 +79,9 @@ class CalendarIncidentScalar:
         db_obj = models.CalendarIncident.objects.get(id=self.id)
         return max(
             db_obj.modified,
-            db_obj.chronologies.order_by("-modified")[0].modified,
+            db_obj.chronologies.order_by("-modified")[0].modified
+            if db_obj.chronologies.count() > 0
+            else datetime.min,
         )
 
 
