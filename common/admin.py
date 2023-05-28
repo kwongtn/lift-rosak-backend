@@ -16,6 +16,23 @@ class UserStackedInline(admin.StackedInline):
     model = User
 
 
+class MediaAdmin(admin.ModelAdmin):
+    fields = [
+        "id",
+        "created",
+        "modified",
+        "file",
+        "image_widget",
+        "uploader",
+    ]
+    readonly_fields = [
+        "id",
+        "created",
+        "modified",
+        "image_widget",
+    ]
+
+
 class UserAdmin(admin.ModelAdmin):
     inlines = [UserBadgeStackedInline]
     list_display = [
@@ -29,5 +46,5 @@ class UserAdmin(admin.ModelAdmin):
     ]
 
 
-admin.site.register(Media, admin.ModelAdmin)
+admin.site.register(Media, MediaAdmin)
 admin.site.register(User, UserAdmin)

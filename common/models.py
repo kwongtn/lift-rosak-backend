@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.utils.safestring import mark_safe
 from model_utils.models import TimeStampedModel, UUIDModel
 
 from common.imgur_storage import ImgurStorage
@@ -19,6 +20,9 @@ class Media(TimeStampedModel, UUIDModel):
 
     def __str__(self) -> str:
         return self.file.name
+
+    def image_widget(self):
+        return mark_safe('<img src="%s" style="max-width: 45vw;" />' % (self.file.url))
 
 
 class User(TimeStampedModel):
