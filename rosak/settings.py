@@ -118,6 +118,8 @@ INSTALLED_APPS = [
     "spotting",
     "incident",
     "mlptf",
+    # Must be at bottom
+    "django_cleanup.apps.CleanupConfig",
 ]
 
 MIDDLEWARE = [
@@ -282,3 +284,11 @@ DEBUG_TOOLBAR_PANELS = [
 # Recaptcha Configuration
 RECAPTCHA_KEY = os.environ.get("RECAPTCHA_SECRET")
 RECAPTCHA_MIN_SCORE = 0.85
+
+# Django Imgur
+IMGUR_CONSUMER_ID = os.environ.get("IMGUR_CONSUMER_ID", "")
+IMGUR_CONSUMER_SECRET = os.environ.get("IMGUR_CONSUMER_SECRET", "")
+IMGUR_USERNAME = os.environ.get("IMGUR_USERNAME", "")
+IMGUR_ACCESS_TOKEN = os.environ.get("IMGUR_ACCESS_TOKEN", "")
+IMGUR_ACCESS_TOKEN_REFRESH = os.environ.get("IMGUR_ACCESS_TOKEN_REFRESH", "")
+IMGUR_ALBUM = os.environ.get("IMGUR_ALBUM", "media")

@@ -1,16 +1,24 @@
+from django.conf import settings
 from django.db import models
-from model_utils.models import SoftDeletableModel, TimeStampedModel, UUIDModel
+from model_utils.models import TimeStampedModel, UUIDModel
+
+from common.imgur_storage import ImgurStorage
+
+STORAGE = ImgurStorage()
 
 
-class Media(TimeStampedModel, UUIDModel, SoftDeletableModel):
-    file = models.FileField()
+class Media(TimeStampedModel, UUIDModel):
+    file = models.ImageField(
+        upload_to=settings.IMGUR_ALBUM,
+        storage=STORAGE,
+    )
     uploader = models.ForeignKey(
         to="common.User",
         on_delete=models.PROTECT,
     )
 
     def __str__(self) -> str:
-        return self.id[:8]
+        return self.file.name
 
 
 class User(TimeStampedModel):

@@ -25,10 +25,11 @@ from spotting import models as spotting_models
 from spotting.enums import SpottingEventType
 
 
-@gql.django.type(models.Media)
-class Media:
+@gql.django.type(models.Media, pagination=True)
+class MediaScalar:
     id: str
     uploader: "UserScalar"
+    file: gql.auto
 
 
 @gql.django.type(models.User)

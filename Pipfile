@@ -8,6 +8,7 @@ django = ">=4.2,<4.3"
 django-admin-rangefilter = "*"
 django-advanced-filters = "*"
 django-choices-field = "*"
+django-cleanup = "*"
 django-colorfield = "*"
 django-cors-headers = "*"
 django-debug-toolbar = "*"
@@ -30,6 +31,7 @@ sentry-sdk = "*"
 strawberry-django-plus = "*"
 strawberry-graphql = "*"
 strawberry-graphql-django = "*"
+imgurpython = {editable = true, git = "https://github.com/BryanH/imgurpython"}
 uvicorn = {extras = ["standard"], version = "*"}
 
 [dev-packages]
