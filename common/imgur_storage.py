@@ -1,12 +1,7 @@
 import base64
-import os.path
-
-try:
-    from io import StringIO
-except ImportError:
-    from io import StringIO
-
 import logging
+import os.path
+from io import StringIO
 
 import requests
 from django.conf import settings
@@ -50,8 +45,10 @@ class ImgurStorage(Storage):
         return os.path.join(self.location, name)
 
     def _open(self, name, mode="rb"):
-        remote_file = self.client.get_image(name, self, mode=mode)
-        return remote_file
+        name = name.split(".")[0]
+        response = requests.get(f"https://i.imgur.com/{name}")
+
+        return response
 
     def _save(self, name, content):
         name = self._get_abs_path(name)

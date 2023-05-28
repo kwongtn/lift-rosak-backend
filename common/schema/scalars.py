@@ -29,7 +29,7 @@ from spotting.enums import SpottingEventType
 class MediaScalar:
     id: str
     uploader: "UserScalar"
-    file: gql.auto
+    file: gql.django.DjangoFileType
 
 
 @gql.django.type(models.User)
