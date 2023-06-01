@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED 1
 ENV GOOGLE_APPLICATION_CREDENTIALS /google-application-credential.json
 RUN pip install pipenv
 RUN apt-get update && apt-get install -y \
-    gdal-bin
+    gdal-bin git
 RUN mkdir /code
 WORKDIR /code
 

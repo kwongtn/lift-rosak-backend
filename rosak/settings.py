@@ -292,3 +292,16 @@ IMGUR_USERNAME = os.environ.get("IMGUR_USERNAME", "")
 IMGUR_ACCESS_TOKEN = os.environ.get("IMGUR_ACCESS_TOKEN", "")
 IMGUR_ACCESS_TOKEN_REFRESH = os.environ.get("IMGUR_ACCESS_TOKEN_REFRESH", "")
 IMGUR_ALBUM = os.environ.get("IMGUR_ALBUM", "media")
+
+
+# Celery
+# http://docs.celeryproject.org/en/latest/userguide/configuration.html
+if USE_TZ:
+    CELERY_TIMEZONE = TIME_ZONE
+CELERY_BROKER_URL = "redis://redis:6379"
+CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TASK_TIME_LIMIT = 5 * 60
+CELERY_TASK_SOFT_TIME_LIMIT = 60

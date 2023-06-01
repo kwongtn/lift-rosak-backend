@@ -31,6 +31,7 @@ services:
     restart: always
 
   app:
+    &app
     build:
       context: .
       args:
@@ -47,3 +48,14 @@ services:
       - db
       - memcached
     restart: always
+
+  redis:
+    image: redis:7
+
+  celeryworker:
+    <<: *app
+    depends_on:
+      - db
+      - memcached
+      - redis
+    command: pipenv run celery -A rosak worker -l INFO
