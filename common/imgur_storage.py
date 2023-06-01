@@ -75,7 +75,7 @@ class ImgurStorage(Storage):
             content, {"album": album.id, "name": name, "title": name}, False
         )
         logger.info(f"Imgur response: {response}")
-        return f"{response['id']}.{response['type'].split('/')[-1]}"
+        return response["link"].split("/")[-1]
 
     def _client_upload_from_fd(self, fd, config=None, anon=True):
         """use a file descriptor to perform a make_request"""
