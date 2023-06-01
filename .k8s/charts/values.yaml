@@ -18,8 +18,11 @@ containers:
       secret: postgres-django-postgresql-ha-postgresql
       key: password
     env:
-      configMap: backend-django-cm
-      secret: backend-django-sec
+      configMaps:
+        - backend-django-cm
+      secrets:
+        - backend-django-sec
+        - imgur-creds
   memcached:
     image: memcached:1.6.20-alpine
     containerPort: 11211

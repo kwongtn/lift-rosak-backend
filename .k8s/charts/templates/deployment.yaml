@@ -49,10 +49,14 @@ spec:
           ports:
             - containerPort: {{ .Values.containers.app.containerPort }}
           envFrom:
+            {{- range .Values.containers.app.env.configMaps }}
             - configMapRef:
-                name: {{ .Values.containers.app.env.configMap }}
+                name: {{ . | quote }}
+            {{- end }}
+            {{- range .Values.containers.app.env.secrets }}
             - secretRef:
-                name: {{ .Values.containers.app.env.secret }}
+                name: {{ . | quote }}
+            {{- end }}
           env:
             - name: "DATABASE_PASSWORD"
               valueFrom:
