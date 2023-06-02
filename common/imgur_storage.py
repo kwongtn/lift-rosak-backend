@@ -1,16 +1,18 @@
 import base64
 import logging
 import os.path
-from io import StringIO
+from io import BytesIO, StringIO
 
 import requests
 from django.conf import settings
 from django.core.cache import cache
 from django.core.files import File
 from django.core.files.storage import Storage
+from django.core.files.uploadedfile import InMemoryUploadedFile
 from django.utils.deconstruct import deconstructible
 from imgurpython import ImgurClient
 from imgurpython.helpers.error import ImgurClientError
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +52,23 @@ class ImgurStorage(Storage):
 
         return response
 
-    def _save(self, name, content):
+    def _save(self, name, content: InMemoryUploadedFile):
         name = self._get_abs_path(name)
         directory = os.path.dirname(name)
+
+        image_b64 = ""
+        with content.open() as stream:
+            image = Image.open(stream)
+
+            if image.mode in ("RGBA", "LA"):
+                background = Image.new(image.mode[:-1], image.size, "#fff")
+                background.paste(image, image.split()[-1])
+                image = background
+
+            image_io = BytesIO()
+            image.save(image_io, format="JPEG", quality=100)
+
+            image_b64 = base64.b64encode(image_io.getvalue())
 
         logger.info(f"albums: {[a.title for a in self.albums]}")
         logger.info(f"name: {name}")
@@ -69,27 +85,28 @@ class ImgurStorage(Storage):
             self.albums = self.client.get_account_albums(settings.IMGUR_USERNAME)
 
         album = [a for a in self.albums if a.title == directory][0]
-        # if not response['is_dir']:
-        #     raise IOError("%s exists and is not a directory." % directory)
         response = self._client_upload_from_fd(
-            content, {"album": album.id, "name": name, "title": name}, False
+            image_b64,
+            {
+                "album": album.id,
+                "name": name,
+                "title": name,
+            },
+            False,
         )
         logger.info(f"Imgur response: {response}")
+
         return response["link"].split("/")[-1]
 
-    def _client_upload_from_fd(self, fd, config=None, anon=True):
+    def _client_upload_from_fd(self, b64: str, config=None, anon=True):
         """use a file descriptor to perform a make_request"""
         if not config:
             config = dict()
-
-        contents = fd.read()
-        b64 = base64.b64encode(contents)
 
         data = {
             "image": b64,
             "type": "base64",
         }
-
         data.update(
             {
                 meta: config[meta]
