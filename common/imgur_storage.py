@@ -1,18 +1,18 @@
 import base64
 import logging
 import os.path
-from io import BytesIO, StringIO
+from io import StringIO
 
 import requests
 from django.conf import settings
 from django.core.cache import cache
 from django.core.files import File
+from django.core.files.images import ImageFile
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import InMemoryUploadedFile
 from django.utils.deconstruct import deconstructible
 from imgurpython import ImgurClient
 from imgurpython.helpers.error import ImgurClientError
-from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -24,24 +24,29 @@ class ImgurStorage(Storage):
     """
 
     def __init__(self, location="/"):
-        self.client = ImgurClient(
-            client_id=settings.IMGUR_CONSUMER_ID,
-            client_secret=settings.IMGUR_CONSUMER_SECRET,
-            access_token=settings.IMGUR_ACCESS_TOKEN,
-            refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
-        )
-        logger.info("Logged in Imgur storage")
+        try:
+            self.client = ImgurClient(
+                client_id=settings.IMGUR_CONSUMER_ID,
+                client_secret=settings.IMGUR_CONSUMER_SECRET,
+                access_token=settings.IMGUR_ACCESS_TOKEN,
+                refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
+            )
+            logger.info("Logged in Imgur storage")
 
-        self.account_info = self.client.get_account(settings.IMGUR_USERNAME)
-        self.albums = self.client.get_account_albums(settings.IMGUR_USERNAME)
-        self.location = location
-        self.base_url = "https://api.imgur.com/3/account/{url}/".format(
-            url=self.account_info.url
-        )
-        logger.debug(f"account_info: {self.account_info}")
-        logger.debug(f"albums: {self.albums}")
-        logger.debug(f"location: {self.location}")
-        logger.debug(f"base_url: {self.base_url}")
+            self.account_info = self.client.get_account(settings.IMGUR_USERNAME)
+            self.albums = self.client.get_account_albums(settings.IMGUR_USERNAME)
+            self.location = location
+            self.base_url = "https://api.imgur.com/3/account/{url}/".format(
+                url=self.account_info.url
+            )
+            logger.debug(f"account_info: {self.account_info}")
+            logger.debug(f"albums: {self.albums}")
+            logger.debug(f"location: {self.location}")
+            logger.debug(f"base_url: {self.base_url}")
+
+        except Exception as e:
+            logger.error(e)
+            print("Imgur login error, functionality disabled.")
 
     def _get_abs_path(self, name):
         return os.path.join(self.location, name)
@@ -52,31 +57,7 @@ class ImgurStorage(Storage):
 
         return response
 
-    def _save(self, name, content: InMemoryUploadedFile):
-        name = self._get_abs_path(name)
-        directory = os.path.dirname(name)
-
-        image_b64 = ""
-        with content.open() as stream:
-            image = Image.open(stream)
-
-            if image.mode in ("RGBA", "LA"):
-                background = Image.new(image.mode[:-1], image.size, "#fff")
-                background.paste(image, image.split()[-1])
-                image = background
-
-            image_io = BytesIO()
-            image.save(image_io, format="JPEG", quality=100)
-
-            image_b64 = base64.b64encode(image_io.getvalue())
-
-        logger.info(f"albums: {[a.title for a in self.albums]}")
-        logger.info(f"name: {name}")
-        logger.info(f"directory: {directory}")
-        logger.info(f"content: {content}")
-
-        logger.debug(f"self.exists(directory): {self.exists(directory)}")
-
+    def check_or_create_directory(self, directory):
         if directory not in [album.title for album in self.albums]:
             logger.debug(f"Album {directory} does not exist, creating it")
             album = self.client.create_album({"title": directory})
@@ -85,6 +66,28 @@ class ImgurStorage(Storage):
             self.albums = self.client.get_account_albums(settings.IMGUR_USERNAME)
 
         album = [a for a in self.albums if a.title == directory][0]
+        return album
+
+    def _save(self, name, content: InMemoryUploadedFile):
+        name = self._get_abs_path(name)
+        directory = os.path.dirname(name)
+
+        album = self.check_or_create_directory(directory)
+
+        image_b64 = ""
+        with content.open() as stream:
+            if type(stream) in (ImageFile, InMemoryUploadedFile):
+                image_b64 = base64.b64encode(stream.file.getvalue())
+
+            else:
+                image_b64 = base64.b64encode(stream)
+
+        logger.info(f"name: {name}")
+        logger.info(f"directory: {directory}")
+        logger.info(f"content: {content}")
+
+        logger.debug(f"self.exists(directory): {self.exists(directory)}")
+
         response = self._client_upload_from_fd(
             image_b64,
             {
