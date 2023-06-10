@@ -55,7 +55,7 @@ class SpottingMutations:
 
     @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
     @sync_to_async
-    def add_event(self, input: EventInput, info: Info) -> GenericMutationReturn:
+    def add_event(self, input: EventInput, info: Info) -> EventScalar:
         user_id = info.context.user.id
 
         notes = input.notes if input.notes != gql.UNSET else ""
@@ -137,7 +137,18 @@ class SpottingMutations:
                 speed=speed,
             )
 
-        return GenericMutationReturn(ok=True)
+        return EventScalar(
+            id=event.id,
+            created=event.created,
+            spotting_date=event.spotting_date,
+            vehicle=event.vehicle,
+            notes=event.notes,
+            status=event.status,
+            type=event.type,
+            run_number=event.run_number,
+            origin_station=event.origin_station,
+            destination_station=event.destination_station,
+        )
 
     @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed, IsAdmin])
     @sync_to_async
