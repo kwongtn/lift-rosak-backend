@@ -20,6 +20,7 @@ from django.urls import include, path, re_path
 from django.views.decorators.csrf import csrf_exempt
 
 from rosak.context import CustomGraphQLView
+from spotting import views as spotting_views
 
 from . import custom_view
 from .schema import schema
@@ -37,6 +38,7 @@ urlpatterns = (
                 schema=schema,
             ),
         ),
+        path("spotting_upload/", spotting_views.SpottingImageUpload.as_view()),
         path("sentry/", csrf_exempt(custom_view.sentry)),
         path("version/", csrf_exempt(custom_view.git_version)),
         path("mdeditor/", include("mdeditor.urls")),

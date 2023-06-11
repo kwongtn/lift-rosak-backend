@@ -71,6 +71,12 @@ class Event(TimeStampedModel):
         related_name="destination_station_event",
     )
 
+    medias = models.ManyToManyField(
+        to="common.Media",
+        blank=True,
+        through="spotting.EventMedia",
+    )
+
     class Meta:
         constraints = [
             models.CheckConstraint(
@@ -123,3 +129,14 @@ class EventRead(TimeStampedModel):
                 name="%(app_label)s_%(class)s_reader_event_unique",
             ),
         ]
+
+
+class EventMedia(TimeStampedModel):
+    event = models.ForeignKey(
+        to="spotting.Event",
+        on_delete=models.CASCADE,
+    )
+    media = models.ForeignKey(
+        to="common.Media",
+        on_delete=models.CASCADE,
+    )
