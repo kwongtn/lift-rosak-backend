@@ -31,6 +31,16 @@ class MediaAdmin(admin.ModelAdmin):
         "modified",
         "image_widget",
     ]
+    list_display = [
+        "__str__",
+        "uploader",
+    ]
+    list_filter = [
+        "uploader",
+    ]
+    search_fields = [
+        "uploader",
+    ]
 
 
 class UserAdmin(admin.ModelAdmin):
