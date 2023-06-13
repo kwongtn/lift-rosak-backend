@@ -90,7 +90,7 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "is_anonymous",
     ]
     autocomplete_fields = (
-        "vehicle",
+        # "vehicle",
         "origin_station",
         "destination_station",
     )
