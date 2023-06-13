@@ -9,7 +9,6 @@ from django.core.cache import cache
 from django.core.files import File
 from django.core.files.images import ImageFile
 from django.core.files.storage import Storage
-from django.core.files.uploadedfile import InMemoryUploadedFile
 from django.utils.deconstruct import deconstructible
 from imgurpython import ImgurClient
 from imgurpython.helpers.error import ImgurClientError
@@ -68,7 +67,7 @@ class ImgurStorage(Storage):
         album = [a for a in self.albums if a.title == directory][0]
         return album
 
-    def _save(self, name, content: InMemoryUploadedFile):
+    def _save(self, name, content: ImageFile):
         name = self._get_abs_path(name)
         directory = os.path.dirname(name)
 
@@ -76,11 +75,10 @@ class ImgurStorage(Storage):
 
         image_b64 = ""
         with content.open() as stream:
-            if type(stream) in (ImageFile, InMemoryUploadedFile):
+            try:
                 image_b64 = base64.b64encode(stream.file.getvalue())
-
-            else:
-                image_b64 = base64.b64encode(stream)
+            except AttributeError:
+                image_b64 = base64.b64encode(stream.read())
 
         logger.info(f"name: {name}")
         logger.info(f"directory: {directory}")
@@ -88,6 +86,7 @@ class ImgurStorage(Storage):
 
         logger.debug(f"self.exists(directory): {self.exists(directory)}")
 
+        logger.debug(image_b64[:128])
         response = self._client_upload_from_fd(
             image_b64,
             {
@@ -145,7 +144,6 @@ class ImgurStorage(Storage):
             return False
         else:
             return True
-        return False
 
     def listdir(self, path):
         path = self._get_abs_path(path)
