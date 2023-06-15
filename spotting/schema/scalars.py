@@ -48,6 +48,12 @@ class EventScalar:
             "location_event_from_event_loader"
         ].load(self.id)
 
+    @gql.field
+    async def has_media(self, info: Info) -> bool:
+        return await info.context.loaders["spotting"][
+            "has_media_from_event_loader"
+        ].load(self.id)
+
 
 @gql.django.type(models.Event)
 class EventRelay(relay.Node, EventScalar):

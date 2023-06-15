@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from django.db.models import Q
+from django.db.models import Count, Q
 from strawberry.dataloader import DataLoader
 
 from spotting.models import Event, EventRead, LocationEvent
@@ -39,10 +39,26 @@ async def batch_load_location_event_from_event(keys):
     return [event_dict.get(key, None) for key in keys]
 
 
+async def batch_load_has_media_from_event(keys):
+    query_dict = {str(key): Count("medias") for key in keys}
+    query_dict_gt = {f"{key}__gt": 0 for key in keys}
+    event_ids = []
+
+    async for id in (
+        Event.objects.annotate(**query_dict)
+        .filter(**query_dict_gt)
+        .values_list("id", flat=True)
+    ):
+        event_ids.append(id)
+
+    return [int(key) in event_ids for key in keys]
+
+
 SpottingContextLoaders = {
     "is_read_from_event_loader": DataLoader(load_fn=batch_load_is_read_from_event),
     "location_event_from_event_loader": DataLoader(
         load_fn=batch_load_location_event_from_event
     ),
     "reporter_from_event_loader": DataLoader(load_fn=batch_load_reporter_from_event),
+    "has_media_from_event_loader": DataLoader(load_fn=batch_load_has_media_from_event),
 }
