@@ -13,7 +13,7 @@ known_project_ids = ["6596136"]
 
 def sentry(request: HttpRequest):
     try:
-        envelope = request.body.decode("utf-8")
+        envelope = request.body.decode("utf-8", "ignore")
 
         piece = envelope.split("\n")[0]
         header = json.loads(piece)
@@ -33,7 +33,7 @@ def sentry(request: HttpRequest):
     except Exception as e:
         # handle exception in your preferred style,
         # e.g. by logging or forwarding to Sentry
-        logging.exception(e)
+        logging.debug(e)
 
     return HttpResponse({})
 
