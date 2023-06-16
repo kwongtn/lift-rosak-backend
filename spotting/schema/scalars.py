@@ -1,6 +1,7 @@
 from datetime import date
 from typing import List, Optional
 
+from asgiref.sync import sync_to_async
 from strawberry.types import Info
 from strawberry_django_plus import gql
 from strawberry_django_plus.gql import relay
@@ -59,6 +60,15 @@ class EventScalar:
         return await info.context.loaders["spotting"]["media_from_event_loader"].load(
             self.id
         )
+
+    @gql.field
+    @sync_to_async
+    def editable(self, info: Info) -> bool:
+        user = info.context.user
+        if user is None:
+            return False
+        else:
+            return self.reporter.id == user.id
 
 
 @gql.django.type(models.Event)
