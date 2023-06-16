@@ -39,19 +39,15 @@ async def batch_load_location_event_from_event(keys):
     return [event_dict.get(key, None) for key in keys]
 
 
-async def batch_load_has_media_from_event(keys):
-    query_dict = {str(key): Count("medias") for key in keys}
-    query_dict_gt = {f"{key}__gt": 0 for key in keys}
-    event_ids = []
+async def batch_load_media_count_from_event(keys):
+    query_dict = {f"{key}_count": Count("medias") for key in keys}
+    query_dict_gt = {f"{key}_count__gt": 0 for key in keys}
+    event_dict = defaultdict()
 
-    async for id in (
-        Event.objects.annotate(**query_dict)
-        .filter(**query_dict_gt)
-        .values_list("id", flat=True)
-    ):
-        event_ids.append(id)
+    async for event in Event.objects.annotate(**query_dict).filter(**query_dict_gt):
+        event_dict[str(event.id)] = getattr(event, f"{event.id}_count", 0)
 
-    return [int(key) in event_ids for key in keys]
+    return [event_dict.get(str(key), 0) for key in keys]
 
 
 async def batch_load_media_from_event(keys):
@@ -70,6 +66,8 @@ SpottingContextLoaders = {
         load_fn=batch_load_location_event_from_event
     ),
     "reporter_from_event_loader": DataLoader(load_fn=batch_load_reporter_from_event),
-    "has_media_from_event_loader": DataLoader(load_fn=batch_load_has_media_from_event),
+    "media_count_from_event_loader": DataLoader(
+        load_fn=batch_load_media_count_from_event
+    ),
     "media_from_event_loader": DataLoader(load_fn=batch_load_media_from_event),
 }

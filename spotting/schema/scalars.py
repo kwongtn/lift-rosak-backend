@@ -49,9 +49,9 @@ class EventScalar:
         ].load(self.id)
 
     @gql.field
-    async def has_media(self, info: Info) -> bool:
+    async def media_count(self, info: Info) -> int:
         return await info.context.loaders["spotting"][
-            "has_media_from_event_loader"
+            "media_count_from_event_loader"
         ].load(self.id)
 
     @gql.field
