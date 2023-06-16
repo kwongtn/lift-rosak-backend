@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 
 from common.models import Media
 from common.utils import FirebaseUser
-from spotting.models import EventMedia
+from spotting.models import Event, EventMedia
 
 
 class SpottingImageUpload(APIView):
@@ -20,6 +20,12 @@ class SpottingImageUpload(APIView):
         if user is None:
             return Response(status=status.HTTP_401_UNAUTHORIZED)
 
+        event: Event = await Event.objects.aget(
+            id=request.data.dict()["spotting_event_id"]
+        )
+        if user.id != event.reporter_id:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
         media = await Media.objects.acreate(
             uploader_id=user.id,
             file=ImageFile(request.data.dict()["image"].file, "image"),
@@ -27,7 +33,7 @@ class SpottingImageUpload(APIView):
 
         await EventMedia.objects.acreate(
             media_id=media.id,
-            event_id=request.data.dict()["spotting_event_id"],
+            event_id=event.id,
         )
 
         return Response(None, status=status.HTTP_201_CREATED)
