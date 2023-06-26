@@ -63,7 +63,7 @@ class EventScalar:
 
     @gql.field
     @sync_to_async
-    def editable(self, info: Info) -> bool:
+    def is_mine(self, info: Info) -> bool:
         user = info.context.user
         if user is None:
             return False
