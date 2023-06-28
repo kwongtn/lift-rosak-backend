@@ -7,6 +7,7 @@ from strawberry.types import Info
 from strawberry_django_plus import gql
 
 from common import models
+from common import models as common_models
 from common.schema.types import (
     FavouriteVehicleData,
     UserSpottingTrend,
@@ -109,6 +110,10 @@ class UserScalar:
     @gql.django.field
     async def spottings_count(self, info: Info) -> int:
         return spotting_models.Event.objects.filter(reporter_id=self.id).acount()
+
+    @gql.django.field
+    async def media_count(self) -> int:
+        return common_models.Media.objects.filter(uploader_id=self.id).acount()
 
     @gql.django.field
     def spotting_trends(
