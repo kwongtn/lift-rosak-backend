@@ -6,6 +6,7 @@ fullnameOverride: ""
 podAnnotations: {}
 
 loadtesterUrl: http://flagger-loadtester.linkerd/
+skipCanaryAnalysis: false
 
 containers:
   web:

@@ -18,6 +18,7 @@ spec:
   progressDeadlineSeconds: 60
   service:
     port: {{ .Values.containers.web.containerPort }}
+  skipAnalysis: {{ .Values.skipCanaryAnalysis }}
   analysis:
     alerts:
       - name: "Discord"
