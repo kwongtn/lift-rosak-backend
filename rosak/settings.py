@@ -140,8 +140,6 @@ MIDDLEWARE = [
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "http://kwongnet.ddns.net",
-    "https://lift-rosak.ddns.net:8000",
     "https://rosak-7223b--pr8-ng-zorro-antd-l1wpy6qj.web.app",
     "https://community.mlptf.org.my",
     "https://api-community.mlptf.org.my",
@@ -157,6 +155,7 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
     "^https://rosak-7223b--staging-.*\\.web\\.app$",
+    "^https://rosak-7223b\\.web\\.app$",
     "^https://.*\\.kwongtn\\.xyz$",
 ]
 
