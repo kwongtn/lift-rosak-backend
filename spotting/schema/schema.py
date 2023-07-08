@@ -53,7 +53,12 @@ class SpottingMutations:
         else:
             return GenericMutationReturn(ok=False)
 
-    @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
+    @gql.mutation(
+        permission_classes=[
+            IsLoggedIn,
+            # IsRecaptchaChallengePassed,
+        ]
+    )
     @sync_to_async
     def add_event(self, input: EventInput, info: Info) -> EventScalar:
         user_id = info.context.user.id
