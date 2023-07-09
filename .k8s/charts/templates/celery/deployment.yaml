@@ -34,6 +34,8 @@ spec:
       containers:
         - name: app
           image: {{ .Values.containers.app.image }}
+          ports:
+            - containerPort: {{ .Values.containers.app.containerPort }}
           envFrom:
             {{- range .Values.containers.app.env.configMaps }}
             - configMapRef:
