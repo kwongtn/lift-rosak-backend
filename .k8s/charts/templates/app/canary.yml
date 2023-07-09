@@ -1,18 +1,18 @@
 apiVersion: flagger.app/v1beta1
 kind: Canary
 metadata:
-  name: {{ include "deploy.fullname" . }}-canary
+  name: {{ include "deploy.fullname" . }}-app-canary
 spec:
   # deployment reference
   targetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "deploy.fullname" . }}
+    name: {{ include "deploy.fullname" . }}-app
   # HPA reference (optional)
   autoscalerRef:
-    apiVersion: autoscaling/v2beta2
+    apiVersion: autoscaling/v2
     kind: HorizontalPodAutoscaler
-    name: {{ include "deploy.fullname" . }}
+    name: {{ include "deploy.fullname" . }}-app-hpa
   # the maximum time in seconds for the canary deployment
   # to make progress before it is rollback (default 600s)
   progressDeadlineSeconds: 60
