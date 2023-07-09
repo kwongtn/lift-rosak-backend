@@ -29,6 +29,7 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "vehicle",
         "status",
         "type",
+        "media_count",
         "origin_station",
         "destination_station",
         "is_anonymous",
@@ -102,6 +103,9 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
             return obj.notes[:29] + "..."
         else:
             return obj.notes
+
+    def media_count(self, obj):
+        return obj.medias.count()
 
 
 class LocationEventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
