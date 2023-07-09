@@ -78,6 +78,7 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
     #     "run_number",
     #     "notes",
     # ]
+    readonly_fields = ("images_widget",)
 
     advanced_filter_fields = [
         "reporter",

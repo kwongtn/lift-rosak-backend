@@ -21,8 +21,11 @@ class Media(TimeStampedModel, UUIDModel):
     def __str__(self) -> str:
         return self.file.name
 
-    def image_widget(self):
-        return mark_safe('<img src="%s" style="max-width: 45vw;" />' % (self.file.url))
+    def image_widget_html(self, style: str = "max-width: 45vw;") -> str:
+        return f'<img src="{self.file.url}" style="{style}" />'
+
+    def image_widget(self, *args, **kwargs):
+        return mark_safe(self.image_widget_html(*args, **kwargs))
 
 
 class User(TimeStampedModel):

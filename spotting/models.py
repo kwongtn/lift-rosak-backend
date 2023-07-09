@@ -1,6 +1,7 @@
 from django.contrib.gis.db import models
 from django.contrib.postgres.indexes import BTreeIndex
 from django.db.models import F, Q
+from django.utils.safestring import mark_safe
 from model_utils.models import TimeStampedModel
 
 from generic.models import WebLocationModel
@@ -110,6 +111,19 @@ class Event(TimeStampedModel):
             BTreeIndex(fields=["vehicle", "-spotting_date"]),
             BTreeIndex(fields=["vehicle", "run_number", "-spotting_date"]),
         ]
+
+    def images_widget(self):
+        html = '<div style="display: flex;\
+            flex-flow: row wrap; align-items: flex-start;\
+            align-content: space-between;">'
+
+        for media in self.medias.all():
+            html += f'<a href="/admin/common/media/{media.id}/change" target="_blank">'
+            html += media.image_widget_html(style="max-width: 200px; padding: 5px;")
+            html += "</a>"
+
+        html += "</div>"
+        return mark_safe(html)
 
 
 class EventRead(TimeStampedModel):
