@@ -57,13 +57,10 @@ spec:
               name: firebase-admin-key
               readOnly: true
           command:
-            - pipenv
+            - bash
           args:
-            - run
-            - celery
-            - -A rosak
-            - worker
-            - -l INFO
+            - run_celery.sh
+
 
         - name: memcached
           image: {{ .Values.containers.memcached.image }}
