@@ -46,3 +46,10 @@ autoscaling:
   maxReplicas: 2
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
+
+  celeryWorker:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 2
+    targetCPUUtilizationPercentage: 80
+    # targetMemoryUtilizationPercentage: 80
