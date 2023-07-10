@@ -297,7 +297,7 @@ IMGUR_ALBUM = os.environ.get("IMGUR_ALBUM", "media")
 # http://docs.celeryproject.org/en/latest/userguide/configuration.html
 if USE_TZ:
     CELERY_TIMEZONE = TIME_ZONE
-CELERY_BROKER_URL = "redis://redis:6379"
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379")
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"

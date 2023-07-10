@@ -2,4 +2,4 @@
 
 cd /code
 
-pipenv run celery -A rosak worker -l INFO
+pipenv run celery -A rosak.celery_app worker -l INFO -c 2

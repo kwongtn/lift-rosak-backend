@@ -51,6 +51,7 @@ services:
 
   redis:
     image: redis:7
+    restart: always
 
   celeryworker:
     <<: *app
@@ -58,4 +59,4 @@ services:
       - db
       - memcached
       - redis
-    command: pipenv run celery -A rosak worker -l INFO
+    command: bash run_celery.sh
