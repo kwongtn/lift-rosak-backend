@@ -27,6 +27,9 @@ containers:
   memcached:
     image: memcached:1.6.20-alpine
     containerPort: 11211
+  celeryWorker:
+    redis:
+      svcBindSecret: redis-svcbind
 
 volumes:
   web:
