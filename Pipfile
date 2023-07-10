@@ -30,7 +30,6 @@ promise = "*"
 psycopg2-binary = "*"
 pymemcache = "*"
 sentry-sdk = "*"
-strawberry-django-plus = "*"
 strawberry-graphql = "*"
 strawberry-graphql-django = "*"
 celery = {extras = ["pymemcache", "redis"], version = "*"}
