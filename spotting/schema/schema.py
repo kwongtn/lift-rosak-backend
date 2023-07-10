@@ -1,12 +1,12 @@
 import typing
 from datetime import timedelta
 
+import strawberry
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
 from django.utils.timezone import now
+from strawberry import relay
 from strawberry.types import Info
-from strawberry_django_plus import gql
-from strawberry_django_plus.gql import relay
 
 from common.schema.scalars import GenericMutationReturn
 from operation.models import StationLine
@@ -20,12 +20,12 @@ from spotting.schema.resolvers import get_events_count
 from spotting.schema.scalars import EventRelay, EventScalar
 
 
-@gql.type
+@strawberry.type
 class SpottingScalars:
-    events: typing.List[EventScalar] = gql.django.field(
+    events: typing.List[EventScalar] = strawberry.django.field(
         filters=EventFilter, pagination=True, order=EventOrder
     )
-    events_count: int = gql.django.field(
+    events_count: int = strawberry.django.field(
         resolver=get_events_count,
         description="Number of events",
     )
@@ -33,9 +33,9 @@ class SpottingScalars:
     event_relay_connection: relay.Connection[EventRelay] = relay.connection()
 
 
-@gql.type
+@strawberry.type
 class SpottingMutations:
-    @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
+    @strawberry.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
     async def delete_event(
         self, input: DeleteEventInput, info: Info
     ) -> GenericMutationReturn:
@@ -53,7 +53,7 @@ class SpottingMutations:
         else:
             return GenericMutationReturn(ok=False)
 
-    @gql.mutation(
+    @strawberry.mutation(
         permission_classes=[
             IsLoggedIn,
             # IsRecaptchaChallengePassed,
@@ -63,8 +63,10 @@ class SpottingMutations:
     def add_event(self, input: EventInput, info: Info) -> EventScalar:
         user_id = info.context.user.id
 
-        notes = input.notes if input.notes != gql.UNSET else ""
-        is_anonymous = input.is_anonymous if input.is_anonymous != gql.UNSET else False
+        notes = input.notes if input.notes != strawberry.UNSET else ""
+        is_anonymous = (
+            input.is_anonymous if input.is_anonymous != strawberry.UNSET else False
+        )
 
         origin_station_id = None
         destination_station_id = None
@@ -78,20 +80,20 @@ class SpottingMutations:
 
             origin_station_id = (
                 station_line_dict[str(input.origin_station)]
-                if input.origin_station != gql.UNSET
+                if input.origin_station != strawberry.UNSET
                 else None
             )
 
             destination_station_id = (
                 station_line_dict[str(input.destination_station)]
-                if input.destination_station != gql.UNSET
+                if input.destination_station != strawberry.UNSET
                 else None
             )
 
         if input.type == SpottingEventType.AT_STATION:
             origin_station_id = (
                 StationLine.objects.get(id=input.origin_station).station_id
-                if input.origin_station != gql.UNSET
+                if input.origin_station != strawberry.UNSET
                 else None
             )
 
@@ -108,27 +110,33 @@ class SpottingMutations:
             run_number=input.run_number,
         )
 
-        if input.location != gql.UNSET:
+        if input.location != strawberry.UNSET:
             location_input = input.location
             accuracy = (
                 location_input.accuracy
-                if location_input.accuracy != gql.UNSET
+                if location_input.accuracy != strawberry.UNSET
                 else None
             )
             altitude_accuracy = (
                 location_input.altitude_accuracy
-                if location_input.altitude_accuracy != gql.UNSET
+                if location_input.altitude_accuracy != strawberry.UNSET
                 else None
             )
             heading = (
-                location_input.heading if location_input.heading != gql.UNSET else None
+                location_input.heading
+                if location_input.heading != strawberry.UNSET
+                else None
             )
-            speed = location_input.speed if location_input.speed != gql.UNSET else None
+            speed = (
+                location_input.speed
+                if location_input.speed != strawberry.UNSET
+                else None
+            )
 
             location = Point(x=location_input.longitude, y=location_input.latitude)
             altitude = (
                 location_input.altitude
-                if location_input.altitude != gql.UNSET
+                if location_input.altitude != strawberry.UNSET
                 else None
             )
 
@@ -155,7 +163,9 @@ class SpottingMutations:
             destination_station=event.destination_station,
         )
 
-    @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed, IsAdmin])
+    @strawberry.mutation(
+        permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed, IsAdmin]
+    )
     @sync_to_async
     def mark_as_read(
         self, input: MarkEventAsReadInput, info: Info

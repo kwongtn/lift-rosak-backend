@@ -1,9 +1,9 @@
 from typing import Optional
 
-from strawberry_django_plus import gql
+import strawberry_django
 
 
-@gql.input
+@strawberry_django.input
 class WebLocationInput:
     accuracy: Optional[float]
     altitude_accuracy: Optional[float]

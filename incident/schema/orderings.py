@@ -1,12 +1,13 @@
-from strawberry_django_plus import gql
+import strawberry
+import strawberry_django
 
 from incident import models
 
 
-@gql.django.ordering.order(models.CalendarIncident)
+@strawberry_django.ordering.order(models.CalendarIncident)
 class CalendarIncidentOrder:
-    id: gql.auto
-    order: gql.auto
-    impact_factor: gql.auto
-    start_datetime: gql.auto
-    end_datetime: gql.auto
+    id: strawberry.auto
+    order: strawberry.auto
+    impact_factor: strawberry.auto
+    start_datetime: strawberry.auto
+    end_datetime: strawberry.auto

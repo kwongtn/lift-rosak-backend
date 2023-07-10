@@ -1,10 +1,11 @@
 from datetime import date
 from typing import List, Optional
 
+import strawberry
+import strawberry_django
 from asgiref.sync import sync_to_async
+from strawberry import relay
 from strawberry.types import Info
-from strawberry_django_plus import gql
-from strawberry_django_plus.gql import relay
 
 from common.schema.scalars import MediaScalar, UserScalar
 from generic.schema.scalars import WebLocationParent
@@ -13,55 +14,55 @@ from rosak.permissions import IsLoggedIn
 from spotting import models
 
 
-@gql.django.type(models.LocationEvent)
+@strawberry_django.type(models.LocationEvent)
 class LocationEvent(WebLocationParent):
     pass
 
 
-@gql.django.type(models.Event, pagination=True)
+@strawberry_django.type(models.Event, pagination=True)
 class EventScalar:
-    id: gql.auto
+    id: strawberry.auto
     created: date
     spotting_date: date
     vehicle: "Vehicle"
     notes: str
-    status: gql.auto
-    type: gql.auto
+    status: strawberry.auto
+    type: strawberry.auto
     run_number: Optional[str]
     origin_station: Optional["Station"]
     destination_station: Optional["Station"]
 
-    @gql.field
+    @strawberry.field
     async def reporter(self, info: Info) -> Optional["UserScalar"]:
         return await info.context.loaders["spotting"][
             "reporter_from_event_loader"
         ].load(self.id)
 
-    @gql.field(permission_classes=[IsLoggedIn])
+    @strawberry.field(permission_classes=[IsLoggedIn])
     async def is_read(self, info: Info) -> bool:
         return await info.context.loaders["spotting"]["is_read_from_event_loader"].load(
             (self.id, info.context.user.id)
         )
 
-    @gql.field
+    @strawberry.field
     async def location(self, info: Info) -> Optional["LocationEvent"]:
         return await info.context.loaders["spotting"][
             "location_event_from_event_loader"
         ].load(self.id)
 
-    @gql.field
+    @strawberry.field
     async def media_count(self, info: Info) -> int:
         return await info.context.loaders["spotting"][
             "media_count_from_event_loader"
         ].load(self.id)
 
-    @gql.field
+    @strawberry.field
     async def medias(self, info: Info) -> List["MediaScalar"]:
         return await info.context.loaders["spotting"]["media_from_event_loader"].load(
             self.id
         )
 
-    @gql.field
+    @strawberry.field
     @sync_to_async
     def is_mine(self, info: Info) -> bool:
         user = info.context.user
@@ -71,6 +72,6 @@ class EventScalar:
             return self.reporter.id == user.id
 
 
-@gql.django.type(models.Event)
+@strawberry_django.type(models.Event)
 class EventRelay(relay.Node, EventScalar):
     pass

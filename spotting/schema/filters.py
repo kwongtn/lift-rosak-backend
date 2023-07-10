@@ -1,17 +1,18 @@
 from datetime import date, datetime
 from typing import List
 
+import strawberry
+import strawberry_django
 from django.db.models import F, Q, Subquery
 from strawberry.types import Info
-from strawberry_django_plus import gql
 
 from spotting import models
 
 
-@gql.django.filters.filter(models.Event)
+@strawberry_django.filters.filter(models.Event)
 class EventFilter:
-    id: gql.auto
-    vehicle_id: gql.ID
+    id: strawberry.auto
+    vehicle_id: strawberry.ID
     type_in: List[str]
     created_start_datetime: datetime
     created_end_datetime: datetime

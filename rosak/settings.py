@@ -101,7 +101,7 @@ INSTALLED_APPS = [
     "colorfield",
     "advanced_filters",
     "rangefilter",
-    "strawberry.django",
+    "strawberry_django",
     "corsheaders",
     "django_extensions",
     "ordered_model",
@@ -125,7 +125,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     # This must be the first
     "django.middleware.cache.UpdateCacheMiddleware",
-    "strawberry_django_plus.middlewares.debug_toolbar.DebugToolbarMiddleware",
+    "strawberry_django.middlewares.debug_toolbar.DebugToolbarMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",

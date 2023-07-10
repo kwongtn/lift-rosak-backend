@@ -1,11 +1,12 @@
-from strawberry_django_plus import gql
+import strawberry
+import strawberry_django
 
 from operation import models
 
 
-@gql.django.ordering.order(models.Vehicle)
+@strawberry_django.ordering.order(models.Vehicle)
 class VehicleOrder:
-    id: gql.auto
-    identification_no: gql.auto
-    status: gql.auto
-    in_service_since: gql.auto
+    id: strawberry.auto
+    identification_no: strawberry.auto
+    status: strawberry.auto
+    in_service_since: strawberry.auto

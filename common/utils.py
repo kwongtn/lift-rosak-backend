@@ -45,7 +45,7 @@ def get_date_key(year: int, month: int = None, day: int = None):
 
 def get_default_start_time(type: DateGroupings) -> date:
     """
-    This function returns a default start time for gql.UNSET passings.
+    This function returns a default start time for strawberry.UNSET passings.
     Reason for this function is that we want a centralized placed to process such timings.
     """
     today = date.today()

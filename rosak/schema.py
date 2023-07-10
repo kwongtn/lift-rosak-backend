@@ -1,8 +1,8 @@
+import strawberry
 from django.conf import settings
 from graphql.validation import NoSchemaIntrospectionCustomRule
 from strawberry.extensions import AddValidationRules
-from strawberry_django_plus import gql
-from strawberry_django_plus.optimizer import DjangoOptimizerExtension
+from strawberry.extensions.tracing import SentryTracingExtension
 
 from common.schema.schema import CommonMutations, CommonScalars
 from incident.schema.schema import IncidentMutations, IncidentScalars
@@ -11,7 +11,7 @@ from reporting.schema.schema import ReportingMutations, ReportingScalars
 from spotting.schema.schema import SpottingMutations, SpottingScalars
 
 
-@gql.type
+@strawberry.type
 class Query(
     OperationScalars,
     ReportingScalars,
@@ -22,7 +22,7 @@ class Query(
     pass
 
 
-@gql.type
+@strawberry.type
 class Mutation(
     OperationMutations,
     ReportingMutations,
@@ -33,18 +33,18 @@ class Mutation(
     pass
 
 
-# @gql.type
+# @strawberry.type
 # class Subscription:
 #     pass
 
 extensions = [
-    DjangoOptimizerExtension(),
+    SentryTracingExtension,
 ]
 
 if not settings.DEBUG:
     extensions.append(AddValidationRules([NoSchemaIntrospectionCustomRule]))
 
-schema = gql.Schema(
+schema = strawberry.Schema(
     query=Query,
     mutation=Mutation,
     # subscription=Subscription,

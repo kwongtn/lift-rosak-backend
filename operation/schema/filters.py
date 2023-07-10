@@ -1,16 +1,16 @@
 import strawberry
+import strawberry_django
 from django.contrib.gis.db.models import Subquery
 from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import Distance
-from strawberry_django_plus import gql
 
 from operation import models
 
 
-@gql.django.filters.filter(models.Vehicle)
+@strawberry_django.filters.filter(models.Vehicle)
 class VehicleFilter:
-    id: gql.ID
-    status: gql.auto
+    id: strawberry.ID
+    status: strawberry.auto
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)
@@ -19,9 +19,9 @@ class VehicleFilter:
         return queryset.filter(status=self.status)
 
 
-@gql.django.filters.filter(models.Line)
+@strawberry_django.filters.filter(models.Line)
 class LineFilter:
-    id: gql.ID
+    id: strawberry.ID
     code: str
     display_name: str
     display_color: str
@@ -46,20 +46,20 @@ class LineFilter:
         return queryset.filter(display_color__icontains=self.display_color)
 
 
-@gql.django.filters.filter(models.VehicleType)
+@strawberry_django.filters.filter(models.VehicleType)
 class VehicleTypeFilter:
-    line_id: gql.ID
+    line_id: strawberry.ID
 
     def filter_line_id(self, queryset):
         return queryset.filter(vehicles__vehicle_lines__id=self.line_id).distinct("id")
 
 
-@gql.django.filters.filter(models.Asset)
+@strawberry_django.filters.filter(models.Asset)
 class AssetFilter:
-    id: gql.ID
+    id: strawberry.ID
     officialid: str
-    asset_type: gql.auto
-    station_id: gql.ID
+    asset_type: strawberry.auto
+    station_id: strawberry.ID
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)
@@ -74,13 +74,13 @@ class AssetFilter:
         return queryset.filter(station_id=self.station_id)
 
 
-@gql.django.filters.filter(models.Station)
+@strawberry_django.filters.filter(models.Station)
 class StationFilter:
-    id: gql.ID
+    id: strawberry.ID
     display_name: str
     internal_representation: str
     location: strawberry.scalars.JSON
-    line_id: gql.ID
+    line_id: strawberry.ID
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)
@@ -111,12 +111,12 @@ class StationFilter:
         return queryset.filter(lines=self.line_id)
 
 
-@gql.django.filters.filter(models.StationLine)
+@strawberry_django.filters.filter(models.StationLine)
 class StationLineFilter:
-    id: gql.ID
+    id: strawberry.ID
     display_name: str
-    station_id: gql.ID
-    line_id: gql.ID
+    station_id: strawberry.ID
+    line_id: strawberry.ID
     internal_representation: str
 
     def filter_id(self, queryset):

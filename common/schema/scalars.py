@@ -2,9 +2,10 @@ from datetime import date
 from typing import TYPE_CHECKING, Annotated, List, Optional
 
 import pendulum
+import strawberry
+import strawberry_django
 from django.db.models import Count, F, Min
 from strawberry.types import Info
-from strawberry_django_plus import gql
 
 from common import models
 from common import models as common_models
@@ -26,26 +27,26 @@ from spotting import models as spotting_models
 from spotting.enums import SpottingEventType
 
 
-@gql.django.type(models.Media, pagination=True)
+@strawberry_django.type(models.Media, pagination=True)
 class MediaScalar:
     id: str
     uploader: "UserScalar"
-    file: gql.django.DjangoFileType
+    file: strawberry_django.DjangoFileType
 
 
-@gql.django.type(models.User)
+@strawberry_django.type(models.User)
 class UserScalar:
     if TYPE_CHECKING:
         from spotting.schema.scalars import EventScalar
 
-    firebase_id: str = gql.django.field(permission_classes=[IsAdmin])
+    firebase_id: str = strawberry_django.field(permission_classes=[IsAdmin])
     nickname: str
 
-    @gql.django.field
+    @strawberry_django.field
     def short_id(self) -> str:
         return self.firebase_id[:8]
 
-    @gql.django.field
+    @strawberry_django.field
     def favourite_vehicles(
         self, count: Optional[int] = 1
     ) -> List[FavouriteVehicleData]:
@@ -68,7 +69,7 @@ class UserScalar:
             for elem in vehicle_count_dict
         ]
 
-    @gql.django.field
+    @strawberry_django.field
     def with_most_entries(self, type: DateGroupings) -> WithMostEntriesData:
         groupings = {"year": F("created__year")}
 
@@ -99,35 +100,35 @@ class UserScalar:
             count=max["count"],
         )
 
-    @gql.django.field
+    @strawberry_django.field
     async def spottings(
         self, info: Info
-    ) -> List[Annotated["EventScalar", gql.lazy("spotting.schema.scalars")]]:
+    ) -> List[Annotated["EventScalar", strawberry.lazy("spotting.schema.scalars")]]:
         return await info.context.loaders["common"]["spottings_from_user_loader"].load(
             self.id
         )
 
-    @gql.django.field
+    @strawberry_django.field
     async def spottings_count(self, info: Info) -> int:
         return spotting_models.Event.objects.filter(reporter_id=self.id).acount()
 
-    @gql.django.field
+    @strawberry_django.field
     async def media_count(self) -> int:
         return common_models.Media.objects.filter(uploader_id=self.id).acount()
 
-    @gql.django.field
+    @strawberry_django.field
     def spotting_trends(
         self,
-        start: Optional[date] = gql.UNSET,
-        end: Optional[date] = gql.UNSET,
+        start: Optional[date] = strawberry.UNSET,
+        end: Optional[date] = strawberry.UNSET,
         date_group: Optional[DateGroupings] = DateGroupings.DAY,
         type_group: Optional[bool] = False,
         free_range: Optional[bool] = False,
     ) -> List[UserSpottingTrend]:
-        if start is gql.UNSET:
+        if start is strawberry.UNSET:
             start = get_default_start_time(type=date_group)
 
-        if end is gql.UNSET:
+        if end is strawberry.UNSET:
             end = date.today()
 
         (group_strs, range_type) = get_group_strs(
@@ -234,6 +235,6 @@ class UserScalar:
         ]
 
 
-@gql.type
+@strawberry.type
 class GenericMutationReturn:
     ok: bool

@@ -1,32 +1,34 @@
-from strawberry_django_plus import gql
+import strawberry
+
+# import strawberry_django
 
 
-@gql.type
+@strawberry.type
 class ReportingScalars:
-    # reports: typing.List[Report] = gql.django.field(filters=ReportFilter)
-    # resolutions: typing.List[Resolution] = gql.django.field(filters=ResolutionFilter)
-    # votes: typing.List[Vote] = gql.django.field(filters=VoteFilter)
+    # reports: typing.List[Report] = strawberry_django.field(filters=ReportFilter)
+    # resolutions: typing.List[Resolution] = strawberry_django.field(filters=ResolutionFilter)
+    # votes: typing.List[Vote] = strawberry_django.field(filters=VoteFilter)
     pass
 
 
-@gql.type
+@strawberry.type
 class ReportingMutations:
-    # create_report: Report = gql.django.mutations.create(ReportInput)
-    # create_reports: typing.List[Report] = gql.django.mutations.create(ReportInput)
-    # update_reports: typing.List[Report] = gql.django.mutations.update(
+    # create_report: Report = strawberry_django.mutations.create(ReportInput)
+    # create_reports: typing.List[Report] = strawberry_django.mutations.create(ReportInput)
+    # update_reports: typing.List[Report] = strawberry_django.mutations.update(
     #     ReportPartialInput
     # )
-    # delete_reports: typing.List[Report] = gql.django.mutations.delete()
+    # delete_reports: typing.List[Report] = strawberry_django.mutations.delete()
 
-    # create_resolution: Resolution = gql.django.mutations.create(ResolutionInput)
-    # create_resolutions: typing.List[Resolution] = gql.django.mutations.create(
+    # create_resolution: Resolution = strawberry_django.mutations.create(ResolutionInput)
+    # create_resolutions: typing.List[Resolution] = strawberry_django.mutations.create(
     #     ResolutionInput
     # )
-    # update_resolutions: typing.List[Resolution] = gql.django.mutations.update(
+    # update_resolutions: typing.List[Resolution] = strawberry_django.mutations.update(
     #     ResolutionPartialInput
     # )
-    # delete_resolutions: typing.List[Resolution] = gql.django.mutations.delete()
+    # delete_resolutions: typing.List[Resolution] = strawberry_django.mutations.delete()
 
-    # create_vote: Vote = gql.django.mutations.create(VoteInput)
-    # delete_vote: typing.List[Vote] = gql.django.mutations.delete()
+    # create_vote: Vote = strawberry_django.mutations.create(VoteInput)
+    # delete_vote: typing.List[Vote] = strawberry_django.mutations.delete()
     pass

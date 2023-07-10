@@ -1,15 +1,16 @@
 from datetime import date, timedelta
 
+import strawberry
+import strawberry_django
 from django.db.models import Q
-from strawberry_django_plus import gql
 
 from incident import models
 
 
 class IncidentAbstractFilter:
-    id: gql.ID
+    id: strawberry.ID
     date: date
-    severity: gql.auto
+    severity: strawberry.auto
     is_last: bool
 
     def filter_id(self, queryset):
@@ -25,25 +26,25 @@ class IncidentAbstractFilter:
         return queryset.filter(is_last=self.is_last)
 
 
-@gql.django.filters.filter(models.VehicleIncident)
+@strawberry_django.filters.filter(models.VehicleIncident)
 class VehicleIncidentFilter(IncidentAbstractFilter):
-    vehicle_id: gql.ID
+    vehicle_id: strawberry.ID
 
     def filter_vehicle_id(self, queryset):
         return queryset.filter(vehicle_id=self.vehicle_id)
 
 
-@gql.django.filters.filter(models.StationIncident)
+@strawberry_django.filters.filter(models.StationIncident)
 class StationIncidentFilter(IncidentAbstractFilter):
-    station_id: gql.ID
+    station_id: strawberry.ID
 
     def filter_station_id(self, queryset):
         return queryset.filter(station_id=self.station_id)
 
 
-@gql.django.filters.filter(models.CalendarIncident)
+@strawberry_django.filters.filter(models.CalendarIncident)
 class CalendarIncidentFilter:
-    id: gql.ID
+    id: strawberry.ID
     severity: str
     date: date
 
@@ -57,7 +58,7 @@ class CalendarIncidentFilter:
         )
 
     def filter_start_date(self, queryset):
-        assert self.start_date != gql.UNSET and self.end_date != gql.UNSET
+        assert self.start_date != strawberry.UNSET and self.end_date != strawberry.UNSET
         assert abs(self.end_date - self.start_date) <= timedelta(days=60)
 
         return queryset.filter(
@@ -75,7 +76,7 @@ class CalendarIncidentFilter:
         )
 
     def filter_end_date(self, queryset):
-        assert self.start_date != gql.UNSET and self.end_date != gql.UNSET
+        assert self.start_date != strawberry.UNSET and self.end_date != strawberry.UNSET
         assert abs(self.end_date - self.start_date) <= timedelta(days=60)
 
         return queryset

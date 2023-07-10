@@ -1,7 +1,8 @@
 from datetime import date, datetime
 from typing import List, Optional
 
-from strawberry_django_plus import gql
+import strawberry
+import strawberry_django
 
 from common.schema.scalars import MediaScalar
 from incident import models
@@ -9,29 +10,29 @@ from operation.schema.scalars import Line, Station, Vehicle
 
 
 class IncidentAbstractScalar:
-    id: gql.ID
+    id: strawberry.ID
     date: date
-    severity: gql.auto
-    order: gql.auto
+    severity: strawberry.auto
+    order: strawberry.auto
     # location
     title: str
     brief: Optional[str]
     is_last: bool
 
 
-@gql.django.type(models.VehicleIncident)
+@strawberry_django.type(models.VehicleIncident)
 class VehicleIncident(IncidentAbstractScalar):
     vehicle: Vehicle
     # medias: List["Media"]
 
 
-@gql.django.type(models.StationIncident)
+@strawberry_django.type(models.StationIncident)
 class StationIncident(IncidentAbstractScalar):
     station: Station
     # medias: List["Media"]
 
 
-@gql.type
+@strawberry.type
 class CalendarIncidentGroupByDateSeverityScalar:
     severity: str
     date: date
@@ -39,14 +40,14 @@ class CalendarIncidentGroupByDateSeverityScalar:
     is_long_term: Optional[bool]
 
 
-@gql.django.type(models.CalendarIncidentCategory)
+@strawberry_django.type(models.CalendarIncidentCategory)
 class CalendarIncidentCategoryScalar:
     name: str
 
 
-@gql.django.type(models.CalendarIncident)
+@strawberry_django.type(models.CalendarIncident)
 class CalendarIncidentScalar:
-    id: gql.auto
+    id: strawberry.auto
     start_datetime: datetime
     end_datetime: Optional[datetime]
 
@@ -70,11 +71,11 @@ class CalendarIncidentScalar:
     # medias: List["Media"]
     # TODO: Dataloaders
 
-    @gql.field
+    @strawberry.field
     def has_details(self) -> bool:
         return self.details not in [None, ""]
 
-    @gql.field
+    @strawberry.field
     def last_updated(self) -> datetime:
         db_obj = models.CalendarIncident.objects.get(id=self.id)
         return max(
@@ -85,9 +86,9 @@ class CalendarIncidentScalar:
         )
 
 
-@gql.django.type(models.CalendarIncidentChronology)
+@strawberry_django.type(models.CalendarIncidentChronology)
 class CalendarIncidentChronologyScalar:
-    id: gql.auto
+    id: strawberry.auto
     order: int
     calendar_incident: "CalendarIncidentScalar"
     indicator: str
