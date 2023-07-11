@@ -2,6 +2,7 @@ from django.contrib.gis.db import models
 from django.contrib.postgres.indexes import BTreeIndex
 from django.db.models import F, Q
 from django.utils.safestring import mark_safe
+from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
 
 from generic.models import WebLocationModel
@@ -36,9 +37,9 @@ class Event(TimeStampedModel):
         blank=True,
         default="",
     )
-    status = models.CharField(
+    status = TextChoicesField(
+        choices_enum=SpottingVehicleStatus,
         max_length=32,
-        choices=SpottingVehicleStatus.choices,
     )
 
     run_number = models.CharField(
@@ -48,9 +49,9 @@ class Event(TimeStampedModel):
         default=None,
     )
 
-    type = models.CharField(
+    type = TextChoicesField(
+        choices_enum=SpottingEventType,
         max_length=32,
-        choices=SpottingEventType.choices,
     )
 
     is_anonymous = models.BooleanField(default=False)
