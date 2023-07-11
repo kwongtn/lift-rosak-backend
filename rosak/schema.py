@@ -3,6 +3,7 @@ from django.conf import settings
 from graphql.validation import NoSchemaIntrospectionCustomRule
 from strawberry.extensions import AddValidationRules
 from strawberry.extensions.tracing import SentryTracingExtension
+from strawberry_django.optimizer import DjangoOptimizerExtension
 
 from common.schema.schema import CommonMutations, CommonScalars
 from incident.schema.schema import IncidentMutations, IncidentScalars
@@ -39,6 +40,7 @@ class Mutation(
 
 extensions = [
     SentryTracingExtension,
+    DjangoOptimizerExtension,
 ]
 
 if not settings.DEBUG:

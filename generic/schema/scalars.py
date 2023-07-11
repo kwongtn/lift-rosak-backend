@@ -1,4 +1,4 @@
-from typing import NewType, Optional, Tuple
+from typing import NewType, Tuple
 
 import strawberry
 from django.contrib.gis.geos import LinearRing, LineString, MultiPoint, Point, Polygon
@@ -42,15 +42,3 @@ GeoMultiPoint = strawberry.scalar(
     parse_value=lambda v: MultiPoint(*[Point(x) for x in v]),
     serialize=lambda v: v.tuple,
 )
-
-
-class WebLocationParent:
-    id: strawberry.auto
-    accuracy: Optional[float]
-    altitude_accuracy: Optional[float]
-    heading: Optional[float]
-    speed: Optional[float]
-    # latitude: Optional[float]
-    # longitude: Optional[float]
-    location: Optional[GeoPoint]
-    altitude: Optional[float]

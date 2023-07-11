@@ -8,15 +8,22 @@ from strawberry import relay
 from strawberry.types import Info
 
 from common.schema.scalars import MediaScalar, UserScalar
-from generic.schema.scalars import WebLocationParent
 from operation.schema.scalars import Station, Vehicle
 from rosak.permissions import IsLoggedIn
 from spotting import models
 
 
 @strawberry_django.type(models.LocationEvent)
-class LocationEvent(WebLocationParent):
-    pass
+class LocationEvent:
+    id: strawberry.auto
+    accuracy: Optional[float]
+    altitude_accuracy: Optional[float]
+    heading: Optional[float]
+    speed: Optional[float]
+    # latitude: Optional[float]
+    # longitude: Optional[float]
+    location: strawberry.auto
+    altitude: Optional[float]
 
 
 @strawberry_django.type(models.Event, pagination=True)
