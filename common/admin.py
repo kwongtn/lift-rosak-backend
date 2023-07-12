@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from common.models import Media, User
+from common.models import Media, TemporaryMedia, User
 from mlptf.admin import UserBadgeStackedInline
 
 
@@ -57,4 +57,5 @@ class UserAdmin(admin.ModelAdmin):
 
 
 admin.site.register(Media, MediaAdmin)
+admin.site.register(TemporaryMedia, MediaAdmin)
 admin.site.register(User, UserAdmin)

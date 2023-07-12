@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "810a490656331c91f54972c130f969065d2db9d9f15ebf0c9fc6b2404205e886"
+            "sha256": "667bab9ec62d83dc4489458a9708a6dd8e42e519ac0599671a0058d32e93076e"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -55,6 +55,22 @@
             ],
             "markers": "python_version >= '3.7'",
             "version": "==4.1.0"
+        },
+        "boto3": {
+            "hashes": [
+                "sha256:0d53fe604dc30edded21906bc56b30a7684f0715f4f6897307d53f8184997368",
+                "sha256:9933e40dc9ac72deac45cecce2df020e3bf8d0d537538d2b361c17d1cee807cc"
+            ],
+            "index": "pypi",
+            "version": "==1.28.2"
+        },
+        "botocore": {
+            "hashes": [
+                "sha256:67a475bec9e52d495a358b34e219ef7f62907e83b87e5bc712528f998bd46dab",
+                "sha256:d368ac0b58e2b9025b9c397e4a4f86d71788913ee619263506885a866a4f6811"
+            ],
+            "markers": "python_version >= '3.7'",
+            "version": "==1.31.2"
         },
         "cachecontrol": {
             "hashes": [
@@ -741,6 +757,14 @@
             "git": "https://github.com/BryanH/imgurpython",
             "ref": "15f1b89e1e532334fc8b053058579aa28f7ed117"
         },
+        "jmespath": {
+            "hashes": [
+                "sha256:02e2e4cc71b5bcab88332eebf907519190dd9e6e82107fa7f83b1003a6252980",
+                "sha256:90261b206d6defd58fdd5e85f478bf633a2901798906be2ad389150c5c60edbe"
+            ],
+            "markers": "python_version >= '3.7'",
+            "version": "==1.0.1"
+        },
         "kombu": {
             "hashes": [
                 "sha256:48ee589e8833126fd01ceaa08f8a2041334e9f5894e5763c8486a550454551e9",
@@ -1170,6 +1194,14 @@
             ],
             "markers": "python_version >= '3.6' and python_version < '4'",
             "version": "==4.9"
+        },
+        "s3transfer": {
+            "hashes": [
+                "sha256:3c0da2d074bf35d6870ef157158641178a4204a6e689e82546083e31e0311346",
+                "sha256:640bb492711f4c0c0905e1f62b6aaeb771881935ad27884852411f8e9cacbca9"
+            ],
+            "markers": "python_version >= '3.7'",
+            "version": "==0.6.1"
         },
         "sentry-sdk": {
             "hashes": [

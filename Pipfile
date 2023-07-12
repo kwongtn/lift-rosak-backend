@@ -4,6 +4,7 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+boto3 = "*"
 django = ">=4.2,<4.3"
 django-admin-rangefilter = "*"
 django-advanced-filters = "*"
