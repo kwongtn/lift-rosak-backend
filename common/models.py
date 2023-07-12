@@ -5,6 +5,7 @@ from django.db import models
 from django.utils.safestring import mark_safe
 from model_utils.models import TimeStampedModel, UUIDModel
 
+from common.enums import TemporaryMediaType
 from common.imgur_storage import ImgurStorage
 
 STORAGE = ImgurStorage()
@@ -43,7 +44,10 @@ class TemporaryMedia(TimeStampedModel, UUIDModel):
         to="common.User",
         on_delete=models.PROTECT,
     )
-    upload_type = models.CharField(max_length=255, default="", blank=True)
+    upload_type = models.CharField(
+        max_length=255,
+        choices=TemporaryMediaType.choices,
+    )
     metadata = models.JSONField(default=dict, blank=True)
 
     def __str__(self) -> str:
