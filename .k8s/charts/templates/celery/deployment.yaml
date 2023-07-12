@@ -11,6 +11,7 @@ spec:
   selector:
     matchLabels:
       {{- include "deploy.selectorLabels" . | nindent 6 }}
+      - app.backend/component: celery-worker
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -19,6 +20,7 @@ spec:
       {{- end }}
       labels:
         {{- include "deploy.selectorLabels" . | nindent 8 }}
+        - app.backend/component: celery-worker
 
     spec:
       {{- if not .Values.topologySpreadConstraints.enabled }}
