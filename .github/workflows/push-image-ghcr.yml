@@ -52,6 +52,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - uses: benjlevesque/short-sha@v2.2
+        id: short-sha
+
       - name: Create tag
         uses: actions/github-script@v5
         with:
@@ -59,6 +62,6 @@ jobs:
             github.rest.git.createRef({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              ref: 'refs/tags/${{ steps.meta.outputs.sha }}-${{ github.run_number }}',
+              ref: 'refs/tags/${{ steps.short-sha.outputs.sha }}-${{ github.run_number }}',
               sha: context.sha
             })
