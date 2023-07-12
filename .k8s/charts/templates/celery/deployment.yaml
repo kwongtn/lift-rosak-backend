@@ -10,8 +10,8 @@ spec:
   {{- end }}
   selector:
     matchLabels:
+      app.backend/component: celery-worker
       {{- include "deploy.selectorLabels" . | nindent 6 }}
-      - app.backend/component: celery-worker
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -19,8 +19,8 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
+        app.backend/component: celery-worker
         {{- include "deploy.selectorLabels" . | nindent 8 }}
-        - app.backend/component: celery-worker
 
     spec:
       {{- if not .Values.topologySpreadConstraints.enabled }}
