@@ -7,6 +7,7 @@ import requests
 from django.conf import settings
 from django.core.cache import cache
 from django.core.files import File
+from django.core.files.base import ContentFile
 from django.core.files.images import ImageFile
 from django.core.files.storage import Storage
 from django.utils.deconstruct import deconstructible
@@ -67,11 +68,28 @@ class ImgurStorage(Storage):
         album = [a for a in self.albums if a.title == directory][0]
         return album
 
-    def _save(self, name, content: ImageFile):
+    def _save(self, name, content: ImageFile | ContentFile):
         name = self._get_abs_path(name)
         directory = os.path.dirname(name)
 
         album = self.check_or_create_directory(directory)
+        config = {
+            "album": album.id,
+            "name": name,
+            "title": name,
+        }
+
+        if type(content) == ContentFile:
+            name = name.split("/")[-1]
+            config["name"] = name
+            config["title"] = name
+
+            res = self._client_upload_from_fd(
+                img_str=content,
+                config=config,
+                type="url",
+            )
+            return res["link"].split("/")[-1]
 
         image_b64 = ""
         with content.open() as stream:
@@ -88,26 +106,27 @@ class ImgurStorage(Storage):
 
         logger.debug(image_b64[:128])
         response = self._client_upload_from_fd(
-            image_b64,
-            {
-                "album": album.id,
-                "name": name,
-                "title": name,
-            },
-            False,
+            img_str=image_b64,
+            config=config,
         )
         logger.info(f"Imgur response: {response}")
 
         return response["link"].split("/")[-1]
 
-    def _client_upload_from_fd(self, b64: str, config=None, anon=True):
+    def _client_upload_from_fd(
+        self,
+        img_str: str,
+        config=None,
+        anon=False,
+        type: str = "base64",
+    ):
         """use a file descriptor to perform a make_request"""
         if not config:
             config = dict()
 
         data = {
-            "image": b64,
-            "type": "base64",
+            "image": img_str,
+            "type": type,
         }
         data.update(
             {
