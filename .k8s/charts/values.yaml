@@ -24,6 +24,8 @@ containers:
       secrets:
         - backend-django-sec
         - imgur-creds
+    redis:
+      svcBindSecret: redis-svcbind
   memcached:
     image: memcached:1.6.20-alpine
     containerPort: 11211
