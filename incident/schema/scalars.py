@@ -3,12 +3,14 @@ from typing import List, Optional
 
 import strawberry
 import strawberry_django
+from asgiref.sync import sync_to_async
 
 from common.schema.scalars import MediaScalar
 from incident import models
 from operation.schema.scalars import Line, Station, Vehicle
 
 
+@strawberry.type
 class IncidentAbstractScalar:
     id: strawberry.ID
     date: date
@@ -72,10 +74,12 @@ class CalendarIncidentScalar:
     # TODO: Dataloaders
 
     @strawberry.field
+    @sync_to_async
     def has_details(self) -> bool:
         return self.details not in [None, ""]
 
     @strawberry.field
+    @sync_to_async
     def last_updated(self) -> datetime:
         db_obj = models.CalendarIncident.objects.get(id=self.id)
         return max(

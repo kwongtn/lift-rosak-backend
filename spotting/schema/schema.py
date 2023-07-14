@@ -169,11 +169,10 @@ class SpottingMutations:
     @strawberry.mutation(
         permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed, IsAdmin]
     )
-    @sync_to_async
-    def mark_as_read(
+    async def mark_as_read(
         self, input: MarkEventAsReadInput, info: Info
     ) -> GenericMutationReturn:
-        models.EventRead.objects.bulk_create(
+        await models.EventRead.objects.abulk_create(
             [
                 models.EventRead(
                     event_id=event_id,

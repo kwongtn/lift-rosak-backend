@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from typing import Optional
 
 import strawberry
 import strawberry_django
@@ -8,10 +9,10 @@ from incident import models
 
 
 class IncidentAbstractFilter:
-    id: strawberry.ID
-    date: date
+    id: strawberry.auto
+    date: Optional[date]
     severity: strawberry.auto
-    is_last: bool
+    is_last: Optional[bool]
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)
@@ -28,7 +29,7 @@ class IncidentAbstractFilter:
 
 @strawberry_django.filters.filter(models.VehicleIncident)
 class VehicleIncidentFilter(IncidentAbstractFilter):
-    vehicle_id: strawberry.ID
+    vehicle_id: Optional[strawberry.ID]
 
     def filter_vehicle_id(self, queryset):
         return queryset.filter(vehicle_id=self.vehicle_id)
@@ -36,7 +37,7 @@ class VehicleIncidentFilter(IncidentAbstractFilter):
 
 @strawberry_django.filters.filter(models.StationIncident)
 class StationIncidentFilter(IncidentAbstractFilter):
-    station_id: strawberry.ID
+    station_id: Optional[strawberry.ID]
 
     def filter_station_id(self, queryset):
         return queryset.filter(station_id=self.station_id)
@@ -44,12 +45,12 @@ class StationIncidentFilter(IncidentAbstractFilter):
 
 @strawberry_django.filters.filter(models.CalendarIncident)
 class CalendarIncidentFilter:
-    id: strawberry.ID
-    severity: str
-    date: date
+    id: Optional[strawberry.ID]
+    severity: Optional[str]
+    date: Optional[date]
 
-    start_date: date
-    end_date: date
+    start_date: Optional[date]
+    end_date: Optional[date]
 
     def filter_date(self, queryset):
         return queryset.filter(

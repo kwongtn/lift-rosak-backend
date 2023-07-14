@@ -110,11 +110,11 @@ class UserScalar:
 
     @strawberry_django.field
     async def spottings_count(self, info: Info) -> int:
-        return spotting_models.Event.objects.filter(reporter_id=self.id).acount()
+        return await spotting_models.Event.objects.filter(reporter_id=self.id).acount()
 
     @strawberry_django.field
     async def media_count(self) -> int:
-        return common_models.Media.objects.filter(uploader_id=self.id).acount()
+        return await common_models.Media.objects.filter(uploader_id=self.id).acount()
 
     @strawberry_django.field
     def spotting_trends(

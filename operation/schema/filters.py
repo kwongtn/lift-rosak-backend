@@ -1,3 +1,5 @@
+from typing import Optional
+
 import strawberry
 import strawberry_django
 from django.contrib.gis.db.models import Subquery
@@ -9,7 +11,7 @@ from operation import models
 
 @strawberry_django.filters.filter(models.Vehicle)
 class VehicleFilter:
-    id: strawberry.ID
+    id: strawberry.auto
     status: strawberry.auto
 
     def filter_id(self, queryset):
@@ -21,11 +23,11 @@ class VehicleFilter:
 
 @strawberry_django.filters.filter(models.Line)
 class LineFilter:
-    id: strawberry.ID
-    code: str
-    display_name: str
-    display_color: str
-    first_only: bool
+    id: strawberry.auto
+    code: Optional[str]
+    display_name: Optional[str]
+    display_color: Optional[str]
+    first_only: Optional[bool]
 
     def filter_first_only(self, queryset):
         if self.first_only:
@@ -56,10 +58,10 @@ class VehicleTypeFilter:
 
 @strawberry_django.filters.filter(models.Asset)
 class AssetFilter:
-    id: strawberry.ID
-    officialid: str
+    id: strawberry.auto
+    officialid: Optional[str]
     asset_type: strawberry.auto
-    station_id: strawberry.ID
+    station_id: Optional[strawberry.ID]
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)
@@ -76,11 +78,11 @@ class AssetFilter:
 
 @strawberry_django.filters.filter(models.Station)
 class StationFilter:
-    id: strawberry.ID
-    display_name: str
-    internal_representation: str
-    location: strawberry.scalars.JSON
-    line_id: strawberry.ID
+    id: strawberry.auto
+    display_name: Optional[str]
+    internal_representation: Optional[str]
+    location: Optional[strawberry.scalars.JSON]
+    line_id: Optional[strawberry.ID]
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)
@@ -113,11 +115,11 @@ class StationFilter:
 
 @strawberry_django.filters.filter(models.StationLine)
 class StationLineFilter:
-    id: strawberry.ID
-    display_name: str
-    station_id: strawberry.ID
-    line_id: strawberry.ID
-    internal_representation: str
+    id: strawberry.auto
+    display_name: Optional[str]
+    station_id: Optional[strawberry.ID]
+    line_id: Optional[strawberry.ID]
+    internal_representation: Optional[str]
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)
