@@ -19,3 +19,18 @@ class VehicleStatus(models.TextChoices):
     MARRIED = "MARRIED"
     TESTING = "TESTING"
     UNKNOWN = "UNKNOWN"
+
+
+class LineStatus(models.TextChoices):
+    TESTING = "TESTING"
+    DEFUNCT = "DEFUNCT"
+    ACTIVE = "ACTIVE"
+
+    # When part of the entire line is active. E.g. MRT Phase 1, 2
+    # Extension does not count
+    PARTIAL_ACTIVE = "PARTIAL_ACTIVE"
+
+    # E.g. Ampang/Sri Petaling line during pillar crack
+    PARTIAL_DISRUPTION = "PARTIAL_DISRUPTION"
+
+    TOTAL_DISRUPTION = "TOTAL_DISRUPTION"

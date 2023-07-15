@@ -35,6 +35,7 @@ class Line:
     code: str
     display_name: str
     display_color: str
+    status: strawberry.auto
     stations: List["Station"]
     station_lines: List["StationLine"]
     # line_vehicles: List["Vehicle"]
