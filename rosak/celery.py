@@ -1,3 +1,4 @@
+import datetime
 import os
 
 from celery import Celery
@@ -17,7 +18,12 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 
 # Beat schedule
-app.conf.beat_schedule = {}
+app.conf.beat_schedule = {
+    "cleanup_temporary_media": {
+        "task": "common.tasks.cleanup_temporary_media_task",
+        "schedule": datetime.timedelta(minutes=1),
+    },
+}
 
 
 @app.task(bind=True)
