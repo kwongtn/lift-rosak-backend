@@ -40,7 +40,7 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         (
             "spotting_date",
             DateRangeFilterBuilder(
-                title="Created",
+                title="Spotting Date",
                 default_start=datetime(2020, 1, 1),
                 default_end=datetime(2030, 1, 1),
             ),
