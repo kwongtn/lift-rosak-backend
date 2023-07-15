@@ -118,6 +118,7 @@ INSTALLED_APPS = [
     "spotting",
     "incident",
     "mlptf",
+    "chartography",
     "django_celery_beat",
     # Must be at bottom
     "django_cleanup.apps.CleanupConfig",
