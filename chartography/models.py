@@ -11,6 +11,8 @@ from operation.enums import VehicleStatus
 class Source(models.Model):
     name = TextChoicesField(max_length=255, choices_enum=DataSources)
     description = models.TextField(blank=True, default="")
+    official_site = models.URLField(null=True, blank=True, default=None)
+    icon_url = models.URLField(null=True, blank=True, default=None)
 
     class Meta:
         constraints = [
