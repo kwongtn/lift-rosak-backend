@@ -49,6 +49,8 @@ class TemporaryMedia(TimeStampedModel, UUIDModel):
         choices=TemporaryMediaType.choices,
     )
     metadata = models.JSONField(default=dict, blank=True)
+    fail_count = models.IntegerField(default=0)
+    can_retry = models.BooleanField(default=True)
 
     def __str__(self) -> str:
         return self.file.name
