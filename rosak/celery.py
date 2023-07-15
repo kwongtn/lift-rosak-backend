@@ -26,7 +26,7 @@ app.conf.beat_schedule = {
     },
     "aggregate_line_vehicle_status_mlptf": {
         "task": "chartography.tasks.aggregate_line_vehicle_status_mlptf_task",
-        "schedule": crontab(hour="5"),
+        "schedule": crontab(hour="5", minute="0"),
     },
 }
 
