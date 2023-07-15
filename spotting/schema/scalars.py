@@ -4,7 +4,6 @@ from typing import List, Optional
 import strawberry
 import strawberry_django
 from asgiref.sync import sync_to_async
-from strawberry import relay
 from strawberry.types import Info
 
 from common.schema.scalars import MediaScalar, UserScalar
@@ -79,6 +78,6 @@ class EventScalar:
             return self.reporter.id == user.id
 
 
-@strawberry_django.type(models.Event)
-class EventRelay(relay.Node, EventScalar):
-    pass
+# @strawberry_django.type(models.Event)
+# class EventRelay(relay.Node, EventScalar):
+#     pass

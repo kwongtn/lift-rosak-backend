@@ -2,12 +2,10 @@ import typing
 from datetime import timedelta
 
 import strawberry
-import strawberry_django
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
 from django.utils.timezone import now
 from strawberry.types import Info
-from strawberry_django.relay import ListConnectionWithTotalCount
 
 from common.schema.scalars import GenericMutationReturn
 from operation.models import StationLine
@@ -18,7 +16,7 @@ from spotting.schema.filters import EventFilter
 from spotting.schema.inputs import DeleteEventInput, EventInput, MarkEventAsReadInput
 from spotting.schema.orderings import EventOrder
 from spotting.schema.resolvers import get_events_count
-from spotting.schema.scalars import EventRelay, EventScalar
+from spotting.schema.scalars import EventScalar
 
 
 @strawberry.type
@@ -30,10 +28,13 @@ class SpottingScalars:
         resolver=get_events_count,
         description="Number of events",
     )
+
+    # import strawberry_django
+    # from strawberry_django.relay import ListConnectionWithTotalCount
     # event_relay: typing.Optional[EventRelay] = relay.node()
-    event_relay_connection: ListConnectionWithTotalCount[
-        EventRelay
-    ] = strawberry_django.connection()
+    # event_relay_connection: ListConnectionWithTotalCount[
+    #     EventRelay
+    # ] = strawberry_django.connection()
 
 
 @strawberry.type
