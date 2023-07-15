@@ -4,11 +4,12 @@ from django.utils.timezone import now
 from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
 
+from chartography.enums import DataSources
 from operation.enums import VehicleStatus
 
 
 class Source(models.Model):
-    name = models.CharField(max_length=255)
+    name = TextChoicesField(max_length=255, choices_enum=DataSources)
     description = models.TextField(blank=True, default="")
 
     class Meta:
@@ -26,6 +27,7 @@ class Source(models.Model):
 class Snapshot(TimeStampedModel):
     date = models.DateField(default=now)
     source = models.ForeignKey("chartography.Source", on_delete=models.CASCADE)
+    url = models.URLField(null=True, blank=True, default=None)
 
     class Meta:
         constraints = [
