@@ -28,6 +28,10 @@ app.conf.beat_schedule = {
         "task": "chartography.tasks.aggregate_line_vehicle_status_mlptf_task",
         "schedule": crontab(hour="5", minute="0"),
     },
+    "aggregate_line_vehicle_status_mtrec": {
+        "task": "chartography.tasks.aggregate_line_vehicle_status_mtrec_task",
+        "schedule": crontab(hour="1", minute="0"),
+    },
 }
 
 

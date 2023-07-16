@@ -1,12 +1,18 @@
 import logging
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 
+import requests
 from django.db.models import Count, Q
 from django.utils.timezone import now
 
 from chartography.enums import DataSources
-from chartography.models import LineVehicleStatusCountHistory, Snapshot, Source
+from chartography.models import (
+    LineVehicleStatusCountHistory,
+    Snapshot,
+    Source,
+    SourceCustomLine,
+)
 from operation.enums import VehicleStatus
 from operation.models import Line, VehicleLine
 from rosak.celery import app as celery_app
@@ -51,4 +57,83 @@ async def aggregate_line_vehicle_status_mlptf_task(self, *args, **kwargs):
             )
         )
 
-    return await LineVehicleStatusCountHistory.objects.abulk_create(create_objs)
+    await LineVehicleStatusCountHistory.objects.abulk_create(create_objs)
+
+
+@celery_app.task(bind=True)
+async def aggregate_line_vehicle_status_mtrec_task(self, *args, **kwargs):
+    source: Source = await Source.objects.aget(name=DataSources.MTREC)
+
+    res = requests.get(
+        "https://spotters.mtrec.name.my/api/listall",
+        headers={"referer": "https://spotters.mtrec.name.my/analytics-2.html"},
+    ).json()
+
+    timestamp = datetime.strptime(
+        res.get("Last_Updated", None), "%d %B %Y, %I:%M:%S %p"
+    )
+    snapshot: Snapshot = await Snapshot.objects.acreate(
+        date=timestamp - timedelta(days=1),
+        source_id=source.id,
+    )
+
+    short_code_line_ids_map = {
+        "KGL": [2],
+        "PYL": [3],
+        "AGSPL": [5, 9],
+        "MRL": [1],
+        "KJL": [4],
+        "ERL": [8],
+        "ETS": [10],
+        "Komuter": [13, 14],
+        "DMU": [],
+        "Locomotive": [],
+    }
+
+    key_status_map = {
+        "Decommissioned": VehicleStatus.DECOMMISSIONED,
+        "In_Service": VehicleStatus.IN_SERVICE,
+        "Not_Spotted": VehicleStatus.NOT_SPOTTED,
+    }
+
+    data = res.get("Data", [])
+    to_create = []
+    for elem in data:
+        short_code = elem["Line_Short_Code"]
+        line_ids = short_code_line_ids_map.get(short_code, None)
+
+        assert isinstance(line_ids, list)
+        if len(line_ids) > 0:
+            for status, status_enum in key_status_map.items():
+                to_create += [
+                    LineVehicleStatusCountHistory(
+                        snapshot_id=snapshot.id,
+                        line_id=line_id,
+                        status=status_enum,
+                        count=elem[status],
+                    )
+                    for line_id in line_ids
+                ]
+        else:
+            custom_line_obj, _ = await SourceCustomLine.objects.aget_or_create(
+                source_id=source.id,
+                name=short_code,
+                defaults={
+                    "source_id": source.id,
+                    "name": short_code,
+                },
+            )
+
+            for status, status_enum in key_status_map.items():
+                to_create += [
+                    LineVehicleStatusCountHistory(
+                        snapshot_id=snapshot.id,
+                        custom_line_id=custom_line_obj.id,
+                        status=status_enum,
+                        count=elem[status],
+                    )
+                ]
+
+    await LineVehicleStatusCountHistory.objects.abulk_create(
+        to_create, ignore_conflicts=True
+    )
