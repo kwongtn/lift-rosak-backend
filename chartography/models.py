@@ -88,6 +88,12 @@ class LineVehicleStatusCountHistory(models.Model):
             models.UniqueConstraint(
                 fields=["snapshot", "line", "status"],
                 name="%(app_label)s_%(class)s_unique_snapshot_line_status",
+                condition=Q(line__isnull=False),
+            ),
+            models.UniqueConstraint(
+                fields=["snapshot", "custom_line", "status"],
+                name="%(app_label)s_%(class)s_unique_snapshot_custom_line_status",
+                condition=Q(custom_line__isnull=False),
             ),
             models.CheckConstraint(
                 check=Q(line__isnull=True) | Q(custom_line__isnull=True),
