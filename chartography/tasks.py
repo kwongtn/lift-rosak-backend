@@ -21,18 +21,18 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True)
-async def aggregate_line_vehicle_status_mlptf_task(self, *args, **kwargs):
-    source: Source = await Source.objects.aget(name=DataSources.MLPTF)
+def aggregate_line_vehicle_status_mlptf_task(self, *args, **kwargs):
+    source: Source = Source.objects.get(name=DataSources.MLPTF)
 
     # Get snapshot now, date would be previous day.
     # It is expected we do it at next day 5am.
-    snapshot: Snapshot = await Snapshot.objects.acreate(
+    snapshot: Snapshot = Snapshot.objects.create(
         date=now() - timedelta(days=1),
         source_id=source.id,
     )
 
     query_dict = defaultdict()
-    async for line in Line.objects.all():
+    for line in Line.objects.all():
         for status in [i[0] for i in VehicleStatus.choices]:
             query_dict[f"{line.id}__{status}"] = Count(
                 "id",
@@ -42,7 +42,7 @@ async def aggregate_line_vehicle_status_mlptf_task(self, *args, **kwargs):
                 ),
             )
 
-    stats = await VehicleLine.objects.aaggregate(**query_dict)
+    stats = VehicleLine.objects.aggregate(**query_dict)
 
     create_objs = []
     for k, v in stats.items():
@@ -57,12 +57,12 @@ async def aggregate_line_vehicle_status_mlptf_task(self, *args, **kwargs):
             )
         )
 
-    await LineVehicleStatusCountHistory.objects.abulk_create(create_objs)
+    LineVehicleStatusCountHistory.objects.bulk_create(create_objs)
 
 
 @celery_app.task(bind=True)
-async def aggregate_line_vehicle_status_mtrec_task(self, *args, **kwargs):
-    source: Source = await Source.objects.aget(name=DataSources.MTREC)
+def aggregate_line_vehicle_status_mtrec_task(self, *args, **kwargs):
+    source: Source = Source.objects.get(name=DataSources.MTREC)
 
     res = requests.get(
         "https://spotters.mtrec.name.my/api/listall",
@@ -72,7 +72,7 @@ async def aggregate_line_vehicle_status_mtrec_task(self, *args, **kwargs):
     timestamp = datetime.strptime(
         res.get("Last_Updated", None), "%d %B %Y, %I:%M:%S %p"
     )
-    snapshot: Snapshot = await Snapshot.objects.acreate(
+    snapshot: Snapshot = Snapshot.objects.create(
         date=timestamp - timedelta(days=1),
         source_id=source.id,
     )
@@ -115,7 +115,7 @@ async def aggregate_line_vehicle_status_mtrec_task(self, *args, **kwargs):
                     for line_id in line_ids
                 ]
         else:
-            custom_line_obj, _ = await SourceCustomLine.objects.aget_or_create(
+            custom_line_obj, _ = SourceCustomLine.objects.get_or_create(
                 source_id=source.id,
                 name=short_code,
                 defaults={
@@ -134,6 +134,4 @@ async def aggregate_line_vehicle_status_mtrec_task(self, *args, **kwargs):
                     )
                 ]
 
-    await LineVehicleStatusCountHistory.objects.abulk_create(
-        to_create, ignore_conflicts=True
-    )
+    LineVehicleStatusCountHistory.objects.bulk_create(to_create, ignore_conflicts=True)

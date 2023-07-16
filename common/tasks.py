@@ -65,10 +65,10 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
 
 
 @celery_app.task(bind=True)
-async def cleanup_temporary_media_task(self, *args, **kwargs):
-    async for temp_media in TemporaryMedia.objects.filter(
+def cleanup_temporary_media_task(self, *args, **kwargs):
+    for temp_media in TemporaryMedia.objects.filter(
         created__lte=now() - datetime.timedelta(minutes=5),
-        retry_count__lt=5,
+        fail_count__lt=5,
         can_retry=True,
     ).filter():
         convert_temporary_media_to_media_task.apply_async(
