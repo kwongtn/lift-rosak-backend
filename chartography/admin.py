@@ -3,7 +3,12 @@ from datetime import datetime
 from django.contrib import admin
 from rangefilter.filters import DateRangeFilterBuilder, DateTimeRangeFilterBuilder
 
-from chartography.models import LineVehicleStatusCountHistory, Snapshot, Source
+from chartography.models import (
+    LineVehicleStatusCountHistory,
+    Snapshot,
+    Source,
+    SourceCustomLine,
+)
 
 
 class SourceAdmin(admin.ModelAdmin):
@@ -14,6 +19,17 @@ class SourceAdmin(admin.ModelAdmin):
     list_filter = [
         "name",
         "description",
+    ]
+
+
+class SourceCustomLineAdmin(admin.ModelAdmin):
+    list_display = [
+        "__str__",
+        "source",
+        "name",
+    ]
+    list_filter = [
+        "source",
     ]
 
 
@@ -68,3 +84,4 @@ class LineVehicleStatusCountHistoryAdmin(admin.ModelAdmin):
 admin.site.register(Source, SourceAdmin)
 admin.site.register(Snapshot, SnapshotAdmin)
 admin.site.register(LineVehicleStatusCountHistory, LineVehicleStatusCountHistoryAdmin)
+admin.site.register(SourceCustomLine, SourceCustomLineAdmin)
