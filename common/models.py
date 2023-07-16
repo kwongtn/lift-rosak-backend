@@ -15,6 +15,18 @@ class Media(TimeStampedModel, UUIDModel):
     file = models.ImageField(
         upload_to=settings.IMGUR_ALBUM,
         storage=STORAGE,
+        # width_field="width",
+        # height_field="height",
+    )
+    width = models.IntegerField(
+        null=True,
+        blank=True,
+        default=None,
+    )
+    height = models.IntegerField(
+        null=True,
+        blank=True,
+        default=None,
     )
     uploader = models.ForeignKey(
         to="common.User",
