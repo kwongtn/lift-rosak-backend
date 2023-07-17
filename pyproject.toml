@@ -1,0 +1,55 @@
+[tool.poetry]
+name = "rosak-backend"
+version = "0.1.0"
+description = ""
+authors = ["Kwong Tung Nan <tungnan5636@gmail.com>"]
+license = "GNU AGPLv3"
+readme = "README.md"
+packages = [{include = "rosak_backend"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+boto3 = "1.28.*"
+django = "4.2.*"
+django-admin-rangefilter = "*"
+django-advanced-filters = "*"
+django-celery-beat = "*"
+django-choices-field = "*"
+django-cleanup = "*"
+django-colorfield = "*"
+django-cors-headers = "*"
+django-debug-toolbar = "*"
+django-extensions = "*"
+django-health-check = "*"
+django-hijack = "*"
+django-location-field = "*"
+django-mdeditor = "*"
+django-model-utils = "*"
+django-ordered-model = "*"
+django-storages = "*"
+djangorestframework = "*"
+dotmap = "*"
+firebase-admin = "*"
+gunicorn = "*"
+pendulum = "*"
+pillow = "*"
+promise = "*"
+psycopg2-binary = "*"
+pymemcache = "*"
+requests = "*"
+sentry-sdk = "*"
+strawberry-graphql = "*"
+strawberry-graphql-django = "*"
+celery = {extras = ["pymemcache", "redis"], version = "^5.3.1"}
+uvicorn = {extras = ["standard"], version = "^0.23.0"}
+imgurpython = {git = "https://github.com/BryanH/imgurpython.git", rev = "master"}
+
+[tool.poetry.group.dev.dependencies]
+black = "*"
+flake8 = "*"
+ipykernel = "*"
+mypi = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
