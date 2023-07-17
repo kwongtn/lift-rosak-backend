@@ -47,7 +47,3 @@ repos:
   #     - id: dockerfile_lint
   #       # optional custom config:
   #       args: [--json, --verbose, --dockerfile]
-  - repo: https://github.com/kwongtn/pipfile-sort
-    rev: v0.3.1
-    hooks:
-      - id: pipfile-sort
