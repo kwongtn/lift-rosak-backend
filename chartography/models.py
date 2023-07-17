@@ -30,6 +30,13 @@ class Source(models.Model):
 class Snapshot(TimeStampedModel):
     date = models.DateField(default=now)
     source = models.ForeignKey("chartography.Source", on_delete=models.CASCADE)
+    triggered_by = models.ForeignKey(
+        "common.User",
+        on_delete=models.SET_NULL,
+        default=None,
+        blank=True,
+        null=True,
+    )
     url = models.URLField(null=True, blank=True, default=None)
 
     class Meta:
@@ -37,6 +44,12 @@ class Snapshot(TimeStampedModel):
             models.UniqueConstraint(
                 fields=["date", "source"],
                 name="%(app_label)s_%(class)s_unique_date_source",
+                condition=Q(triggered_by__isnull=True),
+            ),
+            models.UniqueConstraint(
+                fields=["date", "source", "triggered_by"],
+                name="%(app_label)s_%(class)s_unique_date_source_w_user",
+                condition=Q(triggered_by__isnull=False),
             ),
         ]
 

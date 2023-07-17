@@ -21,7 +21,13 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True)
-def aggregate_line_vehicle_status_mlptf_task(self, *args, **kwargs):
+def aggregate_line_vehicle_status_mlptf_task(
+    self,
+    *args,
+    triggered_by_id=None,
+    force=False,
+    **kwargs,
+):
     source: Source = Source.objects.get(name=DataSources.MLPTF)
 
     # Get snapshot now, date would be previous day.
@@ -29,6 +35,7 @@ def aggregate_line_vehicle_status_mlptf_task(self, *args, **kwargs):
     snapshot: Snapshot = Snapshot.objects.create(
         date=now() - timedelta(days=1),
         source_id=source.id,
+        triggered_by_id=triggered_by_id,
     )
 
     query_dict = defaultdict()
