@@ -22,6 +22,7 @@ class MediaAdmin(admin.ModelAdmin):
         "created",
         "modified",
         "file",
+        "width_x_height",
         "image_widget",
         "uploader",
     ]
@@ -29,10 +30,13 @@ class MediaAdmin(admin.ModelAdmin):
         "id",
         "created",
         "modified",
+        "width_x_height",
         "image_widget",
     ]
     list_display = [
         "__str__",
+        "created",
+        "width_x_height",
         "uploader",
     ]
     list_filter = [
@@ -41,6 +45,9 @@ class MediaAdmin(admin.ModelAdmin):
     search_fields = [
         "uploader",
     ]
+
+    def width_x_height(self, instance):
+        return f"{instance.width} x {instance.height}"
 
 
 class UserAdmin(admin.ModelAdmin):

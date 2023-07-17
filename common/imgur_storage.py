@@ -14,6 +14,8 @@ from django.utils.deconstruct import deconstructible
 from imgurpython import ImgurClient
 from imgurpython.helpers.error import ImgurClientError
 
+from common.tasks import add_width_height_to_media_task
+
 logger = logging.getLogger(__name__)
 
 
@@ -111,7 +113,17 @@ class ImgurStorage(Storage):
         )
         logger.info(f"Imgur response: {response}")
 
-        return response["link"].split("/")[-1]
+        filename = response["link"].split("/")[-1]
+
+        add_width_height_to_media_task.apply_async(
+            kwargs={
+                "filename": filename,
+                "width": response["width"],
+                "height": response["height"],
+            }
+        )
+
+        return filename
 
     def _client_upload_from_fd(
         self,

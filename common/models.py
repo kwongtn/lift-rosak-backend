@@ -6,17 +6,18 @@ from django.utils.safestring import mark_safe
 from model_utils.models import TimeStampedModel, UUIDModel
 
 from common.enums import TemporaryMediaType
+from common.imgur_field import ImgurField
 from common.imgur_storage import ImgurStorage
 
 STORAGE = ImgurStorage()
 
 
 class Media(TimeStampedModel, UUIDModel):
-    file = models.ImageField(
+    file = ImgurField(
         upload_to=settings.IMGUR_ALBUM,
         storage=STORAGE,
-        # width_field="width",
-        # height_field="height",
+        width_field="width",
+        height_field="height",
     )
     width = models.IntegerField(
         null=True,
