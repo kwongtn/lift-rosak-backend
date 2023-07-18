@@ -5,6 +5,7 @@ from strawberry.extensions import AddValidationRules
 from strawberry.extensions.tracing import SentryTracingExtension
 from strawberry_django.optimizer import DjangoOptimizerExtension
 
+from chartography.schema.schema import ChartographyMutations, ChartographyScalars
 from common.schema.schema import CommonMutations, CommonScalars
 from incident.schema.schema import IncidentMutations, IncidentScalars
 from operation.schema.schema import OperationMutations, OperationScalars
@@ -19,6 +20,7 @@ class Query(
     CommonScalars,
     SpottingScalars,
     IncidentScalars,
+    ChartographyScalars,
 ):
     pass
 
@@ -30,6 +32,7 @@ class Mutation(
     CommonMutations,
     SpottingMutations,
     IncidentMutations,
+    ChartographyMutations,
 ):
     pass
 

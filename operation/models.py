@@ -1,9 +1,10 @@
 from colorfield.fields import ColorField
 from django.contrib.gis.db import models
 from django.contrib.postgres.indexes import BTreeIndex
+from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
 
-from operation.enums import AssetStatus, AssetType, VehicleStatus
+from operation.enums import AssetStatus, AssetType, LineStatus, VehicleStatus
 
 
 class Line(TimeStampedModel):
@@ -28,6 +29,11 @@ class Line(TimeStampedModel):
         to="operation.Vehicle",
         through="operation.VehicleLine",
         related_name="vehicle_lines",
+    )
+    status = TextChoicesField(
+        max_length=32,
+        choices_enum=LineStatus,
+        default=LineStatus.ACTIVE,
     )
 
     def __str__(self) -> str:

@@ -1,11 +1,17 @@
-[[source]]
-url = "https://pypi.org/simple"
-verify_ssl = true
-name = "pypi"
+[tool.poetry]
+name = "rosak-backend"
+version = "0.1.0"
+description = ""
+authors = ["Kwong Tung Nan <tungnan5636@gmail.com>"]
+license = "GNU AGPLv3"
+readme = "README.md"
+packages = [{include = "rosak_backend"}]
 
-[packages]
-boto3 = "*"
-django = ">=4.2,<4.3"
+[tool.poetry.dependencies]
+python = "^3.11"
+boto3 = "1.28.*"
+celery = {extras = ["pymemcache", "redis"], version = "^5.3.1"}
+django = "4.2.*"
 django-admin-rangefilter = "*"
 django-advanced-filters = "*"
 django-celery-beat = "*"
@@ -26,27 +32,27 @@ djangorestframework = "*"
 dotmap = "*"
 firebase-admin = "*"
 gunicorn = "*"
+imgurpython = {git = "https://github.com/BryanH/imgurpython.git", rev = "master"}
 pendulum = "*"
 pillow = "*"
 promise = "*"
 psycopg2-binary = "*"
 pymemcache = "*"
+requests = "*"
 sentry-sdk = "*"
 strawberry-graphql = "*"
 strawberry-graphql-django = "*"
-celery = {extras = ["pymemcache", "redis"], version = "*"}
-imgurpython = {editable = true, git = "https://github.com/BryanH/imgurpython"}
-uvicorn = {extras = ["standard"], version = "*"}
+uvicorn = {extras = ["standard"], version = "^0.23.0"}
 
-[dev-packages]
+[tool.poetry.group.dev.dependencies]
 black = "*"
 flake8 = "*"
 ipykernel = "*"
 mypi = "*"
-strawberry-graphql = {extras = ["debug-server", "cli"], version = "*"}
 
-[requires]
-python_version = "3.11"
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
 
-[pipenv]
-allow_prereleases = false
+[tool.poetry-sort]
+move-optionals-to-bottom = true
