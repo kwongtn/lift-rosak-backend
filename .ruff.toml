@@ -1,0 +1,16 @@
+select = [
+    "E", # pycodestyle - error
+    "W", # pycodestyle - warning
+    "F", # pyflakes
+    "I", # isort
+    "C90", # mccabe
+]
+ignore = [
+    "E501",
+    # "W503"
+]
+
+line-length = 88
+
+[mccabe]
+max-complexity = 18
