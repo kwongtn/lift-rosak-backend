@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED 1
 ENV POETRY_VERSION 1.5.1
 RUN pip install "poetry==$POETRY_VERSION"
 RUN apt-get update && apt-get install -y \
-    gdal-bin git
+    gdal-bin git gcc python3-dev
 RUN mkdir /code
 WORKDIR /code
 
