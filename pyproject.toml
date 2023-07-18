@@ -10,6 +10,7 @@ packages = [{include = "rosak_backend"}]
 [tool.poetry.dependencies]
 python = "^3.11"
 boto3 = "1.28.*"
+celery = {extras = ["pymemcache", "redis"], version = "^5.3.1"}
 django = "4.2.*"
 django-admin-rangefilter = "*"
 django-advanced-filters = "*"
@@ -31,6 +32,7 @@ djangorestframework = "*"
 dotmap = "*"
 firebase-admin = "*"
 gunicorn = "*"
+imgurpython = {git = "https://github.com/BryanH/imgurpython.git", rev = "master"}
 pendulum = "*"
 pillow = "*"
 promise = "*"
@@ -40,9 +42,7 @@ requests = "*"
 sentry-sdk = "*"
 strawberry-graphql = "*"
 strawberry-graphql-django = "*"
-celery = {extras = ["pymemcache", "redis"], version = "^5.3.1"}
 uvicorn = {extras = ["standard"], version = "^0.23.0"}
-imgurpython = {git = "https://github.com/BryanH/imgurpython.git", rev = "master"}
 
 [tool.poetry.group.dev.dependencies]
 black = "*"
@@ -53,3 +53,6 @@ mypi = "*"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry-sort]
+move-optionals-to-bottom = true
