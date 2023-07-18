@@ -64,7 +64,10 @@ def aggregate_line_vehicle_status_mlptf_task(
             )
         )
 
-    LineVehicleStatusCountHistory.objects.bulk_create(create_objs)
+    LineVehicleStatusCountHistory.objects.bulk_create(
+        create_objs,
+        ignore_conflicts=True,
+    )
 
 
 @celery_app.task(bind=True)
@@ -141,4 +144,7 @@ def aggregate_line_vehicle_status_mtrec_task(self, *args, **kwargs):
                     )
                 ]
 
-    LineVehicleStatusCountHistory.objects.bulk_create(to_create, ignore_conflicts=True)
+    LineVehicleStatusCountHistory.objects.bulk_create(
+        to_create,
+        ignore_conflicts=True,
+    )
