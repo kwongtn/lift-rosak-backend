@@ -308,7 +308,16 @@ IMGUR_ALBUM = os.environ.get("IMGUR_ALBUM", "media")
 # http://docs.celeryproject.org/en/latest/userguide/configuration.html
 if USE_TZ:
     CELERY_TIMEZONE = TIME_ZONE
-CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379")
+REDIS_HOST = os.environ.get("CELERY_REDIS_HOST", "redis")
+REDIS_USERNAME = os.environ.get("CELERY_REDIS_USERNAME", None)
+REDIS_PASSWORD = os.environ.get("CELERY_REDIS_PASSWORD", None)
+REDIS_PORT = os.environ.get("CELERY_REDIS_PORT", "6379")
+
+redis_cred_prefix = ""
+if REDIS_USERNAME and REDIS_PASSWORD:
+    redis_cred_prefix = f"{REDIS_USERNAME}:{REDIS_PASSWORD}@"
+
+CELERY_BROKER_URL = f"redis://{redis_cred_prefix}{REDIS_HOST}:{REDIS_PORT}"
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
