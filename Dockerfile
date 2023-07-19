@@ -2,6 +2,7 @@ FROM python:3.11-slim-bullseye
 
 ARG ENVIRONMENT
 ENV PYTHONUNBUFFERED 1
+ENV GOOGLE_APPLICATION_CREDENTIALS /google-application-credential.json
 ENV POETRY_VERSION 1.5.1
 RUN pip install "poetry==$POETRY_VERSION"
 RUN apt-get update && apt-get install -y \
