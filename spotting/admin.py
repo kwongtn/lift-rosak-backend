@@ -80,6 +80,7 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
     #     "notes",
     # ]
     readonly_fields = ("images_widget",)
+    date_hierarchy = "created"
 
     advanced_filter_fields = [
         "reporter",
