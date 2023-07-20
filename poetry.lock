@@ -707,6 +707,21 @@ python-crontab = ">=2.3.4"
 tzdata = "*"
 
 [[package]]
+name = "django-celery-results"
+version = "2.5.1"
+description = "Celery result backends for Django."
+optional = false
+python-versions = "*"
+files = [
+    {file = "django_celery_results-2.5.1-py3-none-any.whl", hash = "sha256:0da4cd5ecc049333e4524a23fcfc3460dfae91aa0a60f1fae4b6b2889c254e01"},
+    {file = "django_celery_results-2.5.1.tar.gz", hash = "sha256:3ecb7147f773f34d0381bac6246337ce4cf88a2ea7b82774ed48e518b67bb8fd"},
+]
+
+[package.dependencies]
+celery = ">=5.2.7,<6.0"
+Django = ">=3.2.18"
+
+[[package]]
 name = "django-choices-field"
 version = "2.2.2"
 description = "Django field that set/get django's new TextChoices/IntegerChoices enum."
@@ -3286,4 +3301,4 @@ watchdog = ["watchdog (>=2.3)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "d565f6477fdec4fc8fcfb6711412456fb4f19514ae94985db0c2e9b4b3a17161"
+content-hash = "f24cf57bb575acb852396e032979ca2d64dc0c17ba9f8e91e499b00459b6ec99"

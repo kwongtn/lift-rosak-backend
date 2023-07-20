@@ -120,6 +120,7 @@ INSTALLED_APPS = [
     "mlptf",
     "chartography",
     "django_celery_beat",
+    "django_celery_results",
     # Must be at bottom
     "django_cleanup.apps.CleanupConfig",
 ]
@@ -219,7 +220,11 @@ CACHES = {
             "max_pool_size": 4,
             "use_pooling": True,
         },
-    }
+    },
+    "celery": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "celery_cache",
+    },
 }
 
 
@@ -318,12 +323,14 @@ if REDIS_USERNAME and REDIS_PASSWORD:
     redis_cred_prefix = f"{REDIS_USERNAME}:{REDIS_PASSWORD}@"
 
 CELERY_BROKER_URL = f"redis://{redis_cred_prefix}{REDIS_HOST}:{REDIS_PORT}"
-CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+CELERY_RESULT_BACKEND = "django-db"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TASK_TIME_LIMIT = 5 * 60
 CELERY_TASK_SOFT_TIME_LIMIT = 60
+CELERY_CACHE_BACKEND = "celery"
+CELERY_RESULT_EXTENDED = True
 
 # AWS Boto
 AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "")
