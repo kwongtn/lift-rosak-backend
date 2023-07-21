@@ -7,9 +7,11 @@ from common.tasks import convert_temporary_media_to_media_task
 
 @receiver(post_save, sender=TemporaryMedia)
 def convert_temporary_media_to_media(sender, instance, created, **kwargs):
-    if created:
-        convert_temporary_media_to_media_task.apply_async(
-            kwargs={
-                "temporary_media_id": instance.id,
-            }
-        )
+    if not created:
+        return
+
+    convert_temporary_media_to_media_task.apply_async(
+        kwargs={
+            "temporary_media_id": instance.id,
+        }
+    )
