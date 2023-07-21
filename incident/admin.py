@@ -1,4 +1,6 @@
 from django.contrib.gis import admin, forms
+from django.db import models
+from django.forms import Textarea, TextInput
 from mdeditor.widgets import MDEditorWidget
 from ordered_model.admin import (
     OrderedInlineModelAdminMixin,
@@ -87,6 +89,19 @@ class CalendarIncidentChronologyInlineAdmin(OrderedTabularInline):
     readonly_fields = ("move_up_down_links",)
     ordering = ("order",)
     extra = 1
+    fields = (
+        "order",
+        "indicator",
+        "datetime",
+        "source_url",
+        "content",
+        "move_up_down_links",
+    )
+
+    formfield_overrides = {
+        models.URLField: {"widget": TextInput(attrs={"size": 20})},
+        models.TextField: {"widget": Textarea(attrs={"rows": 4, "cols": 40})},
+    }
 
 
 class CalendarIncidentAdminForm(forms.ModelForm):
