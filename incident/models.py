@@ -1,5 +1,8 @@
+from typing import TYPE_CHECKING
+
 from django.contrib.gis.db import models
 from django.contrib.gis.db.models import Q
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from model_utils.models import TimeStampedModel
 from ordered_model.models import OrderedModel
@@ -9,6 +12,9 @@ from incident.enums import (
     CalendarIncidentSeverity,
     IncidentSeverity,
 )
+
+if TYPE_CHECKING:
+    from common.models import Media
 
 
 class IncidentAbstractModel(TimeStampedModel, OrderedModel):
@@ -184,13 +190,15 @@ class CalendarIncident(TimeStampedModel, OrderedModel):
         to="operation.Station",
         blank=True,
     )
-    medias = models.ManyToManyField(
-        to="common.Media",
-        blank=True,
-    )
     categories = models.ManyToManyField(
         to="incident.CalendarIncidentCategory",
         blank=True,
+    )
+
+    medias = models.ManyToManyField(
+        to="common.Media",
+        blank=True,
+        through="incident.CalendarIncidentMedia",
     )
 
     def __str__(self):
@@ -198,3 +206,33 @@ class CalendarIncident(TimeStampedModel, OrderedModel):
 
     class Meta(OrderedModel.Meta):
         pass
+
+    def images_widget(self):
+        html = '<div style="display: flex;\
+            flex-flow: row wrap; align-items: flex-start;\
+            align-content: space-between;">'
+
+        media: Media
+        for media in self.medias.all():
+            html += f'<a href="/admin/common/media/{media.id}/change" target="_blank">'
+            html += media.image_widget_html(style="max-width: 200px; padding: 5px;")
+            html += "</a>"
+
+        html += "</div>"
+        return mark_safe(html)
+
+
+class CalendarIncidentMedia(TimeStampedModel):
+    timestamp = models.DateTimeField(
+        blank=True,
+        null=True,
+        default=None,
+    )
+    calendar_incident = models.ForeignKey(
+        to="incident.CalendarIncident",
+        on_delete=models.CASCADE,
+    )
+    media = models.ForeignKey(
+        to="common.Media",
+        on_delete=models.CASCADE,
+    )
