@@ -50,6 +50,34 @@ class MediaAdmin(admin.ModelAdmin):
         return f"{instance.width} x {instance.height}"
 
 
+class TemporaryMediaAdmin(admin.ModelAdmin):
+    fields = [
+        "id",
+        "created",
+        "modified",
+        "file",
+        "image_widget",
+        "uploader",
+    ]
+    readonly_fields = [
+        "id",
+        "created",
+        "modified",
+        "image_widget",
+    ]
+    list_display = [
+        "__str__",
+        "created",
+        "uploader",
+    ]
+    list_filter = [
+        "uploader",
+    ]
+    search_fields = [
+        "uploader",
+    ]
+
+
 class UserAdmin(admin.ModelAdmin):
     inlines = [UserBadgeStackedInline]
     list_display = [
@@ -64,5 +92,5 @@ class UserAdmin(admin.ModelAdmin):
 
 
 admin.site.register(Media, MediaAdmin)
-admin.site.register(TemporaryMedia, MediaAdmin)
+admin.site.register(TemporaryMedia, TemporaryMediaAdmin)
 admin.site.register(User, UserAdmin)
