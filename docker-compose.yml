@@ -24,12 +24,6 @@ services:
       - app
     restart: always
 
-  memcached:
-    image: memcached:1.6.20-alpine
-    expose:
-      - "11211"
-    restart: always
-
   app:
     &app
     build:
@@ -46,18 +40,19 @@ services:
       - "8001"
     depends_on:
       - db
-      - memcached
+      - redis
     restart: always
 
   redis:
     image: redis:7
+    ports:
+      - "6379:6379"
     restart: always
 
   celeryworker:
     <<: *app
     depends_on:
       - db
-      - memcached
       - redis
     command: bash run_celery.sh
     restart: no

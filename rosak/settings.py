@@ -32,6 +32,7 @@ SECRET_KEY = os.environ.get(
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = bool(strtobool(os.getenv("DEBUG", "false")))
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "local")
 
 if DEBUG is not True:
     import sentry_sdk
@@ -39,7 +40,7 @@ if DEBUG is not True:
 
     sentry_sdk.init(
         dsn=os.environ.get("SENTRY_DSN", None),
-        environment=os.environ.get("ENVIRONMENT", None),
+        environment=ENVIRONMENT,
         integrations=[
             DjangoIntegration(),
         ],
@@ -111,6 +112,7 @@ INSTALLED_APPS = [
     "health_check.cache",
     "health_check.storage",
     "health_check.contrib.migrations",
+    "cachalot",
     "operation",
     "common",
     "reporting",
@@ -210,15 +212,32 @@ DATABASES = {
     }
 }
 
+REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
+REDIS_USERNAME = os.environ.get("REDIS_USERNAME", None)
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", None)
+REDIS_PORT = os.environ.get("REDIS_PORT", "6379")
+REDIS_DB = os.environ.get("REDIS_DB", "0")
+
+redis_cred_prefix = ""
+if REDIS_USERNAME and REDIS_PASSWORD:
+    redis_cred_prefix = f"{REDIS_USERNAME}:{REDIS_PASSWORD}@"
+
+REDIS_URL = f"redis://{redis_cred_prefix}{REDIS_HOST}:{REDIS_PORT}"
+REDIS_REPLICAS = os.getenv("REDIS_REPLICAS", [])
+
+if REDIS_REPLICAS:
+    replicas = []
+    for redis_url in REDIS_REPLICAS.split(","):
+        replicas.append(f"redis://{redis_cred_prefix}{REDIS_REPLICAS}")
+    REDIS_REPLICAS = [REDIS_URL] + replicas
+
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.memcached.PyMemcacheCache",
-        "LOCATION": os.environ.get("MEMCACHED_LOCATION", "localhost:11211"),
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_REPLICAS if REDIS_REPLICAS else REDIS_URL,
+        "KEY_PREFIX": ENVIRONMENT,
         "OPTIONS": {
-            "no_delay": True,
-            "ignore_exc": True,
-            "max_pool_size": 4,
-            "use_pooling": True,
+            "db": REDIS_DB,
         },
     },
     "celery": {
@@ -294,6 +313,7 @@ DEBUG_TOOLBAR_PANELS = [
     "debug_toolbar.panels.logging.LoggingPanel",
     "debug_toolbar.panels.redirects.RedirectsPanel",
     "debug_toolbar.panels.profiling.ProfilingPanel",
+    "cachalot.panels.CachalotPanel",
 ]
 
 # Recaptcha Configuration
@@ -313,16 +333,8 @@ IMGUR_ALBUM = os.environ.get("IMGUR_ALBUM", "media")
 # http://docs.celeryproject.org/en/latest/userguide/configuration.html
 if USE_TZ:
     CELERY_TIMEZONE = TIME_ZONE
-REDIS_HOST = os.environ.get("CELERY_REDIS_HOST", "redis")
-REDIS_USERNAME = os.environ.get("CELERY_REDIS_USERNAME", None)
-REDIS_PASSWORD = os.environ.get("CELERY_REDIS_PASSWORD", None)
-REDIS_PORT = os.environ.get("CELERY_REDIS_PORT", "6379")
-
-redis_cred_prefix = ""
-if REDIS_USERNAME and REDIS_PASSWORD:
-    redis_cred_prefix = f"{REDIS_USERNAME}:{REDIS_PASSWORD}@"
-
-CELERY_BROKER_URL = f"redis://{redis_cred_prefix}{REDIS_HOST}:{REDIS_PORT}"
+CELERY_BROKER_URL = f"{REDIS_URL}/{REDIS_DB}"
+CELERY_REDIS_DB = REDIS_DB
 CELERY_RESULT_BACKEND = "django-db"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
