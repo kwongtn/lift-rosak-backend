@@ -39,6 +39,7 @@ class Line:
     stations: List["Station"]
     station_lines: List["StationLine"]
     # line_vehicles: List["Vehicle"]
+    status: strawberry.auto
 
     @strawberry_django.field
     async def vehicle_types(self, info: Info) -> List["VehicleType"]:
