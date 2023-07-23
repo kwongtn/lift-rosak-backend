@@ -32,6 +32,7 @@ class GenericUpload(APIView):
             - upload_type
             - image
             - spotting_event_id
+            - calendar_incident_id
         """
         data = request.data.dict()
         extension = str(request.data.dict()["image"]).split(".")[-1]
@@ -54,6 +55,9 @@ class GenericUpload(APIView):
 
             if user.id != event.reporter_id:
                 return Response(status=status.HTTP_403_FORBIDDEN)
+
+        elif upload_type == TemporaryMediaType.INCIDENT_CALENDAR_INCIDENT:
+            metadata["calendar_incident_id"] = data["calendar_incident_id"]
 
         else:
             return Response(status=status.HTTP_400_BAD_REQUEST)
