@@ -95,9 +95,13 @@ class LineAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         StationLineTabularInline,
         VehicleLineTabularInline,
     ]
+    list_editable = [
+        "status",
+    ]
     list_display = [
         "__str__",
         "code",
+        "status",
         "display_name",
         "display_color",
     ]
@@ -105,6 +109,7 @@ class LineAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "code",
         "display_name",
         "display_color",
+        "status",
     ]
     advanced_filter_fields = [
         "code",
