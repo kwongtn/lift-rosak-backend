@@ -358,3 +358,9 @@ AWS_S3_OBJECT_PARAMETERS = {
 }
 
 MEDIA_URL = f"{AWS_S3_ENDPOINT_URL}/{AWS_STORAGE_BUCKET_NAME}/media/"
+
+# RapidAPI Stuff
+RAPID_API_KEY = os.environ.get("RAPID_API_KEY", "")
+RAPID_API_NSFW_TEST_URL = "https://nsfw-image-classification1.p.rapidapi.com/img/nsfw"
+RAPID_API_NSFW_HOST = "nsfw-image-classification1.p.rapidapi.com"
+RAPID_API_NSFW_THRESHOLD = 0.5
