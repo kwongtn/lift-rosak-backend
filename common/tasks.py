@@ -61,6 +61,7 @@ def check_temporary_media_nsfw(self, *, temporary_media_id: str | int):
     )
 
     res = response.json()
+    logger.info(res)
     nsfw_probability = res.get("NSFW_Prob", None)
     temp_media.metadata["nsfw_probability"] = nsfw_probability
 
