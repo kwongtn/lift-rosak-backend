@@ -5,7 +5,7 @@ from django.db import models
 from django.utils.safestring import mark_safe
 from model_utils.models import TimeStampedModel, UUIDModel
 
-from common.enums import TemporaryMediaType
+from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
 from common.imgur_field import ImgurField
 from common.imgur_storage import ImgurStorage
 
@@ -63,7 +63,11 @@ class TemporaryMedia(TimeStampedModel, UUIDModel):
     )
     metadata = models.JSONField(default=dict, blank=True)
     fail_count = models.IntegerField(default=0)
-    can_retry = models.BooleanField(default=True)
+    status = models.CharField(
+        max_length=255,
+        choices=TemporaryMediaStatus.choices,
+        default=TemporaryMediaStatus.PENDING,
+    )
 
     def __str__(self) -> str:
         return self.file.name
@@ -80,6 +84,20 @@ class User(TimeStampedModel):
     nickname = models.CharField(max_length=255, default="", blank=True)
 
     badges = models.ManyToManyField(to="mlptf.Badge", through="mlptf.UserBadge")
+    clearances = models.ManyToManyField(
+        to="common.Clearance", through="common.UserClearance"
+    )
 
     def __str__(self) -> str:
         return self.firebase_id[:8]
+
+
+class UserClearance(TimeStampedModel):
+    user = models.ForeignKey(to="common.User", on_delete=models.CASCADE)
+    clearance = models.ForeignKey(to="common.Clearance", on_delete=models.CASCADE)
+
+
+class Clearance(TimeStampedModel):
+    name = models.CharField(max_length=128, unique=True, choices=ClearanceType.choices)
+    description = models.TextField(blank=True, null=True, default=None)
+    users = models.ManyToManyField(to="common.User", through="common.UserClearance")

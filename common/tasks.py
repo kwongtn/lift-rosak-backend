@@ -2,19 +2,80 @@ import datetime
 import logging
 import time
 
+import requests
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.db.models import Q
 from django.utils.timezone import now
 from imgurpython import ImgurClient
 from PIL import ExifTags, Image, TiffImagePlugin
 
-from common.enums import TemporaryMediaType
+from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
 from incident.models import CalendarIncidentMedia
 from rosak.celery import app as celery_app
 from spotting.models import Event, EventMedia
 
 logger = logging.getLogger(__name__)
+
+
+@celery_app.task(bind=True)
+def check_temporary_media_nsfw(self, *, temporary_media_id: str | int):
+    from common.models import TemporaryMedia
+
+    temp_media: TemporaryMedia = TemporaryMedia.objects.filter(
+        id=temporary_media_id
+    ).first()
+    if not temp_media:
+        logger.info("Temporary media not found, restarting task in 2 seconds")
+        time.sleep(2)
+        check_temporary_media_nsfw.apply_async(
+            kwargs={
+                "temporary_media_id": temporary_media_id,
+            }
+        )
+        return
+
+    if temp_media.uploader.clearances.filter(
+        name=ClearanceType.TRUSTED_MEDIA_UPLOADER
+    ).exists():
+        temp_media.status = TemporaryMediaStatus.TRUSTED_CLEARED
+        temp_media.save()
+        convert_temporary_media_to_media_task.apply_async(
+            kwargs={
+                "temporary_media_id": temporary_media_id,
+            }
+        )
+        return
+
+    response = requests.post(
+        url=settings.RAPID_API_NSFW_TEST_URL,
+        json={
+            "url": temp_media.file.url,
+        },
+        headers={
+            "content-type": "application/json",
+            "X-RapidAPI-Key": settings.RAPID_API_KEY,
+            "X-RapidAPI-Host": settings.RAPID_API_NSFW_HOST,
+        },
+    )
+
+    res = response.json()
+    nsfw_probability = res.get("NSFW_Prob", None)
+    temp_media.metadata["nsfw_probability"] = nsfw_probability
+
+    # If score lower than threshold, set entry as BLOCKED
+    if nsfw_probability > settings.RAPID_API_NSFW_THRESHOLD:
+        temp_media.status = TemporaryMediaStatus.BLOCKED
+        temp_media.save()
+    else:
+        temp_media.status = TemporaryMediaStatus.CLEARED
+        temp_media.save()
+        convert_temporary_media_to_media_task.apply_async(
+            kwargs={
+                "temporary_media_id": temporary_media_id,
+            }
+        )
 
 
 @celery_app.task(bind=True)
@@ -34,8 +95,16 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
         )
         return
 
+    if temp_media.status in [
+        TemporaryMediaStatus.BLOCKED,
+        TemporaryMediaStatus.TO_DELETE,
+        TemporaryMediaStatus.INVALID_UPLOAD,
+    ]:
+        logger.info(f"Temporary media is of type {temp_media.status}, skipping...")
+        return
+
     if temp_media.upload_type not in [i[0] for i in TemporaryMediaType.choices]:
-        temp_media.can_retry = False
+        temp_media.status = TemporaryMediaStatus.INVALID_UPLOAD
         temp_media.save()
 
         raise RuntimeError(f"Invalid upload type: {temp_media.upload_type}")
@@ -90,12 +159,13 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
             else:
                 raise RuntimeError(f"Invalid upload type: {temp_media.upload_type}")
 
-            temp_media.delete()
+            temp_media.status = TemporaryMediaStatus.TO_DELETE
 
     except Exception as e:
         logger.exception(e)
         temp_media.fail_count += 1
-        temp_media.save()
+
+    temp_media.save()
 
 
 @celery_app.task(bind=True)
@@ -103,15 +173,28 @@ def cleanup_temporary_media_task(self, *args, **kwargs):
     from common.models import TemporaryMedia
 
     for temp_media in TemporaryMedia.objects.filter(
-        created__lte=now() - datetime.timedelta(minutes=5),
-        fail_count__lt=5,
-        can_retry=True,
+        Q(
+            created__lte=now() - datetime.timedelta(minutes=5),
+            fail_count__lt=5,
+        )
+        & ~Q(
+            status__in=[
+                TemporaryMediaStatus.TO_DELETE,
+                TemporaryMediaStatus.BLOCKED,
+                TemporaryMediaStatus.RETRY_ELAPSED,
+            ]
+        )
     ).filter():
-        convert_temporary_media_to_media_task.apply_async(
+        check_temporary_media_nsfw.apply_async(
             kwargs={
                 "temporary_media_id": temp_media.id,
             }
         )
+
+    TemporaryMedia.objects.filter(
+        status=TemporaryMediaStatus.TO_DELETE,
+        created__lte=now() - datetime.timedelta(days=30),
+    ).delete()
 
 
 @celery_app.task(bind=True)

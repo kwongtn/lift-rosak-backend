@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from common.models import Media, TemporaryMedia, User
+from common.models import Clearance, Media, TemporaryMedia, User, UserClearance
 from mlptf.admin import UserBadgeStackedInline
 
 
@@ -58,28 +58,42 @@ class TemporaryMediaAdmin(admin.ModelAdmin):
         "file",
         "image_widget",
         "uploader",
+        "status",
+        "metadata",
+        "fail_count",
     ]
     readonly_fields = [
         "id",
         "created",
         "modified",
         "image_widget",
+        "metadata",
+        "fail_count",
     ]
     list_display = [
         "__str__",
         "created",
         "uploader",
+        "status",
+        "fail_count",
     ]
     list_filter = [
         "uploader",
+        "status",
+        "fail_count",
     ]
     search_fields = [
         "uploader",
     ]
 
 
+class UserClearanceStackedInline(admin.StackedInline):
+    model = UserClearance
+    classes = ["collapse"]
+
+
 class UserAdmin(admin.ModelAdmin):
-    inlines = [UserBadgeStackedInline]
+    inlines = [UserBadgeStackedInline, UserClearanceStackedInline]
     list_display = [
         "__str__",
         "nickname",
@@ -89,8 +103,14 @@ class UserAdmin(admin.ModelAdmin):
         "nickname",
         "firebase_id",
     ]
+    filter_horizontal = ("clearances",)
+
+
+class ClearanceAdmin(admin.ModelAdmin):
+    pass
 
 
 admin.site.register(Media, MediaAdmin)
 admin.site.register(TemporaryMedia, TemporaryMediaAdmin)
 admin.site.register(User, UserAdmin)
+admin.site.register(Clearance, ClearanceAdmin)
