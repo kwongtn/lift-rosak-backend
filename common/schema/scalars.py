@@ -5,7 +5,6 @@ import pendulum
 import strawberry
 import strawberry_django
 from django.db.models import Count, F, Min
-from strawberry import relay
 from strawberry.types import Info
 
 from common import models
@@ -35,10 +34,29 @@ class MediaScalar:
     uploader: "UserScalar"
     file: strawberry_django.DjangoImageType
 
+    @strawberry_django.field
+    def width(self) -> int:
+        return self.file.width
+
+    @strawberry_django.field
+    def height(self) -> int:
+        return self.file.height
+
+
+@strawberry.type
+class MediasGroupByPeriodScalar:
+    type: DateGroupings
+    date_key: str
+    year: int
+    month: Optional[int]
+    day: Optional[int]
+    count: int
+    medias: List["MediaScalar"]
+
 
 @strawberry_django.type(models.Media, order=MediaOrder)
-class MediaType(relay.Node):
-    id: relay.NodeID[str]
+class MediaType(strawberry.relay.Node):
+    id: strawberry.relay.NodeID[str]
     created: datetime
     uploader: "UserScalar"
     file: strawberry_django.DjangoFileType

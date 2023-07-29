@@ -1,11 +1,17 @@
+from typing import List
+
 import strawberry
 import strawberry_django
+from django.contrib.postgres.aggregates import ArrayAgg
+from django.db.models import Count, F
 from strawberry.types import Info
 from strawberry_django.relay import ListConnectionWithTotalCount
 
-from common.models import User
+from common.models import Media, User
 from common.schema.inputs import UserInput
-from common.schema.scalars import MediaType, UserScalar
+from common.schema.scalars import MediasGroupByPeriodScalar, MediaType, UserScalar
+from common.utils import get_date_key
+from generic.schema.enums import DateGroupings
 from rosak.permissions import IsLoggedIn
 
 
@@ -21,6 +27,45 @@ class CommonScalars:
         from common.models import User
 
         return await User.objects.aget(id=info.context.user.id)
+
+    @strawberry.field
+    async def medias_group_by_period(
+        self, info: Info, type: DateGroupings
+    ) -> List[MediasGroupByPeriodScalar]:
+        groupings = {"year": F("created__year")}
+
+        if type in [DateGroupings.MONTH, DateGroupings.DAY]:
+            groupings["month"] = F("created__month")
+
+            if type == DateGroupings.DAY:
+                groupings["day"] = F("created__day")
+
+        annotations = (
+            Media.objects.annotate(**groupings)
+            .values(*groupings.keys())
+            .annotate(
+                count=Count("id"), medias=ArrayAgg(F("id"), distinct=True, default=[])
+            )
+        )
+
+        return [
+            MediasGroupByPeriodScalar(
+                type=type,
+                date_key=get_date_key(
+                    year=elem["year"],
+                    month=elem.get("month", None),
+                    day=elem.get("day", None),
+                ),
+                year=elem["year"],
+                month=elem.get("month", None),
+                day=elem.get("day", None),
+                count=elem["count"],
+                medias=[
+                    media async for media in Media.objects.filter(id__in=elem["medias"])
+                ],
+            )
+            async for elem in annotations
+        ]
 
 
 @strawberry.type
