@@ -1,16 +1,18 @@
 import strawberry
+import strawberry_django
 from strawberry.types import Info
+from strawberry_django.relay import ListConnectionWithTotalCount
 
 from common.models import User
 from common.schema.inputs import UserInput
-from common.schema.scalars import UserScalar
+from common.schema.scalars import MediaType, UserScalar
 from rosak.permissions import IsLoggedIn
-
-# import strawberry_django
 
 
 @strawberry.type
 class CommonScalars:
+    medias: ListConnectionWithTotalCount[MediaType] = strawberry_django.connection()
+
     @strawberry.field(permission_classes=[IsLoggedIn])
     async def user(self, info: Info) -> UserScalar:
         if not info.context.user:

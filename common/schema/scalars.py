@@ -1,14 +1,16 @@
-from datetime import date
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Annotated, List, Optional
 
 import pendulum
 import strawberry
 import strawberry_django
 from django.db.models import Count, F, Min
+from strawberry import relay
 from strawberry.types import Info
 
 from common import models
 from common import models as common_models
+from common.schema.orderings import MediaOrder
 from common.schema.types import (
     FavouriteVehicleData,
     UserSpottingTrend,
@@ -29,9 +31,25 @@ from spotting.enums import SpottingEventType
 
 @strawberry_django.type(models.Media, pagination=True)
 class MediaScalar:
-    id: str
+    id: strawberry.ID
+    uploader: "UserScalar"
+    file: strawberry_django.DjangoImageType
+
+
+@strawberry_django.type(models.Media, order=MediaOrder)
+class MediaType(relay.Node):
+    id: relay.NodeID[str]
+    created: datetime
     uploader: "UserScalar"
     file: strawberry_django.DjangoFileType
+
+    @strawberry_django.field
+    def width(self) -> int:
+        return self.file.width
+
+    @strawberry_django.field
+    def height(self) -> int:
+        return self.file.height
 
 
 @strawberry_django.type(models.User)
