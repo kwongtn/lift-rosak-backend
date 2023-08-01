@@ -27,13 +27,13 @@ def check_temporary_media_nsfw(self, *, temporary_media_id: str | int):
         id=temporary_media_id, status__in=[TemporaryMediaStatus.PENDING]
     ).first()
     if not temp_media:
-        # logger.info("Temporary media not found, restarting task in 2 seconds")
-        # time.sleep(2)
-        # check_temporary_media_nsfw.apply_async(
-        #     kwargs={
-        #         "temporary_media_id": temporary_media_id,
-        #     }
-        # )
+        logger.info("Temporary media not found, restarting task in 2 seconds")
+        time.sleep(2)
+        check_temporary_media_nsfw.apply_async(
+            kwargs={
+                "temporary_media_id": temporary_media_id,
+            }
+        )
         return
 
     if temp_media.uploader.clearances.filter(
