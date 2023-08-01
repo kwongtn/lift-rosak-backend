@@ -27,13 +27,13 @@ def check_temporary_media_nsfw(self, *, temporary_media_id: str | int):
         id=temporary_media_id, status__in=[TemporaryMediaStatus.PENDING]
     ).first()
     if not temp_media:
-        logger.info("Temporary media not found, restarting task in 2 seconds")
-        time.sleep(2)
-        check_temporary_media_nsfw.apply_async(
-            kwargs={
-                "temporary_media_id": temporary_media_id,
-            }
-        )
+        # logger.info("Temporary media not found, restarting task in 2 seconds")
+        # time.sleep(2)
+        # check_temporary_media_nsfw.apply_async(
+        #     kwargs={
+        #         "temporary_media_id": temporary_media_id,
+        #     }
+        # )
         return
 
     if temp_media.uploader.clearances.filter(
@@ -178,13 +178,7 @@ def cleanup_temporary_media_task(self, *args, **kwargs):
             created__lte=now() - datetime.timedelta(minutes=5),
             fail_count__lt=5,
         )
-        & ~Q(
-            status__in=[
-                TemporaryMediaStatus.TO_DELETE,
-                TemporaryMediaStatus.BLOCKED,
-                TemporaryMediaStatus.RETRY_ELAPSED,
-            ]
-        )
+        & Q(status__in=[TemporaryMediaStatus.PENDING])
     ).filter():
         check_temporary_media_nsfw.apply_async(
             kwargs={
