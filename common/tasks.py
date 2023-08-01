@@ -6,7 +6,6 @@ import requests
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.db.models import Q
 from django.utils.timezone import now
 from imgurpython import ImgurClient
 from PIL import ExifTags, Image, TiffImagePlugin
@@ -24,7 +23,7 @@ def check_temporary_media_nsfw(self, *, temporary_media_id: str | int):
     from common.models import TemporaryMedia
 
     temp_media: TemporaryMedia = TemporaryMedia.objects.filter(
-        id=temporary_media_id, status__in=[TemporaryMediaStatus.PENDING]
+        id=temporary_media_id,
     ).first()
     if not temp_media:
         logger.info("Temporary media not found, restarting task in 2 seconds")
@@ -34,6 +33,10 @@ def check_temporary_media_nsfw(self, *, temporary_media_id: str | int):
                 "temporary_media_id": temporary_media_id,
             }
         )
+        return
+
+    if temp_media.status is not TemporaryMediaStatus.PENDING:
+        logger.info(f"Temporary media id of {temp_media.status}, skipping...")
         return
 
     if temp_media.uploader.clearances.filter(
@@ -174,11 +177,9 @@ def cleanup_temporary_media_task(self, *args, **kwargs):
     from common.models import TemporaryMedia
 
     for temp_media in TemporaryMedia.objects.filter(
-        Q(
-            created__lte=now() - datetime.timedelta(minutes=5),
-            fail_count__lt=5,
-        )
-        & Q(status__in=[TemporaryMediaStatus.PENDING])
+        created__lte=now() - datetime.timedelta(minutes=5),
+        fail_count__lt=5,
+        status__in=[TemporaryMediaStatus.PENDING],
     ).filter():
         check_temporary_media_nsfw.apply_async(
             kwargs={
