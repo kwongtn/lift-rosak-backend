@@ -61,7 +61,10 @@ class CommonScalars:
                 day=elem.get("day", None),
                 count=elem["count"],
                 medias=[
-                    media async for media in Media.objects.filter(id__in=elem["medias"])
+                    await info.context.loaders["common"]["media_from_id_loader"].load(
+                        key
+                    )
+                    for key in elem["medias"]
                 ],
             )
             async for elem in annotations
