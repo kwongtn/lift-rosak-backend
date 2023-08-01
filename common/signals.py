@@ -10,7 +10,9 @@ from common.tasks import (
 
 
 @receiver(post_save, sender=TemporaryMedia)
-def convert_temporary_media_to_media(sender, instance, created, **kwargs):
+def convert_temporary_media_to_media(
+    sender, instance: TemporaryMedia, created, **kwargs
+):
     if not created:
         return
 
@@ -26,8 +28,9 @@ def convert_temporary_media_to_media(sender, instance, created, **kwargs):
         )
 
     else:
-        check_temporary_media_nsfw.apply_async(
-            kwargs={
-                "temporary_media_id": instance.id,
-            }
-        )
+        if instance.status == TemporaryMediaStatus.PENDING:
+            check_temporary_media_nsfw.apply_async(
+                kwargs={
+                    "temporary_media_id": instance.id,
+                }
+            )

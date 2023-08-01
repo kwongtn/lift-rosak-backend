@@ -24,7 +24,7 @@ def check_temporary_media_nsfw(self, *, temporary_media_id: str | int):
     from common.models import TemporaryMedia
 
     temp_media: TemporaryMedia = TemporaryMedia.objects.filter(
-        id=temporary_media_id
+        id=temporary_media_id, status__in=[TemporaryMediaStatus.PENDING]
     ).first()
     if not temp_media:
         logger.info("Temporary media not found, restarting task in 2 seconds")
