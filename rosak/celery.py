@@ -24,6 +24,10 @@ app.conf.beat_schedule = {
         "task": "common.tasks.cleanup_temporary_media_task",
         "schedule": datetime.timedelta(minutes=1),
     },
+    "add_width_height_to_media": {
+        "task": "common.tasks.cleanup_add_width_height_to_media_task",
+        "schedule": datetime.timedelta(minutes=1),
+    },
     "aggregate_line_vehicle_status_mlptf": {
         "task": "chartography.tasks.aggregate_line_vehicle_status_mlptf_task",
         "schedule": crontab(hour="5", minute="0"),
