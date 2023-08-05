@@ -187,6 +187,15 @@ def cleanup_temporary_media_task(self, *args, **kwargs):
             }
         )
 
+    for temp_media in TemporaryMedia.objects.filter(
+        status__in=[TemporaryMediaStatus.OVERRIDE_CLEARED],
+    ).filter():
+        convert_temporary_media_to_media_task.apply_async(
+            kwargs={
+                "temporary_media_id": temp_media.id,
+            }
+        )
+
     TemporaryMedia.objects.filter(
         status=TemporaryMediaStatus.TO_DELETE,
         created__lte=now() - datetime.timedelta(days=30),
