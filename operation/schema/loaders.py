@@ -98,6 +98,18 @@ async def batch_load_incident_count_from_vehicle(keys):
     return [incident_object.get(str(key), None) for key in keys]
 
 
+async def batch_load_vehicle_from_line(keys):
+    vehicle_lines: List[Vehicle] = VehicleLine.objects.filter(
+        line_id__in=keys
+    ).prefetch_related("vehicle", "line")
+
+    line_dict = defaultdict(set)
+    async for vehicle_line in vehicle_lines:
+        line_dict[vehicle_line.line_id].add(vehicle_line.vehicle)
+
+    return [list(line_dict.get(key, {})) for key in keys]
+
+
 OperationContextLoaders = {
     "vehicle_from_vehicle_type_loader": DataLoader(
         load_fn=batch_load_vehicle_from_vehicle_type
@@ -105,6 +117,7 @@ OperationContextLoaders = {
     "vehicle_type_from_line_loader": DataLoader(
         load_fn=batch_load_vehicle_type_from_line
     ),
+    "vehicle_from_line_loader": DataLoader(load_fn=batch_load_vehicle_from_line),
     "vehicle_status_count_from_vehicle_type_loader": DataLoader(
         load_fn=batch_load_vehicle_status_count_from_vehicle_type
     ),

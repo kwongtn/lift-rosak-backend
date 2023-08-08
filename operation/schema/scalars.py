@@ -47,6 +47,12 @@ class Line:
             "vehicle_type_from_line_loader"
         ].load(self.id)
 
+    @strawberry_django.field
+    async def vehicles(self, info: Info) -> List["Vehicle"]:
+        return await info.context.loaders["operation"]["vehicle_from_line_loader"].load(
+            self.id
+        )
+
 
 @strawberry_django.type(models.Asset)
 class Asset:
