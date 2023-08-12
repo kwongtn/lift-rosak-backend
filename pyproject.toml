@@ -11,6 +11,7 @@ packages = [{include = "rosak_backend"}]
 python = "^3.11"
 boto3 = "1.28.*"
 celery = {extras = ["pymemcache", "redis"], version = "^5.3.1"}
+discord-webhook = "1.2.*"
 django = "4.2.*"
 django-admin-rangefilter = "*"
 django-advanced-filters = "*"
