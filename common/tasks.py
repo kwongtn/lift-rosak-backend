@@ -280,15 +280,16 @@ def cleanup_add_width_height_to_media_task(self, *args, **kwargs):
         height__isnull=True,
     ).first()
 
-    imgur_client = ImgurClient(
-        client_id=settings.IMGUR_CONSUMER_ID,
-        client_secret=settings.IMGUR_CONSUMER_SECRET,
-        access_token=settings.IMGUR_ACCESS_TOKEN,
-        refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
-    )
+    if media:
+        imgur_client = ImgurClient(
+            client_id=settings.IMGUR_CONSUMER_ID,
+            client_secret=settings.IMGUR_CONSUMER_SECRET,
+            access_token=settings.IMGUR_ACCESS_TOKEN,
+            refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
+        )
 
-    metadata = imgur_client.get_image(media.file.name)
+        metadata = imgur_client.get_image(media.file.name)
 
-    media.width = metadata.width
-    media.height = metadata.height
-    media.save()
+        media.width = metadata.width
+        media.height = metadata.height
+        media.save()
