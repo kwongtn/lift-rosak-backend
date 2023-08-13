@@ -13,11 +13,14 @@ STORAGE = ImgurStorage()
 
 
 class Media(TimeStampedModel, UUIDModel, MediaMixin):
-    file = ImgurField(
+    file = ImgurField(  # TODO: Deprecate in future version
         upload_to=settings.IMGUR_ALBUM,
         storage=STORAGE,
         width_field="width",
         height_field="height",
+        null=True,
+        blank=True,
+        default=None,
     )
     width = models.IntegerField(
         null=True,
@@ -33,6 +36,31 @@ class Media(TimeStampedModel, UUIDModel, MediaMixin):
         to="common.User",
         on_delete=models.PROTECT,
     )
+
+    message_id = models.CharField(max_length=32, null=True, blank=True, default=None)
+    file_id = models.CharField(max_length=32, null=True, blank=True, default=None)
+    file_name = models.CharField(max_length=128, null=True, blank=True, default=None)
+    content_type = models.CharField(max_length=16, null=True, blank=True, default=None)
+
+    @property
+    def discord_suffix(self) -> str:
+        return (
+            f"{settings.DISCORD_MEDIA_WEBHOOK_CHANNEL}/{self.file_id}/{self.file_name}"
+        )
+
+    @property
+    def url(self) -> str:
+        if self.file_id is None or self.file_name is None:
+            return None
+
+        return f"https://cdn.discordapp.com/attachments/{self.discord_suffix}"
+
+    @property
+    def proxy_url(self) -> str:
+        if self.file_id is None or self.file_name is None:
+            return None
+
+        return f"https://media.discordapp.net/attachments/{self.discord_suffix}"
 
 
 def get_temporary_media_file_name(instance, filename: str) -> str:
@@ -72,6 +100,10 @@ class User(TimeStampedModel):
 
     def __str__(self) -> str:
         return self.firebase_id[:8]
+
+    @property
+    def display_name(self) -> str:
+        return self.nickname or self.firebase_id[:8]
 
 
 class UserClearance(TimeStampedModel):

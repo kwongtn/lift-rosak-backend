@@ -328,6 +328,12 @@ IMGUR_ACCESS_TOKEN = os.environ.get("IMGUR_ACCESS_TOKEN", "")
 IMGUR_ACCESS_TOKEN_REFRESH = os.environ.get("IMGUR_ACCESS_TOKEN_REFRESH", "")
 IMGUR_ALBUM = os.environ.get("IMGUR_ALBUM", "media")
 
+DISCORD_MEDIA_WEBHOOK_URL = os.environ.get("DISCORD_MEDIA_WEBHOOK_URL", "")
+DISCORD_MEDIA_WEBHOOK_CHANNEL = os.environ.get("DISCORD_MEDIA_WEBHOOK_CHANNEL", "")
+DISCORD_MEDIA_WEBHOOK_EMBED_COLOR = os.environ.get(
+    "DISCORD_MEDIA_WEBHOOK_EMBED_COLOR", "03b2f8"
+)
+
 
 # Celery
 # http://docs.celeryproject.org/en/latest/userguide/configuration.html

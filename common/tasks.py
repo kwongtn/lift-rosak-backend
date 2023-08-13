@@ -3,6 +3,7 @@ import logging
 import time
 
 import requests
+from discord_webhook import DiscordEmbed, DiscordWebhook
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -36,7 +37,9 @@ def check_temporary_media_nsfw(self, *, temporary_media_id: str | int):
         return
 
     if temp_media.status is not TemporaryMediaStatus.PENDING:
-        logger.info(f"Temporary media id of {temp_media.status}, skipping...")
+        logger.info(
+            f"Temporary media id {temp_media.id} of status {temp_media.status}, skipping..."
+        )
         return
 
     if temp_media.uploader.clearances.filter(
@@ -131,10 +134,52 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
 
             logger.info(exif)
 
+            image_response = requests.get(url=temp_media.file.url)
+            webhook = DiscordWebhook(url=settings.DISCORD_MEDIA_WEBHOOK_URL)
+            webhook.add_file(
+                file=image_response.content,
+                filename=temp_media.file.name.split("/")[-1],
+            )
+
+            title = "Unknown Event"
+            if temp_media.upload_type == TemporaryMediaType.SPOTTING_EVENT:
+                title = "Spotting"
+
+            elif (
+                temp_media.upload_type == TemporaryMediaType.INCIDENT_CALENDAR_INCIDENT
+            ):
+                title = "Calendar Incident"
+
+            embed = DiscordEmbed(
+                title=title,
+                color=settings.DISCORD_MEDIA_WEBHOOK_EMBED_COLOR,
+            )
+            embed.set_timestamp()
+            embed.set_author(name=temp_media.uploader.display_name)
+
+            for k, v in exif.items():
+                embed.add_embed_field(name=k, value=v)
+
+            # TODO: Add a link to the entry
+            # TODO: Add GPS coordinate data
+            webhook.add_embed(embed)
+            discord_res = webhook.execute().json()
+
+            logger.info(discord_res)
+
+            # If there is no attachment, there is a big issue
+            discord_attachment: dict = discord_res["attachments"][0]
+
             media = Media.objects.create(
                 created=temp_media.created,
                 file=ContentFile(temp_media.file.url, name=temp_media.file.name),
                 uploader_id=temp_media.uploader_id,
+                message_id=discord_res["id"],
+                file_id=discord_attachment.get("id", None),
+                file_name=discord_attachment.get("filename", None),
+                width=discord_attachment.get("width", None),
+                height=discord_attachment.get("height", None),
+                content_type=discord_attachment.get("content_type", None),
             )
 
             if temp_media.upload_type == TemporaryMediaType.SPOTTING_EVENT:
