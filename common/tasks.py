@@ -242,7 +242,7 @@ def cleanup_add_width_height_to_media_task(self, *args, **kwargs):
         refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
     )
 
-    metadata = imgur_client.get_image(media.name)
+    metadata = imgur_client.get_image(media.file.name)
 
     media.width = metadata.width
     media.height = metadata.height
