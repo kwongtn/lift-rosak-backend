@@ -226,7 +226,7 @@ def cleanup_temporary_media_task(self, *args, **kwargs):
         fail_count__lt=5,
         status__in=[TemporaryMediaStatus.PENDING],
     ).filter():
-        check_temporary_media_nsfw.apply_async(
+        convert_temporary_media_to_media_task.apply_async(
             kwargs={
                 "temporary_media_id": temp_media.id,
             }
