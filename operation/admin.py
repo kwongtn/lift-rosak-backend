@@ -100,6 +100,7 @@ class LineAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
     ]
     list_display = [
         "__str__",
+        "official_numbering",
         "code",
         "status",
         "display_name",
@@ -115,6 +116,9 @@ class LineAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "code",
         "display_name",
         "display_color",
+    ]
+    list_editable = [
+        "official_numbering",
     ]
 
 

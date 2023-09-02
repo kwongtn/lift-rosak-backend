@@ -8,6 +8,12 @@ from operation.enums import AssetStatus, AssetType, LineStatus, VehicleStatus
 
 
 class Line(TimeStampedModel):
+    official_numbering = models.CharField(
+        null=True,
+        blank=True,
+        default=None,
+        max_length=5,
+    )
     code = models.CharField(
         null=False,
         blank=False,
@@ -37,7 +43,10 @@ class Line(TimeStampedModel):
     )
 
     def __str__(self) -> str:
-        return f"{self.id} - {self.code}"
+        if self.official_numbering:
+            return f"{self.official_numbering} - {self.display_name}"
+        else:
+            return f"ID:{self.id} - {self.code}"
 
     class Meta:
         ordering = ["code"]
@@ -344,3 +353,15 @@ class VehicleType(models.Model):
             BTreeIndex(fields=["internal_name"]),
             BTreeIndex(fields=["display_name"]),
         ]
+
+
+# class VehicleSnapshot(TimeStampedModel):
+#     vehicle = models.ForeignKey(
+#         to="operation.Vehicle",
+#         null=False,
+#         blank=False,
+#         on_delete=models.CASCADE,
+#         related_name="snapshots",
+#         related_query_name="snapshot",
+#         db_constraint=False,
+#     )
