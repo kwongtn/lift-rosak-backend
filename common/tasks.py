@@ -158,7 +158,10 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
             embed.set_author(name=temp_media.uploader.display_name)
 
             for k, v in exif.items():
-                embed.add_embed_field(name=k, value=v)
+                embed.add_embed_field(
+                    name=k,
+                    value=v if isinstance(v, (str, int)) else str(v),
+                )
 
             # TODO: Add a link to the entry
             # TODO: Add GPS coordinate data
