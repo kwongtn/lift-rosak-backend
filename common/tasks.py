@@ -10,11 +10,14 @@ from django.db import transaction
 from django.utils.timezone import now
 from imgurpython import ImgurClient
 from PIL import ExifTags, Image, TiffImagePlugin
+from pillow_heif import register_heif_opener
 
 from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
 from incident.models import CalendarIncidentMedia
 from rosak.celery import app as celery_app
 from spotting.models import Event, EventMedia
+
+register_heif_opener()
 
 logger = logging.getLogger(__name__)
 

@@ -38,6 +38,7 @@ gunicorn = "*"
 imgurpython = {git = "https://github.com/BryanH/imgurpython.git", rev = "master"}
 pendulum = "*"
 pillow = "*"
+pillow-heif = "0.13.*"
 promise = "*"
 psycopg2-binary = "*"
 pymemcache = "*"
