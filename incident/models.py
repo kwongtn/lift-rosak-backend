@@ -100,6 +100,9 @@ class CalendarIncidentCategory(models.Model):
         unique=True,
     )
 
+    def __str__(self):
+        return self.name
+
 
 class CalendarIncidentChronology(TimeStampedModel, OrderedModel):
     calendar_incident = models.ForeignKey(

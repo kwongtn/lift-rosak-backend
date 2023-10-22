@@ -11,6 +11,7 @@ from ordered_model.admin import (
 from generic.views import GeometricForm
 from incident.models import (
     CalendarIncident,
+    CalendarIncidentCategory,
     CalendarIncidentChronology,
     StationIncident,
     VehicleIncident,
@@ -161,7 +162,23 @@ class CalendarIncidentChronologyAdmin(OrderedModelAdmin):
     autocomplete_fields = ("calendar_incident",)
 
 
+class CalendarIncidentCategoryAdmin(OrderedModelAdmin):
+    list_display = [
+        "__str__",
+        "name",
+    ]
+    ordering = (
+        "id",
+        "name",
+    )
+    search_fields = (
+        "id",
+        "name",
+    )
+
+
 admin.site.register(VehicleIncident, VehicleIncidentAdmin)
 admin.site.register(StationIncident, StationIncidentAdmin)
 admin.site.register(CalendarIncident, CalendarIncidentAdmin)
 admin.site.register(CalendarIncidentChronology, CalendarIncidentChronologyAdmin)
+admin.site.register(CalendarIncidentCategory, CalendarIncidentCategoryAdmin)
