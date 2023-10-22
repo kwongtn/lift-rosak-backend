@@ -9,7 +9,7 @@ services:
       - "5432:5432"
     volumes:
       - .:/code
-    restart: always
+    restart: unless-stopped
 
   web:
     image: nginx:alpine
@@ -22,10 +22,9 @@ services:
       - ./static:/code/static
     depends_on:
       - app
-    restart: always
+    restart: unless-stopped
 
-  app:
-    &app
+  app: &app
     build:
       context: .
       args:
@@ -41,13 +40,13 @@ services:
     depends_on:
       - db
       - redis
-    restart: always
+    restart: unless-stopped
 
   redis:
     image: redis:7
     ports:
       - "6379:6379"
-    restart: always
+    restart: unless-stopped
 
   celeryworker:
     <<: *app
@@ -55,7 +54,6 @@ services:
       - db
       - redis
     command: bash run_celery.sh
-    restart: no
 
   celerybeat:
     <<: *app
