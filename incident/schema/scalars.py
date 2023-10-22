@@ -4,6 +4,7 @@ from typing import List, Optional
 import strawberry
 import strawberry_django
 from asgiref.sync import sync_to_async
+from strawberry.types import Info
 
 from common.schema.scalars import MediaScalar
 from incident import models
@@ -67,11 +68,13 @@ class CalendarIncidentScalar:
     vehicles: List[Vehicle]
     stations: List[Station]
     categories: List[CalendarIncidentCategoryScalar]
-    medias: List["MediaScalar"]
     chronologies: List["CalendarIncidentChronologyScalar"]
 
-    # medias: List["Media"]
-    # TODO: Dataloaders
+    @strawberry_django.field
+    async def medias(self, info: Info) -> List["MediaScalar"]:
+        return await info.context.loaders["incident"][
+            "medias_from_calendar_incident_loader"
+        ].load(self.id)
 
     @strawberry.field
     @sync_to_async
