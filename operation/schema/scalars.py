@@ -173,6 +173,14 @@ class Vehicle:
             "incident_from_vehicle_loader"
         ].load(self.id)
 
+    @strawberry_django.field
+    async def spottings(
+        self, info: Info
+    ) -> List[Annotated["EventScalar", strawberry.lazy("spotting.schema.scalars")]]:
+        return await info.context.loaders["operation"][
+            "spottings_from_vehicle_loader"
+        ].load(self.id)
+
     @strawberry.field
     async def incident_count(self, info: Info) -> int:
         return await info.context.loaders["operation"][

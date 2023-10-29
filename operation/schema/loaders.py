@@ -78,6 +78,18 @@ async def batch_load_spotting_count_from_vehicle(keys):
     return [event_object.get(str(key[0]), None) for key in keys]
 
 
+async def batch_load_spottings_from_vehicle(keys):
+    spotting_events: List[Event] = Event.objects.filter(
+        vehicle_id__in=keys
+    ).prefetch_related("vehicle")
+
+    vehicle_dict = defaultdict(set)
+    async for spotting_event in spotting_events:
+        vehicle_dict[spotting_event.vehicle_id].add(spotting_event)
+
+    return [list(vehicle_dict.get(key, {})) for key in keys]
+
+
 async def batch_load_incident_from_vehicle(keys):
     vehicle_incidents: List[VehicleIncident] = VehicleIncident.objects.filter(
         vehicle_id__in=keys
@@ -129,6 +141,9 @@ OperationContextLoaders = {
     ),
     "spotting_count_from_vehicle_loader": DataLoader(
         load_fn=batch_load_spotting_count_from_vehicle
+    ),
+    "spottings_from_vehicle_loader": DataLoader(
+        load_fn=batch_load_spottings_from_vehicle
     ),
     "incident_from_vehicle_loader": DataLoader(
         load_fn=batch_load_incident_from_vehicle
