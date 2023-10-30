@@ -1,13 +1,18 @@
 import dataclasses
 from datetime import date, timedelta
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
+import pendulum
 from asgiref.sync import sync_to_async
+from django.db.models import Count, Min
 from django.http import HttpRequest
 from firebase_admin import auth
 
 from common.models import User
 from generic.schema.enums import DateGroupings
+
+if TYPE_CHECKING:
+    from django.db.models import Model
 
 
 @dataclasses.dataclass
@@ -101,3 +106,130 @@ def get_result_comparison_tuple(
         return_results.append(to_append)
 
     return return_results
+
+
+def get_combinations(groupbys):
+    buffer = []
+    for k, arr in groupbys.items():
+        temp_buffer = []
+        for v in arr:
+            if buffer:
+                for b in buffer:
+                    temp_buffer.append({**b, k: v})
+            else:
+                temp_buffer.append({k: v})
+
+        buffer = temp_buffer
+
+    return buffer
+
+
+def get_trends(
+    groupby_field: str,
+    count_model: "Model",
+    #
+    filters={},
+    additional_groupby={},
+    start: date = None,
+    end: date = date.today(),
+    date_group: DateGroupings = DateGroupings.DAY,
+    free_range: bool = False,
+    add_zero: bool = False,
+):
+    if start is None:
+        start = get_default_start_time(type=date_group)
+
+    (group_strs, range_type) = get_group_strs(
+        grouping=date_group,
+        prefix=f"{groupby_field}__",
+    )
+
+    for k in additional_groupby.keys():
+        group_strs.append(k)
+
+    filter_params = {
+        **filters,
+        f"{groupby_field}__lte": end,
+        f"{groupby_field}__gte": start,
+    }
+
+    if free_range:
+        filter_params.pop(f"{groupby_field}__lte", None)
+        filter_params.pop(f"{groupby_field}__gte", None)
+
+    qs = count_model.objects.filter(**filter_params)
+
+    results = list(
+        qs.values(*group_strs)
+        .annotate(count=Count("id"))
+        .values(*group_strs, "count")
+        .order_by(*[f"-{group_str}" for group_str in group_strs])
+    )
+    print(results)
+
+    period = pendulum.period(
+        qs.aggregate(min=Min(groupby_field))["min"] if free_range else start,
+        date.today() if free_range else end,
+    )
+    range = period.range(range_type)
+
+    grouping__year = results[0].get(f"{groupby_field}__year", None)
+    grouping__month = results[0].get(f"{groupby_field}__month", None)
+    grouping__day = results[0].get(f"{groupby_field}__day", None)
+
+    if add_zero:
+        result_types = get_result_comparison_tuple(
+            results=results,
+            additional_params=[k for k in additional_groupby.keys()],
+            prefix=f"{groupby_field}__",
+        )
+
+        combinations = get_combinations(additional_groupby)
+        print(combinations)
+
+        for elem in range:
+            year_val = elem.year if grouping__year is not None else None
+            month_val = elem.month if grouping__month is not None else None
+            day_val = elem.day if grouping__day is not None else None
+
+            if not combinations:
+                if (
+                    year_val,
+                    month_val,
+                    day_val,
+                ) not in result_types:
+                    results.append(
+                        {
+                            f"{groupby_field}__year": year_val,
+                            f"{groupby_field}__month": month_val,
+                            f"{groupby_field}__day": day_val,
+                            "count": 0,
+                        }
+                    )
+
+            # Else
+            for val in combinations:
+                if (
+                    year_val,
+                    month_val,
+                    day_val,
+                    *val.items(),
+                ) not in result_types:
+                    results.append(
+                        {
+                            f"{groupby_field}__year": year_val,
+                            f"{groupby_field}__month": month_val,
+                            f"{groupby_field}__day": day_val,
+                            **val,
+                            "count": 0,
+                        }
+                    )
+
+    for result in results:
+        result["date_key"] = get_date_key(
+            year=result[f"{groupby_field}__year"],
+            month=result.get(f"{groupby_field}__month", None),
+            day=result.get(f"{groupby_field}__day", None),
+        )
+
+    return sorted(results, key=lambda d: f'{d["date_key"]}')

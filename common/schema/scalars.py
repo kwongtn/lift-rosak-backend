@@ -1,10 +1,9 @@
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Annotated, List, Optional
 
-import pendulum
 import strawberry
 import strawberry_django
-from django.db.models import Count, F, Min
+from django.db.models import Count, F
 from strawberry.types import Info
 
 from common import models
@@ -15,12 +14,7 @@ from common.schema.types import (
     UserSpottingTrend,
     WithMostEntriesData,
 )
-from common.utils import (
-    get_date_key,
-    get_default_start_time,
-    get_group_strs,
-    get_result_comparison_tuple,
-)
+from common.utils import get_date_key, get_default_start_time, get_trends
 from generic.schema.enums import DateGroupings
 from operation import models as operation_models
 from rosak.permissions import IsAdmin
@@ -167,96 +161,20 @@ class UserScalar:
         if end is strawberry.UNSET:
             end = date.today()
 
-        (group_strs, range_type) = get_group_strs(
-            grouping=date_group, prefix="spotting_date__"
+        results = get_trends(
+            groupby_field="spotting_date",
+            count_model=spotting_models.Event,
+            filters={
+                "reporter_id": self.id,
+            },
+            add_zero=True,
+            additional_groupby={
+                "type": [event_type.value for event_type in SpottingEventType],
+            }
+            if type_group
+            else {},
+            free_range=free_range,
         )
-
-        if type_group:
-            group_strs.append("type")
-
-        filter_params = {
-            "reporter_id": self.id,
-            "spotting_date__lte": end,
-            "spotting_date__gte": start,
-        }
-
-        if free_range:
-            filter_params.pop("spotting_date__lte", None)
-            filter_params.pop("spotting_date__gte", None)
-
-        qs = spotting_models.Event.objects.filter(**filter_params)
-
-        results = list(
-            qs.values(*group_strs)
-            .annotate(count=Count("id"))
-            .values(*group_strs, "count")
-            .order_by(*[f"-{group_str}" for group_str in group_strs])
-        )
-
-        period = pendulum.period(
-            qs.aggregate(min=Min("spotting_date"))["min"] if free_range else start,
-            date.today() if free_range else end,
-        )
-        range = period.range(range_type)
-
-        spotting_date__year = results[0].get("spotting_date__year", None)
-        spotting_date__month = results[0].get("spotting_date__month", None)
-        spotting_date__day = results[0].get("spotting_date__day", None)
-
-        if not type_group:
-            result_dates = get_result_comparison_tuple(
-                results=results,
-                prefix="spotting_date__",
-            )
-
-            for elem in range:
-                year_val = elem.year if spotting_date__year is not None else None
-                month_val = elem.month if spotting_date__month is not None else None
-                day_val = elem.day if spotting_date__day is not None else None
-
-                if (year_val, month_val, day_val) not in result_dates:
-                    results.append(
-                        {
-                            "spotting_date__year": year_val,
-                            "spotting_date__month": month_val,
-                            "spotting_date__day": day_val,
-                            "count": 0,
-                        }
-                    )
-
-        else:
-            result_types = get_result_comparison_tuple(
-                results=results,
-                additional_params=["type"],
-                prefix="spotting_date__",
-            )
-            event_types = [event_type.value for event_type in SpottingEventType]
-
-            for elem in range:
-                year_val = elem.year if spotting_date__year is not None else None
-                month_val = elem.month if spotting_date__month is not None else None
-                day_val = elem.day if spotting_date__day is not None else None
-
-                for event_type in event_types:
-                    if (year_val, month_val, day_val, event_type) not in result_types:
-                        results.append(
-                            {
-                                "spotting_date__year": year_val,
-                                "spotting_date__month": month_val,
-                                "spotting_date__day": day_val,
-                                "type": event_type,
-                                "count": 0,
-                            }
-                        )
-
-        for result in results:
-            result["date_key"] = get_date_key(
-                year=result["spotting_date__year"],
-                month=result.get("spotting_date__month", None),
-                day=result.get("spotting_date__day", None),
-            )
-
-        results = sorted(results, key=lambda d: f'{d["date_key"]}')
 
         return [
             UserSpottingTrend(
