@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Annotated, List, Optional
 
 import strawberry
 import strawberry_django
-from django.db.models import Count, F
+from django.db.models import Count, F, Q
 from strawberry.types import Info
 
 from common import models
@@ -164,9 +164,7 @@ class UserScalar:
         results = get_trends(
             groupby_field="spotting_date",
             count_model=spotting_models.Event,
-            filters={
-                "reporter_id": self.id,
-            },
+            filters=Q(reporter_id=self.id),
             add_zero=True,
             additional_groupby={
                 "type": [event_type.value for event_type in SpottingEventType],

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, List, Tuple
 
 import pendulum
 from asgiref.sync import sync_to_async
-from django.db.models import Count, Min
+from django.db.models import Count, Min, Q
 from django.http import HttpRequest
 from firebase_admin import auth
 
@@ -128,7 +128,7 @@ def get_trends(
     groupby_field: str,
     count_model: "Model",
     #
-    filters={},
+    filters: Q = Q(),
     additional_groupby={},
     start: date = None,
     end: date = date.today(),
@@ -148,7 +148,6 @@ def get_trends(
         group_strs.append(k)
 
     filter_params = {
-        **filters,
         f"{groupby_field}__lte": end,
         f"{groupby_field}__gte": start,
     }
@@ -157,7 +156,7 @@ def get_trends(
         filter_params.pop(f"{groupby_field}__lte", None)
         filter_params.pop(f"{groupby_field}__gte", None)
 
-    qs = count_model.objects.filter(**filter_params)
+    qs = count_model.objects.filter(filters).filter(**filter_params)
 
     results = list(
         qs.values(*group_strs)
