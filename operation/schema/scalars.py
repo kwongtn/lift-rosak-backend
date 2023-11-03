@@ -6,9 +6,15 @@ import strawberry_django
 from django.db.models import Q
 from strawberry.types import Info
 
+from common.utils import get_default_start_time, get_trends
+from generic.schema.enums import DateGroupings
 from generic.schema.scalars import GeoPoint
 from operation import models
+from operation import models as operation_models
 from operation.enums import VehicleStatus
+from operation.schema.types import LineVehicleSpottingTrend, VehicleSpottingTrend
+from spotting import models as spotting_models
+from spotting.enums import SpottingEventType
 
 
 @strawberry_django.type(models.Station)
@@ -52,6 +58,57 @@ class Line:
         return await info.context.loaders["operation"]["vehicle_from_line_loader"].load(
             self.id
         )
+
+    @strawberry_django.field
+    def vehicle_spotting_trends(
+        self,
+        start: Optional[date] = strawberry.UNSET,
+        end: Optional[date] = strawberry.UNSET,
+        date_group: Optional[DateGroupings] = DateGroupings.DAY,
+        type_group: Optional[bool] = False,
+        free_range: Optional[bool] = False,
+        add_zero: Optional[bool] = True,
+    ) -> List["LineVehicleSpottingTrend"]:
+        if start is strawberry.UNSET:
+            start = get_default_start_time(type=date_group)
+
+        if end is strawberry.UNSET:
+            end = date.today()
+
+        vehicles = operation_models.Vehicle.objects.filter(lines=self.id).in_bulk()
+
+        results = get_trends(
+            start=start,
+            end=end,
+            date_group=date_group,
+            groupby_field="spotting_date",
+            count_model=spotting_models.Event,
+            filters=Q(vehicle__lines=self.id),
+            add_zero=add_zero,
+            additional_groupby={
+                "type": [event_type.value for event_type in SpottingEventType],
+                "vehicle_id": [k for k in vehicles.keys()],
+            }
+            if type_group
+            else {
+                "vehicle_id": [k for k in vehicles.keys()],
+            },
+            free_range=free_range,
+        )
+
+        return [
+            LineVehicleSpottingTrend(
+                date_key=value["date_key"],
+                count=value["count"],
+                vehicle=vehicles[value["vehicle_id"]],
+                event_type=value.get("type", None),
+                year=value.get("spotting_date__year", None),
+                month=value.get("spotting_date__month", None),
+                week=value.get("spotting_date__week", None),
+                day=value.get("spotting_date__day", None),
+            )
+            for value in results
+        ]
 
 
 @strawberry_django.type(models.Asset)
@@ -198,3 +255,49 @@ class Vehicle:
                 "spotting_count_from_vehicle_loader"
             ].load((self.id, Q(vehicle_id=self.id)))
         ) > 0
+
+    @strawberry_django.field
+    def spotting_trends(
+        self,
+        start: Optional[date] = strawberry.UNSET,
+        end: Optional[date] = strawberry.UNSET,
+        date_group: Optional[DateGroupings] = DateGroupings.DAY,
+        type_group: Optional[bool] = False,
+        free_range: Optional[bool] = False,
+        add_zero: Optional[bool] = True,
+    ) -> List["VehicleSpottingTrend"]:
+        if start is strawberry.UNSET:
+            start = get_default_start_time(type=date_group)
+
+        if end is strawberry.UNSET:
+            end = date.today()
+            end.isocalendar()
+
+        results = get_trends(
+            start=start,
+            end=end,
+            date_group=date_group,
+            groupby_field="spotting_date",
+            count_model=spotting_models.Event,
+            filters=Q(vehicle_id=self.id),
+            add_zero=add_zero,
+            additional_groupby={
+                "type": [event_type.value for event_type in SpottingEventType],
+            }
+            if type_group
+            else {},
+            free_range=free_range,
+        )
+
+        return [
+            VehicleSpottingTrend(
+                date_key=value["date_key"],
+                count=value["count"],
+                event_type=value.get("type", None),
+                year=value.get("spotting_date__year", None),
+                month=value.get("spotting_date__month", None),
+                week=value.get("spotting_date__week", None),
+                day=value.get("spotting_date__day", None),
+            )
+            for value in results
+        ]

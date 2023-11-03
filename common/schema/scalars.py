@@ -154,7 +154,7 @@ class UserScalar:
         date_group: Optional[DateGroupings] = DateGroupings.DAY,
         type_group: Optional[bool] = False,
         free_range: Optional[bool] = False,
-    ) -> List[UserSpottingTrend]:
+    ) -> List["UserSpottingTrend"]:
         if start is strawberry.UNSET:
             start = get_default_start_time(type=date_group)
 
@@ -181,6 +181,7 @@ class UserScalar:
                 event_type=value.get("type", None),
                 year=value.get("spotting_date__year", None),
                 month=value.get("spotting_date__month", None),
+                week=value.get("spotting_date__week", None),
                 day=value.get("spotting_date__day", None),
             )
             for value in results

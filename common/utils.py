@@ -81,6 +81,7 @@ def get_group_strs(grouping: DateGroupings, prefix: str = "") -> Tuple[List[str]
                 f"{prefix}year",
                 f"{prefix}month",
                 f"{prefix}day",
+                f"{prefix}week",
             ],
             "days",
         )
@@ -164,17 +165,12 @@ def get_trends(
         .values(*group_strs, "count")
         .order_by(*[f"-{group_str}" for group_str in group_strs])
     )
-    print(results)
 
     period = pendulum.period(
         qs.aggregate(min=Min(groupby_field))["min"] if free_range else start,
         date.today() if free_range else end,
     )
     range = period.range(range_type)
-
-    grouping__year = results[0].get(f"{groupby_field}__year", None)
-    grouping__month = results[0].get(f"{groupby_field}__month", None)
-    grouping__day = results[0].get(f"{groupby_field}__day", None)
 
     if add_zero:
         result_types = get_result_comparison_tuple(
@@ -184,12 +180,19 @@ def get_trends(
         )
 
         combinations = get_combinations(additional_groupby)
-        print(combinations)
+        display_year = date_group in [
+            DateGroupings.DAY,
+            DateGroupings.MONTH,
+            DateGroupings.YEAR,
+        ]
+        display_month = date_group in [DateGroupings.DAY, DateGroupings.MONTH]
+        display_day = date_group in [DateGroupings.DAY]
 
         for elem in range:
-            year_val = elem.year if grouping__year is not None else None
-            month_val = elem.month if grouping__month is not None else None
-            day_val = elem.day if grouping__day is not None else None
+            year_val = elem.year if display_year else None
+            month_val = elem.month if display_month else None
+            day_val = elem.day if display_day else None
+            week_val = elem.week_of_month if display_day else None
 
             if not combinations:
                 if (
@@ -202,6 +205,7 @@ def get_trends(
                             f"{groupby_field}__year": year_val,
                             f"{groupby_field}__month": month_val,
                             f"{groupby_field}__day": day_val,
+                            f"{groupby_field}__week": week_val,
                             "count": 0,
                         }
                     )
@@ -219,6 +223,7 @@ def get_trends(
                             f"{groupby_field}__year": year_val,
                             f"{groupby_field}__month": month_val,
                             f"{groupby_field}__day": day_val,
+                            f"{groupby_field}__week": week_val,
                             **val,
                             "count": 0,
                         }
