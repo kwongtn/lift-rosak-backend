@@ -4,7 +4,13 @@ from django.contrib.postgres.indexes import BTreeIndex
 from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
 
-from operation.enums import AssetStatus, AssetType, LineStatus, VehicleStatus
+from operation.enums import (
+    AssetStatus,
+    AssetType,
+    LineStatus,
+    VehicleStatus,
+    WheelStatus,
+)
 
 
 class Line(TimeStampedModel):
@@ -266,6 +272,14 @@ class Vehicle(models.Model):
         to="operation.Line",
         through="operation.VehicleLine",
         related_name="line_vehicles",
+    )
+
+    wheel_status = TextChoicesField(
+        choices_enum=WheelStatus,
+        max_length=16,
+        blank=True,
+        null=True,
+        default=None,
     )
 
     notes = models.TextField(

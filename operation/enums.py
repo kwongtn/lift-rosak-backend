@@ -34,3 +34,11 @@ class LineStatus(models.TextChoices):
     PARTIAL_DISRUPTION = "PARTIAL_DISRUPTION"
 
     TOTAL_DISRUPTION = "TOTAL_DISRUPTION"
+
+
+class WheelStatus(models.TextChoices):
+    FRESH = "FRESH"
+    NEAR_PERFECT = "NEAR_PERFECT"
+    FLAT = "FLAT"
+    WORN_OUT = "WORN_OUT"
+    WORRYING = "WORRYING"
