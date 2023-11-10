@@ -19,7 +19,6 @@ def forwards_func(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("operation", "0004_vehicleline_many_to_many_db0"),
     ]

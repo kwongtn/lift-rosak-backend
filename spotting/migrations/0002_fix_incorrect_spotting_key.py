@@ -21,7 +21,6 @@ def fix_stations(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("spotting", "0001_initial"),
     ]

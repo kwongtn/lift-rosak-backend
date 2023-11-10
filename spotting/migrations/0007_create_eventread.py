@@ -7,7 +7,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("common", "0001_initial"),
         ("spotting", "0006_event_spotting_ev_vehicle_86e837_btree"),

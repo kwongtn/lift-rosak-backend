@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("spotting", "0003_event_is_anonymous_alter_event_status"),
     ]

@@ -36,8 +36,9 @@ async def batch_load_vehicle_status_count_from_vehicle_type(keys):
     # Keys in format (vehicle_type_id, status)
     vehicle_object = await Vehicle.objects.aaggregate(
         **{
-            str(key[0])
-            + str(key[1]): Count("id", filter=Q(vehicle_type_id=key[0], status=key[1]))
+            str(key[0]) + str(key[1]): Count(
+                "id", filter=Q(vehicle_type_id=key[0], status=key[1])
+            )
             for key in keys
         }
     )

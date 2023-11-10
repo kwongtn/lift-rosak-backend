@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("operation", "0006_vehicleline_many_to_many_db1"),
     ]

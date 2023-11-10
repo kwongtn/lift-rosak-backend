@@ -5,7 +5,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("operation", "0003_add_vehicle_vehicle_type_related_name"),
     ]

@@ -5,7 +5,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("spotting", "0010_remove_event_spotting_event_value_relevant_and_more"),
     ]

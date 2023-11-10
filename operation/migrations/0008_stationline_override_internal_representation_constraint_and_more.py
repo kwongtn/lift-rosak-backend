@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("operation", "0007_alter_station_options_vehicle_nickname_and_more"),
     ]
