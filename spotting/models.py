@@ -6,7 +6,7 @@ from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
 
 from generic.models import WebLocationModel
-from spotting.enums import SpottingEventType, SpottingVehicleStatus
+from spotting.enums import SpottingEventType, SpottingVehicleStatus, WheelStatus
 
 
 class LocationEvent(WebLocationModel):
@@ -52,6 +52,14 @@ class Event(TimeStampedModel):
     type = TextChoicesField(
         choices_enum=SpottingEventType,
         max_length=32,
+    )
+
+    wheel_status = TextChoicesField(
+        choices_enum=WheelStatus,
+        max_length=16,
+        blank=True,
+        null=True,
+        default=None,
     )
 
     is_anonymous = models.BooleanField(default=False)

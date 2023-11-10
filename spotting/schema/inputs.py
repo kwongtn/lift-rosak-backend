@@ -16,6 +16,7 @@ class EventInput:
     run_number: Optional[str]
     status: strawberry.auto
     type: strawberry.auto
+    wheel_status: Optional[str]
     origin_station: Optional[strawberry.ID]
     destination_station: Optional[strawberry.ID]
     location: Optional["WebLocationInput"]

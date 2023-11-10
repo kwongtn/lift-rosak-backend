@@ -112,6 +112,7 @@ class SpottingMutations:
             destination_station_id=destination_station_id,
             is_anonymous=is_anonymous,
             run_number=input.run_number,
+            wheel_status=input.wheel_status,
         )
 
         if input.location != strawberry.UNSET:
@@ -165,6 +166,7 @@ class SpottingMutations:
             run_number=event.run_number,
             origin_station=event.origin_station,
             destination_station=event.destination_station,
+            wheel_status=event.wheel_status,
         )
 
     @strawberry.mutation(

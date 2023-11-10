@@ -34,6 +34,7 @@ class EventScalar:
     notes: str
     status: strawberry.auto
     type: strawberry.auto
+    wheel_status: strawberry.auto
     run_number: Optional[str]
     origin_station: Optional["Station"]
     destination_station: Optional["Station"]

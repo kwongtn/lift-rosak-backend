@@ -18,3 +18,11 @@ class SpottingVehicleStatus(models.TextChoices):
     NOT_SPOTTED = "NOT_SPOTTED"
     MARRIED = "MARRIED"
     UNKNOWN = "UNKNOWN"
+
+
+class WheelStatus(models.TextChoices):
+    FRESH = "FRESH"
+    NEAR_PERFECT = "NEAR_PERFECT"
+    FLAT = "FLAT"
+    WORN_OUT = "WORN_OUT"
+    WORRYING = "WORRYING"
