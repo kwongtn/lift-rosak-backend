@@ -71,6 +71,7 @@ class SpottingMutations:
         is_anonymous = (
             input.is_anonymous if input.is_anonymous != strawberry.UNSET else False
         )
+        wheel_status = input.wheel_status if input.notes != strawberry.UNSET else None
 
         origin_station_id = None
         destination_station_id = None
@@ -112,7 +113,7 @@ class SpottingMutations:
             destination_station_id=destination_station_id,
             is_anonymous=is_anonymous,
             run_number=input.run_number,
-            wheel_status=input.wheel_status,
+            wheel_status=wheel_status,
         )
 
         if input.location != strawberry.UNSET:
