@@ -240,7 +240,7 @@ def get_trends(
                     month_val,
                     week_of_year_val,
                     day_val,
-                    *val.items(),
+                    *val.values(),
                 ) not in result_types:
                     results.append(
                         {
