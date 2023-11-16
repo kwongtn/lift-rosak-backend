@@ -11,8 +11,12 @@ class UserSpottingTrend:
     date_key: str
     year: int
     month: Optional[int]
-    week: Optional[int]
     day: Optional[int]
+    day_of_week: Optional[int]
+    week_of_month: Optional[int]
+    week_of_year: Optional[int]
+    is_last_day_of_month: Optional[bool]
+    is_last_week_of_month: Optional[bool]
     event_type: Optional[str]
     count: int
 

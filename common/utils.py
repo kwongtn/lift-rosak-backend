@@ -14,6 +14,9 @@ from generic.schema.enums import DateGroupings
 if TYPE_CHECKING:
     from django.db.models import Model
 
+pendulum.week_starts_at(pendulum.SUNDAY)
+pendulum.week_ends_at(pendulum.SATURDAY)
+
 
 @dataclasses.dataclass
 class FirebaseUser:
@@ -36,8 +39,11 @@ class FirebaseUser:
         return user
 
 
-def get_date_key(year: int, month: int = None, day: int = None):
+def get_date_key(year: int, month: int = None, week: int = None, day: int = None):
     return_str = f"{year:04}"
+
+    if week:
+        return f"{return_str}-W{week:02}"
 
     if month is not None:
         return_str += f"-{month:02}"
@@ -63,6 +69,10 @@ def get_default_start_time(type: DateGroupings) -> date:
         today.day = 1
         return today - timedelta(days=1500)  # 50 months
 
+    elif type == DateGroupings.WEEK:
+        today.day = today.day - today.weekday()
+        return today - timedelta(days=56)  # 8 weeks
+
     elif type == DateGroupings.DAY:
         return today - timedelta(days=365)
 
@@ -75,13 +85,14 @@ def get_group_strs(grouping: DateGroupings, prefix: str = "") -> Tuple[List[str]
         return ([f"{prefix}year"], "years")
     elif grouping == DateGroupings.MONTH:
         return ([f"{prefix}year", f"{prefix}month"], "months")
+    elif grouping == DateGroupings.WEEK:
+        return ([f"{prefix}year", f"{prefix}week"], "weeks")
     elif grouping == DateGroupings.DAY:
         return (
             [
                 f"{prefix}year",
                 f"{prefix}month",
                 f"{prefix}day",
-                f"{prefix}week",
             ],
             "days",
         )
@@ -99,6 +110,7 @@ def get_result_comparison_tuple(
         to_append = (
             result.get(f"{prefix}year", None),
             result.get(f"{prefix}month", None),
+            result.get(f"{prefix}week", None),
             result.get(f"{prefix}day", None),
         )
         for param in additional_params:
@@ -183,49 +195,59 @@ def get_trends(
         display_year = date_group in [
             DateGroupings.DAY,
             DateGroupings.MONTH,
+            DateGroupings.WEEK,
             DateGroupings.YEAR,
         ]
         display_month = date_group in [DateGroupings.DAY, DateGroupings.MONTH]
+        display_week = date_group in [DateGroupings.WEEK]
         display_day = date_group in [DateGroupings.DAY]
 
         for elem in range:
             year_val = elem.year if display_year else None
             month_val = elem.month if display_month else None
+            week_of_year_val = elem.week_of_year if display_week else None
             day_val = elem.day if display_day else None
-            week_val = elem.week_of_month if display_day else None
 
             if not combinations:
+                to_append = {
+                    f"{groupby_field}__year": year_val,
+                    "count": 0,
+                }
                 if (
                     year_val,
                     month_val,
+                    week_of_year_val,
                     day_val,
                 ) not in result_types:
                     results.append(
                         {
-                            f"{groupby_field}__year": year_val,
+                            **to_append,
                             f"{groupby_field}__month": month_val,
+                            f"{groupby_field}__week": week_of_year_val,
                             f"{groupby_field}__day": day_val,
-                            f"{groupby_field}__week": week_val,
-                            "count": 0,
                         }
                     )
 
             # Else
             for val in combinations:
+                to_append = {
+                    **val,
+                    f"{groupby_field}__year": year_val,
+                    "count": 0,
+                }
                 if (
                     year_val,
                     month_val,
+                    week_of_year_val,
                     day_val,
                     *val.items(),
                 ) not in result_types:
                     results.append(
                         {
-                            f"{groupby_field}__year": year_val,
+                            **to_append,
                             f"{groupby_field}__month": month_val,
+                            f"{groupby_field}__week": week_of_year_val,
                             f"{groupby_field}__day": day_val,
-                            f"{groupby_field}__week": week_val,
-                            **val,
-                            "count": 0,
                         }
                     )
 
@@ -234,6 +256,30 @@ def get_trends(
             year=result[f"{groupby_field}__year"],
             month=result.get(f"{groupby_field}__month", None),
             day=result.get(f"{groupby_field}__day", None),
+            week=result[f"{groupby_field}__week"]
+            if date_group == DateGroupings.WEEK
+            else None,
         )
+
+        if result.get(f"{groupby_field}__day", None):
+            result_date = pendulum.date(
+                year=result[f"{groupby_field}__year"],
+                month=result[f"{groupby_field}__month"],
+                day=result[f"{groupby_field}__day"],
+            )
+            result["day_of_week"] = result_date.day_of_week
+
+            if result_date.day_of_week == pendulum.SUNDAY:
+                new_date = result_date + timedelta(days=6)
+            else:
+                new_date = result_date
+            result["week_of_month"] = new_date.week_of_month
+            result["week_of_year"] = new_date.week_of_year
+
+            new_date = result_date + timedelta(days=1)
+            result["is_last_day_of_month"] = new_date.month != result_date.month
+
+            new_date = result_date + timedelta(days=7)
+            result["is_last_week_of_month"] = new_date.month != result_date.month
 
     return sorted(results, key=lambda d: f'{d["date_key"]}')
