@@ -24,7 +24,7 @@ class Migration(migrations.Migration):
                     ("WORN_OUT", "Worn Out"),
                     ("WORRYING", "Worrying"),
                 ],
-                choices_enum=spotting.enums.WheelStatus,
+                choices_enum=spotting.enums.SpottingWheelStatus,
                 default=None,
                 max_length=16,
                 null=True,
