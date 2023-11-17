@@ -20,7 +20,7 @@ class SpottingVehicleStatus(models.TextChoices):
     UNKNOWN = "UNKNOWN"
 
 
-class WheelStatus(models.TextChoices):
+class SpottingWheelStatus(models.TextChoices):
     FRESH = "FRESH"
     NEAR_PERFECT = "NEAR_PERFECT"
     FLAT = "FLAT"

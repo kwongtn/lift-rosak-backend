@@ -203,6 +203,7 @@ class Vehicle:
     vehicle_type: "VehicleType" = strawberry_django.field(
         select_related=["vehicle_type"]
     )
+    wheel_status: strawberry.auto
 
     @strawberry_django.field
     async def last_spotting_date(self, info: Info) -> Optional[date]:
