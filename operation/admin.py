@@ -189,11 +189,13 @@ class VehicleAdmin(OrderedInlineModelAdminMixin, admin.ModelAdmin):
         "identification_no",
         "vehicle_type",
         "status",
+        "wheel_status",
         "in_service_since",
     ]
     list_filter = [
         "vehicle_type",
         "status",
+        "wheel_status",
         "in_service_since",
         "vehicle_lines__display_name",
     ]
@@ -204,6 +206,7 @@ class VehicleAdmin(OrderedInlineModelAdminMixin, admin.ModelAdmin):
     ]
     list_editable = [
         "status",
+        "wheel_status",
     ]
     autocomplete_fields = ("vehicle_type",)
 
