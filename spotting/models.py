@@ -6,7 +6,7 @@ from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
 
 from generic.models import WebLocationModel
-from spotting.enums import SpottingEventType, SpottingVehicleStatus, WheelStatus
+from spotting.enums import SpottingEventType, SpottingVehicleStatus, SpottingWheelStatus
 
 
 class LocationEvent(WebLocationModel):
@@ -55,7 +55,7 @@ class Event(TimeStampedModel):
     )
 
     wheel_status = TextChoicesField(
-        choices_enum=WheelStatus,
+        choices_enum=SpottingWheelStatus,
         max_length=16,
         blank=True,
         null=True,
