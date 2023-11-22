@@ -42,3 +42,38 @@ class LineVehiclesSpottingTrend(APIView):
             sorted(results, key=lambda d: f'{d["vehicle"]}'),
             status=status.HTTP_200_OK,
         )
+
+
+class VehicleSpottingTrend(APIView):
+    def get(self, request: Request | HttpRequest, vehicle_id, start_date, end_date):
+        trends = get_trends(
+            start=pendulum.parse(start_date),
+            end=pendulum.parse(end_date),
+            date_group=DateGroupings.DAY,
+            groupby_field="spotting_date",
+            count_model=spotting_models.Event,
+            filters=Q(vehicle_id=vehicle_id),
+            add_zero=True,
+            additional_groupby={},
+            free_range=False,
+        )
+
+        results = [
+            {
+                "vehicle": operation_models.Vehicle.objects.get(
+                    id=vehicle_id
+                ).identification_no,
+                "count": trend["count"],
+                "dateKey": trend["date_key"],
+                "dayOfWeek": trend["day_of_week"],
+                "weekOfYear": trend["week_of_year"],
+                "isLastDayOfMonth": trend["is_last_day_of_month"],
+                "isLastWeekOfMonth": trend["is_last_week_of_month"],
+            }
+            for trend in trends
+        ]
+
+        return Response(
+            sorted(results, key=lambda d: f'{d["dateKey"]}'),
+            status=status.HTTP_200_OK,
+        )
