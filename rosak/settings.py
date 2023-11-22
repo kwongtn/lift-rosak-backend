@@ -239,6 +239,10 @@ CACHES = {
         "OPTIONS": {
             "db": REDIS_DB,
         },
+    }
+    if not DEBUG
+    else {
+        "BACKEND": "django.core.cache.backends.dummy.DummyCache",
     },
     "celery": {
         "BACKEND": "django.core.cache.backends.db.DatabaseCache",

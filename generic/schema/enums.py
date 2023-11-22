@@ -7,4 +7,5 @@ import strawberry
 class DateGroupings(Enum):
     YEAR = "YEAR"
     MONTH = "MONTH"
+    WEEK = "WEEK"
     DAY = "DAY"

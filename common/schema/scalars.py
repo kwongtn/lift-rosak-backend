@@ -181,8 +181,12 @@ class UserScalar:
                 event_type=value.get("type", None),
                 year=value.get("spotting_date__year", None),
                 month=value.get("spotting_date__month", None),
-                week=value.get("spotting_date__week", None),
                 day=value.get("spotting_date__day", None),
+                day_of_week=value.get("day_of_week", None),
+                week_of_month=value.get("week_of_month", None),
+                week_of_year=value.get("week_of_year", None),
+                is_last_day_of_month=value.get("is_last_day_of_month", None),
+                is_last_week_of_month=value.get("is_last_week_of_month", None),
             )
             for value in results
         ]

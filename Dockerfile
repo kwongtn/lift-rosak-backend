@@ -6,7 +6,7 @@ ENV GOOGLE_APPLICATION_CREDENTIALS /google-application-credential.json
 RUN apt-get update && apt-get install -y \
     gdal-bin git gcc python3-dev
 
-ENV POETRY_VERSION 1.6.1
+ENV POETRY_VERSION 1.7.1
 RUN pip install "poetry==$POETRY_VERSION"
 
 RUN mkdir /code
