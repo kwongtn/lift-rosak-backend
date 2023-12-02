@@ -36,13 +36,21 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "local")
 
 if DEBUG is not True:
     import sentry_sdk
+    from sentry_sdk.integrations.celery import CeleryIntegration
     from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.integrations.strawberry import StrawberryIntegration
 
     sentry_sdk.init(
         dsn=os.environ.get("SENTRY_DSN", None),
         environment=ENVIRONMENT,
         integrations=[
             DjangoIntegration(),
+            CeleryIntegration(
+                monitor_beat_tasks=True,
+            ),
+            StrawberryIntegration(
+                async_execution=True,
+            ),
         ],
         # Set traces_sample_rate to 1.0 to capture 100%
         # of transactions for performance monitoring.
@@ -56,6 +64,7 @@ if DEBUG is not True:
         _experiments={
             "profiles_sample_rate": 1.0,
         },
+        sample_rate=0.3,
     )
 
 # LOGGING = {
