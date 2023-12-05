@@ -8,7 +8,7 @@ readme = "README.md"
 packages = [{include = "rosak_backend"}]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.12"
 boto3 = "1.28.*"
 celery = {extras = ["pymemcache", "redis"], version = "*"}
 discord-webhook = "*"
@@ -36,7 +36,7 @@ dotmap = "*"
 firebase-admin = "*"
 gunicorn = "*"
 imgurpython = {git = "https://github.com/BryanH/imgurpython.git", rev = "master"}
-pendulum = "*"
+pendulum = {git = "https://github.com/kwongtn/pendulum.git", rev = "3.0.0a1"}
 pillow = "*"
 pillow-heif = "*"
 promise = "*"
@@ -45,6 +45,7 @@ pymemcache = "*"
 redis = {extras = ["hiredis"], version = "*"}
 requests = "*"
 sentry-sdk = "*"
+setuptools = "*"
 strawberry-graphql = "*"
 strawberry-graphql-django = "*"
 uvicorn = {extras = ["standard"], version = "*"}
