@@ -45,14 +45,14 @@ async def get_calendar_incidents_by_severity_count(
     if min is None:
         return []
 
-    period = pendulum.period(
+    interval = pendulum.interval(
         min if start_date > min else start_date,
         today if today < end_date else end_date,
     )
 
     aggregations = {}
     if group_by == GroupByEnum.MONTH:
-        range = period.range("months")
+        range = interval.range("months")
         for range_date in range:
             range_str = range_date.strftime("%Y-%m")
             range_year, range_month = range_str.split("-")
@@ -91,7 +91,7 @@ async def get_calendar_incidents_by_severity_count(
                 )
 
     elif group_by == GroupByEnum.DAY:
-        range = period.range("days")
+        range = interval.range("days")
         for range_date in range:
             long_term_filter = Q(Q(long_term=True) & Q(start_datetime__date=range_date))
 

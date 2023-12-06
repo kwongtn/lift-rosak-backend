@@ -178,11 +178,11 @@ def get_trends(
         .order_by(*[f"-{group_str}" for group_str in group_strs])
     )
 
-    period = pendulum.period(
+    interval = pendulum.interval(
         qs.aggregate(min=Min(groupby_field))["min"] if free_range else start,
         date.today() if free_range else end,
     )
-    range = period.range(range_type)
+    range = interval.range(range_type)
 
     if add_zero:
         result_types = get_result_comparison_tuple(
