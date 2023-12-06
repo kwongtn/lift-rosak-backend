@@ -57,9 +57,25 @@ class Snapshot(TimeStampedModel):
         return f"{self.date}_{self.source.name}"
 
 
+class SourceCustomLineLineMapping(models.Model):
+    source_custom_line = models.ForeignKey(
+        "chartography.SourceCustomLine",
+        on_delete=models.CASCADE,
+    )
+    line = models.ForeignKey(
+        "operation.Line",
+        on_delete=models.CASCADE,
+    )
+
+
 class SourceCustomLine(models.Model):
     source = models.ForeignKey("chartography.Source", on_delete=models.CASCADE)
     name = models.CharField(max_length=255)
+
+    mapped_lines = models.ManyToManyField(
+        through="chartography.SourceCustomLineLineMapping",
+        to="operation.Line",
+    )
 
     class Meta:
         constraints = [
