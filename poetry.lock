@@ -480,19 +480,6 @@ traitlets = ">=4"
 test = ["pytest"]
 
 [[package]]
-name = "cron-descriptor"
-version = "1.4.0"
-description = "A Python library that converts cron expressions into human readable strings."
-optional = false
-python-versions = "*"
-files = [
-    {file = "cron_descriptor-1.4.0.tar.gz", hash = "sha256:b6ff4e3a988d7ca04a4ab150248e9f166fb7a5c828a85090e75bcc25aa93b4dd"},
-]
-
-[package.extras]
-dev = ["polib"]
-
-[[package]]
 name = "cryptography"
 version = "41.0.7"
 description = "cryptography is a package which provides cryptographic recipes and primitives to Python developers."
@@ -594,17 +581,17 @@ async = ["httpx (>=0.23.0,<0.24.0)"]
 
 [[package]]
 name = "django"
-version = "4.2.8"
+version = "5.0"
 description = "A high-level Python web framework that encourages rapid development and clean, pragmatic design."
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.10"
 files = [
-    {file = "Django-4.2.8-py3-none-any.whl", hash = "sha256:6cb5dcea9e3d12c47834d32156b8841f533a4493c688e2718cafd51aa430ba6d"},
-    {file = "Django-4.2.8.tar.gz", hash = "sha256:d69d5e36cc5d9f4eb4872be36c622878afcdce94062716cf3e25bcedcb168b62"},
+    {file = "Django-5.0-py3-none-any.whl", hash = "sha256:3a9fd52b8dbeae335ddf4a9dfa6c6a0853a1122f1fb071a8d5eca979f73a05c8"},
+    {file = "Django-5.0.tar.gz", hash = "sha256:7d29e14dfbc19cb6a95a4bd669edbde11f5d4c6a71fdaa42c2d40b6846e807f7"},
 ]
 
 [package.dependencies]
-asgiref = ">=3.6.0,<4"
+asgiref = ">=3.7.0"
 sqlparse = ">=0.3.1"
 tzdata = {version = "*", markers = "sys_platform == \"win32\""}
 
@@ -642,36 +629,34 @@ test = ["coveralls", "factory-boy (==2.12.0)", "pycodestyle (==2.5.0)", "pytest-
 
 [[package]]
 name = "django-cachalot"
-version = "2.6.1"
+version = "2.3.5"
 description = "Caches your Django ORM queries and automatically invalidates them."
 optional = false
 python-versions = "*"
 files = [
-    {file = "django-cachalot-2.6.1.tar.gz", hash = "sha256:6772d2d2cc2efa8b6484b242567a5a01847f8e1e8c8ef59a7b9a367b2edfa929"},
-    {file = "django_cachalot-2.6.1-py3-none-any.whl", hash = "sha256:442ad5321e646ce33ec7825c289476373b8926d23b4c1b8b9659879306e44748"},
+    {file = "django-cachalot-2.3.5.tar.gz", hash = "sha256:02afabb6e83f5f06c87a7e6f01ebcdbc52a4156ec849da8e68b14498bc474d3e"},
+    {file = "django_cachalot-2.3.5-py3-none-any.whl", hash = "sha256:ed0782f9702ead95337692f0fae8bbb9352a106490f272d9b76e86b1da81c7e3"},
 ]
 
 [package.dependencies]
-Django = ">=3.2,<4.3"
+Django = ">=2"
 
 [[package]]
 name = "django-celery-beat"
-version = "2.5.0"
+version = "2.1.0"
 description = "Database-backed Periodic Tasks."
 optional = false
 python-versions = "*"
 files = [
-    {file = "django-celery-beat-2.5.0.tar.gz", hash = "sha256:cd0a47f5958402f51ac0c715bc942ae33d7b50b4e48cba91bc3f2712be505df1"},
-    {file = "django_celery_beat-2.5.0-py3-none-any.whl", hash = "sha256:ae460faa5ea142fba0875409095d22f6bd7bcc7377889b85e8cab5c0dfb781fe"},
+    {file = "django-celery-beat-2.1.0.tar.gz", hash = "sha256:4eb0e8412e2e05ba0029912a6f80d1054731001eecbcb4d59688c4e07cf4d9d3"},
+    {file = "django_celery_beat-2.1.0-py2.py3-none-any.whl", hash = "sha256:8a169e11d96faed8b72d505ddbc70e7fe0b16cdc854df43cb209c153ed08d651"},
 ]
 
 [package.dependencies]
-celery = ">=5.2.3,<6.0"
-cron-descriptor = ">=1.2.32"
-Django = ">=2.2,<5.0"
-django-timezone-field = ">=5.0"
+celery = ">=4.4,<6.0"
+Django = ">=2.2"
+django-timezone-field = ">=4.0,<5.0"
 python-crontab = ">=2.3.4"
-tzdata = "*"
 
 [[package]]
 name = "django-celery-results"
@@ -716,13 +701,13 @@ files = [
 
 [[package]]
 name = "django-colorfield"
-version = "0.10.1"
+version = "0.11.0"
 description = "color field for django models with a nice color-picker in the admin."
 optional = false
 python-versions = "*"
 files = [
-    {file = "django-colorfield-0.10.1.tar.gz", hash = "sha256:1e862bef9e73308499f366ab61190554fba366aa54d5fb1eba378ed2a04bc93d"},
-    {file = "django_colorfield-0.10.1-py3-none-any.whl", hash = "sha256:00ceb5ef55338a0af131c87a13eca3533a327a6206e02a6c2723c059bcd65ea5"},
+    {file = "django-colorfield-0.11.0.tar.gz", hash = "sha256:05c38c8eb2a94938b810a19b2011846391a4ce71d1c92e88a35974fbcc8fc62e"},
+    {file = "django_colorfield-0.11.0-py3-none-any.whl", hash = "sha256:460f40e6123b6ae0fb51a4eb86fc258fcdc0ea28f75102b685e8209b1eae9ec3"},
 ]
 
 [package.dependencies]
@@ -877,17 +862,21 @@ sftp = ["paramiko (>=1.15)"]
 
 [[package]]
 name = "django-timezone-field"
-version = "6.1.0"
-description = "A Django app providing DB, form, and REST framework fields for zoneinfo and pytz timezone objects."
+version = "4.2.3"
+description = "A Django app providing database and form fields for pytz timezone objects."
 optional = false
-python-versions = ">=3.8,<4.0"
+python-versions = ">=3.5"
 files = [
-    {file = "django_timezone_field-6.1.0-py3-none-any.whl", hash = "sha256:0095f43da716552fcc606783cfb42cb025892514f1ec660ebfa96186eb83b74c"},
-    {file = "django_timezone_field-6.1.0.tar.gz", hash = "sha256:d40f7059d7bae4075725d04a9dae601af9fe3c7f0119a69b0e2c6194a782f797"},
+    {file = "django-timezone-field-4.2.3.tar.gz", hash = "sha256:5dd5bd9249382bef8847d3e7e4c32b7be182a4b538f354130d1252ed228892f8"},
+    {file = "django_timezone_field-4.2.3-py3-none-any.whl", hash = "sha256:7552d2b0f145684b7de3fb5046101c7efd600cc6ba951b15c630fa1e1b83558e"},
 ]
 
 [package.dependencies]
-Django = ">=3.2,<6.0"
+django = ">=2.2"
+pytz = "*"
+
+[package.extras]
+rest-framework = ["djangorestframework (>=3.0.0)"]
 
 [[package]]
 name = "djangorestframework"
@@ -931,13 +920,13 @@ tests = ["asttokens (>=2.1.0)", "coverage", "coverage-enable-subprocess", "ipyth
 
 [[package]]
 name = "firebase-admin"
-version = "6.2.0"
+version = "6.3.0"
 description = "Firebase Admin Python SDK"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "firebase_admin-6.2.0-py3-none-any.whl", hash = "sha256:e3c42351fb6194d7279a6fd9209a947005fb4ee7e9037d19762e6cb3da4a82e1"},
-    {file = "firebase_admin-6.2.0.tar.gz", hash = "sha256:e3b334d18bbea039f2f3e8a792ad6870d2a7cc79a13ed10659dedd63f5b475e4"},
+    {file = "firebase_admin-6.3.0-py3-none-any.whl", hash = "sha256:fcada47664f38b6da67fd924108b98029370554c9f762895d3f83e912cac5ab9"},
+    {file = "firebase_admin-6.3.0.tar.gz", hash = "sha256:f040625b8cd3a15f99f84a797fe288ad5993c4034c355b7df3c37a99d39400e6"},
 ]
 
 [package.dependencies]
@@ -992,13 +981,13 @@ uritemplate = ">=3.0.1,<5"
 
 [[package]]
 name = "google-auth"
-version = "2.24.0"
+version = "2.25.1"
 description = "Google Authentication Library"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "google-auth-2.24.0.tar.gz", hash = "sha256:2ec7b2a506989d7dbfdbe81cb8d0ead8876caaed14f86d29d34483cbe99c57af"},
-    {file = "google_auth-2.24.0-py2.py3-none-any.whl", hash = "sha256:9b82d5c8d3479a5391ea0a46d81cca698d328459da31d4a459d4e901a5d927e0"},
+    {file = "google-auth-2.25.1.tar.gz", hash = "sha256:d5d66b8f4f6e3273740d7bb73ddefa6c2d1ff691704bd407d51c6b5800e7c97b"},
+    {file = "google_auth-2.25.1-py2.py3-none-any.whl", hash = "sha256:dfd7b44935d498e106c08883b2dac0ad36d8aa10402a6412e9a1c9d74b4773f1"},
 ]
 
 [package.dependencies]
@@ -2860,13 +2849,13 @@ tests = ["cython", "littleutils", "pygments", "pytest", "typeguard"]
 
 [[package]]
 name = "strawberry-graphql"
-version = "0.215.1"
+version = "0.216.0"
 description = "A library for creating GraphQL APIs"
 optional = false
 python-versions = ">=3.8,<4.0"
 files = [
-    {file = "strawberry_graphql-0.215.1-py3-none-any.whl", hash = "sha256:485e29cb29ef03eaf95b5947d1761c33cdb798a890e097077824e30bef55eb87"},
-    {file = "strawberry_graphql-0.215.1.tar.gz", hash = "sha256:4903b569c3ef1999da8ec5ba4165f5d68048ec8875679140a668fa67538a3bf6"},
+    {file = "strawberry_graphql-0.216.0-py3-none-any.whl", hash = "sha256:0b299cc95e1170a3d790ab4b2da153c4960224ba5bc836bf793f5cae2f961926"},
+    {file = "strawberry_graphql-0.216.0.tar.gz", hash = "sha256:7f6a11ef769ec236baf84335117122ee214dae917f3e8f6a0057dbab63273109"},
 ]
 
 [package.dependencies]
@@ -2894,13 +2883,13 @@ starlite = ["starlite (>=1.48.0)"]
 
 [[package]]
 name = "strawberry-graphql-django"
-version = "0.27.0"
+version = "0.28.1"
 description = "Strawberry GraphQL Django extension"
 optional = false
 python-versions = ">=3.8,<4.0"
 files = [
-    {file = "strawberry_graphql_django-0.27.0-py3-none-any.whl", hash = "sha256:c54172a388323d4a023c7bc4b387e537c0c7ffb63855058d268be851ca8aa505"},
-    {file = "strawberry_graphql_django-0.27.0.tar.gz", hash = "sha256:ae2ee127739e33b8579b2440b531acd3b2c018dbe48faf539f0ff5b3abfbc942"},
+    {file = "strawberry_graphql_django-0.28.1-py3-none-any.whl", hash = "sha256:c70f081f1680cf7a75e8114dc522d92d844388066d73c919beeee23543a9d930"},
+    {file = "strawberry_graphql_django-0.28.1.tar.gz", hash = "sha256:f7692af1e7f1836042f4c1b906546c53d855caa110cbb13fe202c83309596d6c"},
 ]
 
 [package.dependencies]
@@ -3326,4 +3315,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "6771bec9f2bd7236275c619b31afbf975cf7e36a58026c451577956fca5386f1"
+content-hash = "895e3ab097b994b9d1625b08e29ac9e82510b80e2beac8e1723b6d6b0df2bbe3"
