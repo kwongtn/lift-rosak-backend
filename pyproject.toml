@@ -12,7 +12,7 @@ python = "^3.12"
 boto3 = "1.28.*"
 celery = {extras = ["pymemcache", "redis"], version = "*"}
 discord-webhook = "*"
-django = "4.2.*"
+django = "5.0.*"
 django-admin-rangefilter = "*"
 django-advanced-filters = "*"
 django-cachalot = "*"
@@ -40,7 +40,7 @@ pendulum = {git = "https://github.com/kwongtn/pendulum.git", rev = "3.0.0a1"}
 pillow = "*"
 pillow-heif = "*"
 promise = "*"
-psycopg = {extras = ["binary", "pool"], version = "^3.1.14"}
+psycopg = {extras = ["binary", "pool"], version = "3.*"}
 pymemcache = "*"
 redis = {extras = ["hiredis"], version = "*"}
 requests = "*"
