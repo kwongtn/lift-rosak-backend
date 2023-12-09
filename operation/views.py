@@ -91,8 +91,6 @@ class LineVehiclesStatusTrendCount(APIView):
 
 class VehicleSpottingTrend(APIView):
     def get(self, request: Request | HttpRequest, vehicle_id, start_date, end_date):
-        vehicle = get_object_or_404(operation_models.Vehicle, id=vehicle_id)
-
         trends = get_trends(
             start=pendulum.parse(start_date),
             end=pendulum.parse(end_date),
@@ -107,7 +105,6 @@ class VehicleSpottingTrend(APIView):
 
         results = [
             {
-                "vehicle": vehicle.identification_no,
                 "count": trend["count"],
                 "dateKey": trend["date_key"],
                 "dayOfWeek": trend["day_of_week"],
@@ -118,7 +115,23 @@ class VehicleSpottingTrend(APIView):
             for trend in trends
         ]
 
+        sortedResults = sorted(results, key=lambda d: f'{d["dateKey"]}')
+
+        # TODO: Figure out how to do for cross-year situations
+        combination_dict = {}
+        for result in sortedResults:
+            year = result["dateKey"].split("-")[0]
+            dict_key = f"{year}W{result['weekOfYear']}"
+
+            if combination_dict.get(dict_key, None) is None:
+                combination_dict[dict_key] = len(combination_dict)
+
         return Response(
-            sorted(results, key=lambda d: f'{d["dateKey"]}'),
+            {
+                "data": sortedResults,
+                "mappings": {
+                    "yearWeek": combination_dict,
+                },
+            },
             status=status.HTTP_200_OK,
         )
