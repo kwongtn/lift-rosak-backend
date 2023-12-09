@@ -63,9 +63,7 @@ if DEBUG is not True:
         # If you wish to associate users to errors (assuming you are using
         # django.contrib.auth) you may enable sending PII data.
         send_default_pii=True,
-        _experiments={
-            "profiles_sample_rate": 1.0,
-        },
+        profiles_sample_rate=1.0,
         sample_rate=0.3,
     )
 
