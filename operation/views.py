@@ -1,6 +1,7 @@
 import pendulum
 from django.db.models import Q
 from django.http import HttpRequest
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -46,6 +47,8 @@ class LineVehiclesSpottingTrend(APIView):
 
 class VehicleSpottingTrend(APIView):
     def get(self, request: Request | HttpRequest, vehicle_id, start_date, end_date):
+        vehicle = get_object_or_404(operation_models.Vehicle, id=vehicle_id)
+
         trends = get_trends(
             start=pendulum.parse(start_date),
             end=pendulum.parse(end_date),
@@ -60,9 +63,7 @@ class VehicleSpottingTrend(APIView):
 
         results = [
             {
-                "vehicle": operation_models.Vehicle.objects.get(
-                    id=vehicle_id
-                ).identification_no,
+                "vehicle": vehicle.identification_no,
                 "count": trend["count"],
                 "dateKey": trend["date_key"],
                 "dayOfWeek": trend["day_of_week"],
