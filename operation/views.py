@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pendulum
 from django.db.models import OuterRef, Q, QuerySet, Subquery
 from django.http import HttpRequest
@@ -117,13 +119,27 @@ class VehicleSpottingTrend(APIView):
 
         sortedResults = sorted(results, key=lambda d: f'{d["dateKey"]}')
 
-        # TODO: Figure out how to do for cross-year situations
         combination_dict = {}
         for result in sortedResults:
             year = result["dateKey"].split("-")[0]
             dict_key = f"{year}W{result['weekOfYear']}"
 
-            if combination_dict.get(dict_key, None) is None:
+            dateTarget = pendulum.parse(result["dateKey"])
+            if (dateTarget - timedelta(days=6)).year != dateTarget.year:
+                combination_dict[dict_key] = len(combination_dict) - 1
+
+            elif (
+                dateTarget.month == 12
+                and result["isLastWeekOfMonth"]
+                and result["weekOfYear"] < 10
+            ):  # < 10 is just a random number
+                dict_key = f"{year}W{(
+                    dateTarget - timedelta(days=6)
+                ).week_of_year + 1}"
+                combination_dict[dict_key] = len(combination_dict)
+                result["weekOfYear"] += 52
+
+            elif combination_dict.get(dict_key, None) is None:
                 combination_dict[dict_key] = len(combination_dict)
 
         return Response(

@@ -36,7 +36,7 @@ dotmap = "*"
 firebase-admin = "*"
 gunicorn = "*"
 imgurpython = {git = "https://github.com/BryanH/imgurpython.git", rev = "master"}
-pendulum = {git = "https://github.com/kwongtn/pendulum.git", rev = "3.0.0a1"}
+pendulum = {git = "https://github.com/kwongtn/pendulum.git", rev = "for_rosak"}
 pillow = "*"
 pillow-heif = "*"
 promise = "*"
