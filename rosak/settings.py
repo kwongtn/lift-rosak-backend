@@ -10,12 +10,12 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.0/ref/settings/
 """
 import os
-from distutils.util import strtobool
 from pathlib import Path
 
 from corsheaders.defaults import default_headers
 
 from rosak.sentry import filter_transactions
+from rosak.util import strtobool
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
