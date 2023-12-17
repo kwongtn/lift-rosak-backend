@@ -34,39 +34,6 @@ SECRET_KEY = os.environ.get(
 DEBUG = bool(strtobool(os.getenv("DEBUG", "false")))
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "local")
 
-if DEBUG is not True:
-    import sentry_sdk
-    from sentry_sdk.integrations.celery import CeleryIntegration
-    from sentry_sdk.integrations.django import DjangoIntegration
-    from sentry_sdk.integrations.redis import RedisIntegration
-    from sentry_sdk.integrations.strawberry import StrawberryIntegration
-
-    sentry_sdk.init(
-        dsn=os.environ.get("SENTRY_DSN", None),
-        environment=ENVIRONMENT,
-        integrations=[
-            DjangoIntegration(),
-            CeleryIntegration(
-                monitor_beat_tasks=True,
-            ),
-            StrawberryIntegration(
-                async_execution=True,
-            ),
-            RedisIntegration(),
-        ],
-        # Set traces_sample_rate to 1.0 to capture 100%
-        # of transactions for performance monitoring.
-        # We recommend adjusting this value in production.
-        traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLING_RATE", "1.0")),
-        # Refer: https://docs.sentry.io/platforms/python/guides/django/configuration/filtering/#using-platformidentifier-namebefore-send-transaction-
-        before_send_transaction=filter_transactions,
-        # If you wish to associate users to errors (assuming you are using
-        # django.contrib.auth) you may enable sending PII data.
-        send_default_pii=True,
-        profiles_sample_rate=1.0,
-        sample_rate=0.3,
-    )
-
 # LOGGING = {
 #     "version": 1,
 #     "disable_existing_loggers": False,
@@ -97,7 +64,6 @@ LOGIN_REDIRECT_URL = os.getenv("LOGIN_REDIRECT_URL", "admin/")
 # Application definition
 
 INSTALLED_APPS = [
-    "debug_toolbar",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -139,7 +105,6 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     # This must be the first
     "django.middleware.cache.UpdateCacheMiddleware",
-    "strawberry_django.middlewares.debug_toolbar.DebugToolbarMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -152,6 +117,46 @@ MIDDLEWARE = [
     # This must be the last
     "django.middleware.cache.FetchFromCacheMiddleware",
 ]
+
+
+if DEBUG is not True:
+    import sentry_sdk
+    from sentry_sdk.integrations.celery import CeleryIntegration
+    from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.integrations.redis import RedisIntegration
+    from sentry_sdk.integrations.strawberry import StrawberryIntegration
+
+    sentry_sdk.init(
+        dsn=os.environ.get("SENTRY_DSN", None),
+        environment=ENVIRONMENT,
+        integrations=[
+            DjangoIntegration(),
+            CeleryIntegration(
+                monitor_beat_tasks=True,
+            ),
+            StrawberryIntegration(
+                async_execution=True,
+            ),
+            RedisIntegration(),
+        ],
+        # Set traces_sample_rate to 1.0 to capture 100%
+        # of transactions for performance monitoring.
+        # We recommend adjusting this value in production.
+        traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLING_RATE", "1.0")),
+        # Refer: https://docs.sentry.io/platforms/python/guides/django/configuration/filtering/#using-platformidentifier-namebefore-send-transaction-
+        before_send_transaction=filter_transactions,
+        # If you wish to associate users to errors (assuming you are using
+        # django.contrib.auth) you may enable sending PII data.
+        send_default_pii=True,
+        profiles_sample_rate=1.0,
+        sample_rate=0.3,
+    )
+
+else:
+    INSTALLED_APPS.insert(0, "debug_toolbar")
+    MIDDLEWARE.insert(
+        1, "strawberry_django.middlewares.debug_toolbar.DebugToolbarMiddleware"
+    )
 
 CSRF_TRUSTED_ORIGINS = [
     "https://rosak-7223b--pr8-ng-zorro-antd-l1wpy6qj.web.app",
