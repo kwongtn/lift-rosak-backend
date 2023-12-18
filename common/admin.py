@@ -103,7 +103,7 @@ class UserAdmin(admin.ModelAdmin):
         "nickname",
         "firebase_id",
     ]
-    filter_horizontal = ("clearances",)
+    # filter_horizontal = ("clearances",)
 
 
 class ClearanceAdmin(admin.ModelAdmin):

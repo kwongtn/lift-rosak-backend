@@ -128,7 +128,7 @@ class CalendarIncidentAdmin(OrderedInlineModelAdminMixin, OrderedModelAdmin):
         "vehicles",
         "stations",
         "categories",
-        "medias",
+        # "medias",
     )
     ordering = ("-start_datetime",)
     inlines = [
