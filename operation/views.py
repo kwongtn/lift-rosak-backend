@@ -1,11 +1,15 @@
+from datetime import timedelta
+
 import pendulum
-from django.db.models import Q
+from django.db.models import OuterRef, Q, QuerySet, Subquery
 from django.http import HttpRequest
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from chartography import models as chartography_models
 from common.utils import get_trends
 from generic.schema.enums import DateGroupings
 from operation import models as operation_models
@@ -44,6 +48,49 @@ class LineVehiclesSpottingTrend(APIView):
         )
 
 
+class LineVehiclesStatusTrendCount(APIView):
+    def get(
+        self, request: Request | HttpRequest, line_id, source_str, start_date, end_date
+    ):
+        line = get_object_or_404(operation_models.Line, id=line_id)
+        source = get_object_or_404(chartography_models.Source, name__iexact=source_str)
+
+        snapshots = chartography_models.Snapshot.objects.filter(
+            source_id=source.id,
+            date__gte=pendulum.parse(start_date),
+            date__lte=pendulum.parse(end_date),
+            id=OuterRef("snapshot_id"),
+        )
+
+        vehicle_status_count_history: QuerySet[
+            chartography_models.LineVehicleStatusCountHistory
+        ] = chartography_models.LineVehicleStatusCountHistory.objects.filter(
+            Q(snapshot__in=Subquery(snapshots.values_list("id", flat=True)))
+            & Q(
+                Q(
+                    line_id=line.id,
+                )
+                | Q(
+                    custom_line__mapped_lines=line,
+                )
+            )
+        ).select_related("snapshot")
+
+        results = [
+            {
+                "status": vehicle_status_count.status,
+                "count": vehicle_status_count.count,
+                "date": vehicle_status_count.snapshot.date,
+            }
+            for vehicle_status_count in vehicle_status_count_history
+        ]
+
+        return Response(
+            sorted(results, key=lambda d: f'{d["date"]}__{d["status"]}'),
+            status=status.HTTP_200_OK,
+        )
+
+
 class VehicleSpottingTrend(APIView):
     def get(self, request: Request | HttpRequest, vehicle_id, start_date, end_date):
         trends = get_trends(
@@ -60,9 +107,6 @@ class VehicleSpottingTrend(APIView):
 
         results = [
             {
-                "vehicle": operation_models.Vehicle.objects.get(
-                    id=vehicle_id
-                ).identification_no,
                 "count": trend["count"],
                 "dateKey": trend["date_key"],
                 "dayOfWeek": trend["day_of_week"],
@@ -73,7 +117,37 @@ class VehicleSpottingTrend(APIView):
             for trend in trends
         ]
 
+        sortedResults = sorted(results, key=lambda d: f'{d["dateKey"]}')
+
+        combination_dict = {}
+        for result in sortedResults:
+            year = result["dateKey"].split("-")[0]
+            dict_key = f"{year}W{result['weekOfYear']}"
+
+            dateTarget = pendulum.parse(result["dateKey"])
+            if (dateTarget - timedelta(days=6)).year != dateTarget.year:
+                combination_dict[dict_key] = len(combination_dict) - 1
+
+            elif (
+                dateTarget.month == 12
+                and result["isLastWeekOfMonth"]
+                and result["weekOfYear"] < 10
+            ):  # < 10 is just a random number
+                dict_key = f"{year}W{(
+                    dateTarget - timedelta(days=6)
+                ).week_of_year + 1}"
+                combination_dict[dict_key] = len(combination_dict)
+                result["weekOfYear"] += 52
+
+            elif combination_dict.get(dict_key, None) is None:
+                combination_dict[dict_key] = len(combination_dict)
+
         return Response(
-            sorted(results, key=lambda d: f'{d["dateKey"]}'),
+            {
+                "data": sortedResults,
+                "mappings": {
+                    "yearWeek": combination_dict,
+                },
+            },
             status=status.HTTP_200_OK,
         )
