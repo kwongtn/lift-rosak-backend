@@ -3,9 +3,11 @@ from typing import TYPE_CHECKING, Annotated, List, Optional
 
 import strawberry
 import strawberry_django
-from django.db.models import Q
+from django.db.models import Q, Subquery
 from strawberry.types import Info
 
+from chartography import models as chartography_models
+from chartography.schema.scalars import Source
 from common.utils import get_default_start_time, get_trends
 from generic.schema.enums import DateGroupings
 from generic.schema.scalars import GeoPoint
@@ -113,6 +115,30 @@ class Line:
             )
             for value in results
         ]
+
+    @strawberry_django.field
+    async def chartography_sources(self, info: Info) -> List["Source"]:
+        snapshot_histories = (
+            (
+                chartography_models.LineVehicleStatusCountHistory.objects.filter(
+                    Q(line_id=self.id) | Q(custom_line__mapped_lines=self)
+                )
+            )
+            .values_list("snapshot_id", flat=True)
+            .distinct()
+        )
+
+        snapshots = (
+            chartography_models.Snapshot.objects.filter(
+                id__in=Subquery(snapshot_histories),
+            )
+            .values_list("source_id", flat=True)
+            .distinct()
+        )
+
+        return chartography_models.Source.objects.filter(
+            id__in=Subquery(snapshots),
+        )
 
 
 @strawberry_django.type(models.Asset)
