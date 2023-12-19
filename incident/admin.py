@@ -1,3 +1,4 @@
+from django.contrib.admin import SimpleListFilter
 from django.contrib.gis import admin, forms
 from django.db import models
 from django.forms import Textarea, TextInput
@@ -16,6 +17,7 @@ from incident.models import (
     StationIncident,
     VehicleIncident,
 )
+from operation.models import Line
 
 incident_list_display = [
     "__str__",
@@ -114,6 +116,18 @@ class CalendarIncidentAdminForm(forms.ModelForm):
         fields = "__all__"
 
 
+class CalendarIncidentLineFilter(SimpleListFilter):
+    title = "Line"
+    parameter_name = "lines"
+
+    def lookups(self, request, model_admin):
+        return [(line.id, line.__str__()) for line in Line.objects.all()]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(lines=self.value())
+
+
 class CalendarIncidentAdmin(OrderedInlineModelAdminMixin, OrderedModelAdmin):
     form = CalendarIncidentAdminForm
     list_display = [
@@ -122,7 +136,10 @@ class CalendarIncidentAdmin(OrderedInlineModelAdminMixin, OrderedModelAdmin):
         "end_datetime",
         "severity",
     ]
-    list_filter = ["severity"]
+    list_filter = (
+        "severity",
+        CalendarIncidentLineFilter,
+    )
     filter_horizontal = (
         "lines",
         "vehicles",
