@@ -40,7 +40,8 @@ pendulum = {git = "https://github.com/kwongtn/pendulum.git", rev = "for_rosak"}
 pillow = "*"
 pillow-heif = "*"
 promise = "*"
-psycopg = {extras = ["binary", "pool"], version = "3.*"}
+psycopg2-binary = "^2.9.9"
+# psycopg = {extras = ["binary", "pool"], version = "3.*"}
 pymemcache = "*"
 redis = {extras = ["hiredis"], version = "*"}
 requests = "*"
