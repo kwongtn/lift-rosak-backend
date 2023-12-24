@@ -4,6 +4,7 @@ from typing import List, Optional
 import strawberry
 import strawberry_django
 from asgiref.sync import sync_to_async
+from strawberry.permission import PermissionExtension
 from strawberry.types import Info
 
 from common.schema.scalars import MediaScalar, UserScalar
@@ -45,7 +46,7 @@ class EventScalar:
             "reporter_from_event_loader"
         ].load(self.id)
 
-    @strawberry.field(permission_classes=[IsLoggedIn])
+    @strawberry.field(extensions=[PermissionExtension(permissions=[IsLoggedIn()])])
     async def is_read(self, info: Info) -> bool:
         return await info.context.loaders["spotting"]["is_read_from_event_loader"].load(
             (self.id, info.context.user.id)

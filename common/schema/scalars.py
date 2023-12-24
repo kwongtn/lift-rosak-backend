@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Annotated, List, Optional
 import strawberry
 import strawberry_django
 from django.db.models import Count, F, Q
+from strawberry.permission import PermissionExtension
 from strawberry.types import Info
 
 from common import models
@@ -69,7 +70,9 @@ class UserScalar:
     if TYPE_CHECKING:
         from spotting.schema.scalars import EventScalar
 
-    firebase_id: str = strawberry_django.field(permission_classes=[IsAdmin])
+    firebase_id: str = strawberry_django.field(
+        extensions=[PermissionExtension(permissions=[IsAdmin()])]
+    )
     nickname: str
 
     @strawberry_django.field

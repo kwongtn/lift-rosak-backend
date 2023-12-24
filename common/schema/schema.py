@@ -4,6 +4,7 @@ import strawberry
 import strawberry_django
 from django.contrib.postgres.aggregates import ArrayAgg
 from django.db.models import Count, F
+from strawberry.permission import PermissionExtension
 from strawberry.types import Info
 from strawberry_django.relay import ListConnectionWithTotalCount
 
@@ -19,7 +20,7 @@ from rosak.permissions import IsLoggedIn
 class CommonScalars:
     medias: ListConnectionWithTotalCount[MediaType] = strawberry_django.connection()
 
-    @strawberry.field(permission_classes=[IsLoggedIn])
+    @strawberry.field(extensions=[PermissionExtension(permissions=[IsLoggedIn()])])
     async def user(self, info: Info) -> UserScalar:
         if not info.context.user:
             return None
@@ -77,7 +78,7 @@ class CommonMutations:
     #     delete_medias: List[Media] = strawberry_django.mutations.delete()
     pass
 
-    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    @strawberry.mutation(extensions=[PermissionExtension(permissions=[IsLoggedIn()])])
     async def update_user(self, input: UserInput, info: Info) -> UserScalar:
         user: User = info.context.user
         user.nickname = input.nickname

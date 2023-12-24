@@ -1,4 +1,5 @@
 import strawberry
+from strawberry.permission import PermissionExtension
 from strawberry.types import Info
 
 from chartography.schema.inputs import TriggerInput
@@ -13,7 +14,9 @@ class ChartographyScalars:
 
 @strawberry.type
 class ChartographyMutations:
-    @strawberry.mutation(permission_classes=[IsLoggedIn, IsAdmin])
+    @strawberry.mutation(
+        extensions=[PermissionExtension(permissions=[IsLoggedIn(), IsAdmin()])]
+    )
     async def trigger_line_vehicle_status_snapshot(
         self,
         input: TriggerInput,

@@ -5,6 +5,7 @@ import strawberry
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
 from django.utils.timezone import now
+from strawberry.permission import PermissionExtension
 from strawberry.types import Info
 
 from common.schema.scalars import GenericMutationReturn
@@ -39,7 +40,13 @@ class SpottingScalars:
 
 @strawberry.type
 class SpottingMutations:
-    @strawberry.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
+    @strawberry.mutation(
+        extensions=[
+            PermissionExtension(
+                permissions=[IsLoggedIn(), IsRecaptchaChallengePassed()]
+            )
+        ]
+    )
     async def delete_event(
         self, input: DeleteEventInput, info: Info
     ) -> GenericMutationReturn:
@@ -58,9 +65,13 @@ class SpottingMutations:
             return GenericMutationReturn(ok=False)
 
     @strawberry.mutation(
-        permission_classes=[
-            IsLoggedIn,
-            # IsRecaptchaChallengePassed,
+        extensions=[
+            PermissionExtension(
+                permissions=[
+                    IsLoggedIn(),
+                    # IsRecaptchaChallengePassed(),
+                ]
+            )
         ]
     )
     @sync_to_async
@@ -171,7 +182,11 @@ class SpottingMutations:
         )
 
     @strawberry.mutation(
-        permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed, IsAdmin]
+        extensions=[
+            PermissionExtension(
+                permissions=[IsLoggedIn(), IsRecaptchaChallengePassed(), IsAdmin()]
+            )
+        ],
     )
     async def mark_as_read(
         self, input: MarkEventAsReadInput, info: Info
