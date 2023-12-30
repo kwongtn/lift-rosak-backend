@@ -12,7 +12,7 @@ python = "^3.12"
 boto3 = "1.28.*"
 celery = {extras = ["pymemcache", "redis"], version = "*"}
 discord-webhook = "*"
-django = "5.0.*"
+django = "4.2.*"
 django-admin-rangefilter = "*"
 django-advanced-filters = "*"
 django-cachalot = "*"
