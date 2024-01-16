@@ -81,16 +81,13 @@ class StationLineStackedInline(admin.StackedInline):
 class StationLineTabularInline(admin.TabularInline):
     model = StationLine
     classes = ["collapse"]
-
-
-class VehicleLineStackedInline(admin.StackedInline):
-    model = VehicleLine
-    classes = ["collapse"]
+    autocomplete_fields = ("line",)
 
 
 class VehicleLineTabularInline(admin.TabularInline):
     model = VehicleLine
     classes = ["collapse"]
+    autocomplete_fields = ("line",)
 
 
 class LineAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
@@ -98,9 +95,14 @@ class LineAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         StationLineTabularInline,
         VehicleLineTabularInline,
     ]
+    list_editable = [
+        "status",
+    ]
     list_display = [
         "__str__",
+        "official_numbering",
         "code",
+        "status",
         "display_name",
         "display_color",
     ]
@@ -108,11 +110,15 @@ class LineAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "code",
         "display_name",
         "display_color",
+        "status",
     ]
     advanced_filter_fields = [
         "code",
         "display_name",
         "display_color",
+    ]
+    list_editable = [
+        "official_numbering",
     ]
 
 
@@ -183,11 +189,13 @@ class VehicleAdmin(OrderedInlineModelAdminMixin, admin.ModelAdmin):
         "identification_no",
         "vehicle_type",
         "status",
+        "wheel_status",
         "in_service_since",
     ]
     list_filter = [
         "vehicle_type",
         "status",
+        "wheel_status",
         "in_service_since",
         "vehicle_lines__display_name",
     ]
@@ -197,9 +205,10 @@ class VehicleAdmin(OrderedInlineModelAdminMixin, admin.ModelAdmin):
         "vehicle_type__display_name",
     ]
     list_editable = [
-        "identification_no",
         "status",
+        "wheel_status",
     ]
+    autocomplete_fields = ("vehicle_type",)
 
 
 class VehicleTypeAdmin(admin.ModelAdmin):

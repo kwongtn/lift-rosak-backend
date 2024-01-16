@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("incident", "0002_stationincident_is_last_vehicleincident_is_last_and_more"),
     ]

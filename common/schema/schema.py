@@ -1,13 +1,25 @@
-from strawberry.types import Info
-from strawberry_django_plus import gql
+from typing import List
 
-from common.schema.scalars import UserScalar
+import strawberry
+import strawberry_django
+from django.contrib.postgres.aggregates import ArrayAgg
+from django.db.models import Count, F
+from strawberry.types import Info
+from strawberry_django.relay import ListConnectionWithTotalCount
+
+from common.models import Media, User
+from common.schema.inputs import UserInput
+from common.schema.scalars import MediasGroupByPeriodScalar, MediaType, UserScalar
+from common.utils import get_date_key
+from generic.schema.enums import DateGroupings
 from rosak.permissions import IsLoggedIn
 
 
-@gql.type
+@strawberry.type
 class CommonScalars:
-    @gql.field(permission_classes=[IsLoggedIn])
+    medias: ListConnectionWithTotalCount[MediaType] = strawberry_django.connection()
+
+    @strawberry.field(permission_classes=[IsLoggedIn])
     async def user(self, info: Info) -> UserScalar:
         if not info.context.user:
             return None
@@ -16,11 +28,59 @@ class CommonScalars:
 
         return await User.objects.aget(id=info.context.user.id)
 
+    @strawberry.field
+    async def medias_group_by_period(
+        self, info: Info, type: DateGroupings
+    ) -> List[MediasGroupByPeriodScalar]:
+        groupings = {"year": F("created__year")}
 
-@gql.type
+        if type in [DateGroupings.MONTH, DateGroupings.DAY]:
+            groupings["month"] = F("created__month")
+
+            if type == DateGroupings.DAY:
+                groupings["day"] = F("created__day")
+
+        annotations = (
+            Media.objects.annotate(**groupings)
+            .values(*groupings.keys())
+            .annotate(
+                count=Count("id"), medias=ArrayAgg(F("id"), distinct=True, default=[])
+            )
+        )
+
+        return [
+            MediasGroupByPeriodScalar(
+                type=type,
+                date_key=get_date_key(
+                    year=elem["year"],
+                    month=elem.get("month", None),
+                    day=elem.get("day", None),
+                ),
+                year=elem["year"],
+                month=elem.get("month", None),
+                day=elem.get("day", None),
+                count=elem["count"],
+                medias=[
+                    await info.context.loaders["common"]["media_from_id_loader"].load(
+                        key
+                    )
+                    for key in elem["medias"]
+                ],
+            )
+            async for elem in annotations
+        ]
+
+
+@strawberry.type
 class CommonMutations:
-    #     create_media: Media = gql.django.mutations.create(MediaInput)
-    #     create_medias: List[Media] = gql.django.mutations.create(MediaInput)
-    #     delete_medias: List[Media] = gql.django.mutations.delete()
-
+    #     create_medias: List[Media] = strawberry_django.mutations.create(MediaInput)
+    #     delete_medias: List[Media] = strawberry_django.mutations.delete()
     pass
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def update_user(self, input: UserInput, info: Info) -> UserScalar:
+        user: User = info.context.user
+        user.nickname = input.nickname
+        await user.asave()
+
+        return user

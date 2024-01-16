@@ -1,12 +1,11 @@
 import typing
 from datetime import timedelta
 
+import strawberry
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
 from django.utils.timezone import now
 from strawberry.types import Info
-from strawberry_django_plus import gql
-from strawberry_django_plus.gql import relay
 
 from common.schema.scalars import GenericMutationReturn
 from operation.models import StationLine
@@ -16,21 +15,31 @@ from spotting.enums import SpottingEventType
 from spotting.schema.filters import EventFilter
 from spotting.schema.inputs import DeleteEventInput, EventInput, MarkEventAsReadInput
 from spotting.schema.orderings import EventOrder
-from spotting.schema.scalars import EventRelay, EventScalar
+from spotting.schema.resolvers import get_events_count
+from spotting.schema.scalars import EventScalar
 
 
-@gql.type
+@strawberry.type
 class SpottingScalars:
-    events: typing.List[EventScalar] = gql.django.field(
+    events: typing.List[EventScalar] = strawberry.django.field(
         filters=EventFilter, pagination=True, order=EventOrder
     )
+    events_count: int = strawberry.django.field(
+        resolver=get_events_count,
+        description="Number of events",
+    )
+
+    # import strawberry_django
+    # from strawberry_django.relay import ListConnectionWithTotalCount
     # event_relay: typing.Optional[EventRelay] = relay.node()
-    event_relay_connection: relay.Connection[EventRelay] = relay.connection()
+    # event_relay_connection: ListConnectionWithTotalCount[
+    #     EventRelay
+    # ] = strawberry_django.connection()
 
 
-@gql.type
+@strawberry.type
 class SpottingMutations:
-    @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
+    @strawberry.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
     async def delete_event(
         self, input: DeleteEventInput, info: Info
     ) -> GenericMutationReturn:
@@ -48,13 +57,21 @@ class SpottingMutations:
         else:
             return GenericMutationReturn(ok=False)
 
-    @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
+    @strawberry.mutation(
+        permission_classes=[
+            IsLoggedIn,
+            # IsRecaptchaChallengePassed,
+        ]
+    )
     @sync_to_async
-    def add_event(self, input: EventInput, info: Info) -> GenericMutationReturn:
+    def add_event(self, input: EventInput, info: Info) -> EventScalar:
         user_id = info.context.user.id
 
-        notes = input.notes if input.notes != gql.UNSET else ""
-        is_anonymous = input.is_anonymous if input.is_anonymous != gql.UNSET else False
+        notes = input.notes if input.notes != strawberry.UNSET else ""
+        is_anonymous = (
+            input.is_anonymous if input.is_anonymous != strawberry.UNSET else False
+        )
+        wheel_status = input.wheel_status if input.notes != strawberry.UNSET else None
 
         origin_station_id = None
         destination_station_id = None
@@ -68,20 +85,20 @@ class SpottingMutations:
 
             origin_station_id = (
                 station_line_dict[str(input.origin_station)]
-                if input.origin_station != gql.UNSET
+                if input.origin_station != strawberry.UNSET
                 else None
             )
 
             destination_station_id = (
                 station_line_dict[str(input.destination_station)]
-                if input.destination_station != gql.UNSET
+                if input.destination_station != strawberry.UNSET
                 else None
             )
 
         if input.type == SpottingEventType.AT_STATION:
             origin_station_id = (
                 StationLine.objects.get(id=input.origin_station).station_id
-                if input.origin_station != gql.UNSET
+                if input.origin_station != strawberry.UNSET
                 else None
             )
 
@@ -96,29 +113,36 @@ class SpottingMutations:
             destination_station_id=destination_station_id,
             is_anonymous=is_anonymous,
             run_number=input.run_number,
+            wheel_status=wheel_status,
         )
 
-        if input.location != gql.UNSET:
+        if input.location != strawberry.UNSET:
             location_input = input.location
             accuracy = (
                 location_input.accuracy
-                if location_input.accuracy != gql.UNSET
+                if location_input.accuracy != strawberry.UNSET
                 else None
             )
             altitude_accuracy = (
                 location_input.altitude_accuracy
-                if location_input.altitude_accuracy != gql.UNSET
+                if location_input.altitude_accuracy != strawberry.UNSET
                 else None
             )
             heading = (
-                location_input.heading if location_input.heading != gql.UNSET else None
+                location_input.heading
+                if location_input.heading != strawberry.UNSET
+                else None
             )
-            speed = location_input.speed if location_input.speed != gql.UNSET else None
+            speed = (
+                location_input.speed
+                if location_input.speed != strawberry.UNSET
+                else None
+            )
 
             location = Point(x=location_input.longitude, y=location_input.latitude)
             altitude = (
                 location_input.altitude
-                if location_input.altitude != gql.UNSET
+                if location_input.altitude != strawberry.UNSET
                 else None
             )
 
@@ -132,14 +156,27 @@ class SpottingMutations:
                 speed=speed,
             )
 
-        return GenericMutationReturn(ok=True)
+        return EventScalar(
+            id=event.id,
+            created=event.created,
+            spotting_date=event.spotting_date,
+            vehicle=event.vehicle,
+            notes=event.notes,
+            status=event.status,
+            type=event.type,
+            run_number=event.run_number,
+            origin_station=event.origin_station,
+            destination_station=event.destination_station,
+            wheel_status=event.wheel_status,
+        )
 
-    @gql.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed, IsAdmin])
-    @sync_to_async
-    def mark_as_read(
+    @strawberry.mutation(
+        permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed, IsAdmin]
+    )
+    async def mark_as_read(
         self, input: MarkEventAsReadInput, info: Info
     ) -> GenericMutationReturn:
-        models.EventRead.objects.bulk_create(
+        await models.EventRead.objects.abulk_create(
             [
                 models.EventRead(
                     event_id=event_id,

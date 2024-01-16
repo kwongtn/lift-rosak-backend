@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from common.models import Media, User, UserJejakTransaction
+from common.models import (
+    Clearance,
+    Media,
+    TemporaryMedia,
+    User,
+    UserClearance,
+    UserJejakTransaction,
+)
 from mlptf.admin import UserBadgeStackedInline
 
 
@@ -16,13 +23,91 @@ class UserStackedInline(admin.StackedInline):
     model = User
 
 
-class UserAdmin(admin.ModelAdmin):
-    inlines = [UserBadgeStackedInline]
+class MediaAdmin(admin.ModelAdmin):
+    fields = [
+        "id",
+        "created",
+        "modified",
+        "file",
+        "width_x_height",
+        "image_widget",
+        "uploader",
+    ]
+    readonly_fields = [
+        "id",
+        "created",
+        "modified",
+        "width_x_height",
+        "image_widget",
+    ]
     list_display = [
         "__str__",
+        "created",
+        "width_x_height",
+        "uploader",
+    ]
+    list_filter = [
+        "uploader",
+    ]
+    search_fields = [
+        "uploader",
+    ]
+
+    def width_x_height(self, instance):
+        return f"{instance.width} x {instance.height}"
+
+
+class TemporaryMediaAdmin(admin.ModelAdmin):
+    fields = [
+        "id",
+        "created",
+        "modified",
+        "file",
+        "image_widget",
+        "uploader",
+        "status",
+        "metadata",
+        "fail_count",
+    ]
+    readonly_fields = [
+        "id",
+        "created",
+        "modified",
+        "image_widget",
+        "metadata",
+        "fail_count",
+    ]
+    list_display = [
+        "__str__",
+        "created",
+        "uploader",
+        "status",
+        "fail_count",
+    ]
+    list_filter = [
+        "uploader",
+        "status",
+        "fail_count",
+    ]
+    search_fields = [
+        "uploader",
+    ]
+
+
+class UserClearanceStackedInline(admin.StackedInline):
+    model = UserClearance
+    classes = ["collapse"]
+
+
+class UserAdmin(admin.ModelAdmin):
+    inlines = [UserBadgeStackedInline, UserClearanceStackedInline]
+    list_display = [
+        "__str__",
+        "nickname",
         "firebase_id",
     ]
     search_fields = [
+        "nickname",
         "firebase_id",
     ]
     readonly_fields = [
@@ -55,7 +140,15 @@ class UserJejakTransactionAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
 
+    # filter_horizontal = ("clearances",)
 
-admin.site.register(Media, admin.ModelAdmin)
+
+class ClearanceAdmin(admin.ModelAdmin):
+    pass
+
+
+admin.site.register(Media, MediaAdmin)
+admin.site.register(TemporaryMedia, TemporaryMediaAdmin)
 admin.site.register(User, UserAdmin)
 admin.site.register(UserJejakTransaction, UserJejakTransactionAdmin)
+admin.site.register(Clearance, ClearanceAdmin)

@@ -1,11 +1,12 @@
 from django.contrib.gis.db import models
 from django.contrib.postgres.indexes import BTreeIndex
 from django.db.models import F, Q
+from django.utils.safestring import mark_safe
+from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
 
 from generic.models import WebLocationModel
-from operation.enums import VehicleStatus
-from spotting.enums import SpottingEventType
+from spotting.enums import SpottingEventType, SpottingVehicleStatus, SpottingWheelStatus
 
 
 class LocationEvent(WebLocationModel):
@@ -36,9 +37,9 @@ class Event(TimeStampedModel):
         blank=True,
         default="",
     )
-    status = models.CharField(
+    status = TextChoicesField(
+        choices_enum=SpottingVehicleStatus,
         max_length=32,
-        choices=VehicleStatus.choices,
     )
 
     run_number = models.CharField(
@@ -48,9 +49,17 @@ class Event(TimeStampedModel):
         default=None,
     )
 
-    type = models.CharField(
+    type = TextChoicesField(
+        choices_enum=SpottingEventType,
         max_length=32,
-        choices=SpottingEventType.choices,
+    )
+
+    wheel_status = TextChoicesField(
+        choices_enum=SpottingWheelStatus,
+        max_length=16,
+        blank=True,
+        null=True,
+        default=None,
     )
 
     is_anonymous = models.BooleanField(default=False)
@@ -70,6 +79,12 @@ class Event(TimeStampedModel):
         blank=True,
         on_delete=models.PROTECT,
         related_name="destination_station_event",
+    )
+
+    medias = models.ManyToManyField(
+        to="common.Media",
+        blank=True,
+        through="spotting.EventMedia",
     )
 
     class Meta:
@@ -106,6 +121,19 @@ class Event(TimeStampedModel):
             BTreeIndex(fields=["vehicle", "run_number", "-spotting_date"]),
         ]
 
+    def images_widget(self):
+        html = '<div style="display: flex;\
+            flex-flow: row wrap; align-items: flex-start;\
+            align-content: space-between;">'
+
+        for media in self.medias.all():
+            html += f'<a href="/admin/common/media/{media.id}/change" target="_blank">'
+            html += media.image_widget_html(style="max-width: 200px; padding: 5px;")
+            html += "</a>"
+
+        html += "</div>"
+        return mark_safe(html)
+
 
 class EventRead(TimeStampedModel):
     reader = models.ForeignKey(
@@ -124,3 +152,14 @@ class EventRead(TimeStampedModel):
                 name="%(app_label)s_%(class)s_reader_event_unique",
             ),
         ]
+
+
+class EventMedia(TimeStampedModel):
+    event = models.ForeignKey(
+        to="spotting.Event",
+        on_delete=models.CASCADE,
+    )
+    media = models.ForeignKey(
+        to="common.Media",
+        on_delete=models.CASCADE,
+    )

@@ -1,10 +1,11 @@
-from strawberry_django_plus import gql
+import strawberry
+import strawberry_django
 
 from spotting import models
 
 
-@gql.django.ordering.order(models.Event)
+@strawberry_django.ordering.order(models.Event)
 class EventOrder:
-    id: gql.auto
-    spotting_date: gql.auto
-    created: gql.auto
+    id: strawberry.auto
+    spotting_date: strawberry.auto
+    created: strawberry.auto

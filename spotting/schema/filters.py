@@ -1,30 +1,31 @@
 from datetime import date, datetime
-from typing import List
+from typing import List, Optional
 
+import strawberry
+import strawberry_django
 from django.db.models import F, Q, Subquery
 from strawberry.types import Info
-from strawberry_django_plus import gql
 
 from spotting import models
 
 
-@gql.django.filters.filter(models.Event)
+@strawberry_django.filters.filter(models.Event)
 class EventFilter:
-    id: gql.auto
-    vehicle_id: gql.ID
-    type_in: List[str]
-    created_start_datetime: datetime
-    created_end_datetime: datetime
-    has_notes: bool
-    notes_contain: str
-    different_status_than_vehicle: bool
-    status_in: List[str]
-    spotted_start_date: date
-    spotted_end_date: date
-    is_read: bool
-    only_mine: bool
-    is_anonymous: bool
-    free_search: str
+    id: strawberry.auto
+    vehicle_id: Optional[strawberry.ID]
+    type_in: Optional[List[str]]
+    created_start_datetime: Optional[datetime]
+    created_end_datetime: Optional[datetime]
+    has_notes: Optional[bool]
+    notes_contain: Optional[str]
+    different_status_than_vehicle: Optional[bool]
+    status_in: Optional[List[str]]
+    spotted_start_date: Optional[date]
+    spotted_end_date: Optional[date]
+    is_read: Optional[bool]
+    only_mine: Optional[bool]
+    is_anonymous: Optional[bool]
+    free_search: Optional[str]
 
     def filter_id(self, queryset):
         return queryset.filter(id=self.id)

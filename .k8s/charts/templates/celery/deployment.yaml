@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "deploy.fullname" . }}-celery-worker
+  labels:
+    {{- include "deploy.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.celeryWorker.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: celery-worker
+      {{- include "deploy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        app: celery-worker
+        {{- include "deploy.selectorLabels" . | nindent 8 }}
+
+    spec:
+      {{- if not .Values.topologySpreadConstraints.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.topologySpreadConstraints.maxSkew }}
+          topologyKey: {{ .Values.topologySpreadConstraints.maxSkew }}
+          whenUnsatisfiable: {{ .Values.topologySpreadConstraints.maxSkew }}
+          labelSelector:
+            matchLabels:
+              {{- include "deploy.labels" . | nindent 4 }}
+      {{- end }}
+
+      containers:
+        - name: app
+          image: {{ .Values.containers.app.image }}
+          ports:
+            - containerPort: {{ .Values.containers.app.containerPort }}
+          envFrom:
+            {{- range .Values.containers.app.env.configMaps }}
+            - configMapRef:
+                name: {{ . | quote }}
+            {{- end }}
+            {{- range .Values.containers.app.env.secrets }}
+            - secretRef:
+                name: {{ . | quote }}
+            {{- end }}
+          env:
+            - name: "DATABASE_PASSWORD"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.containers.app.dbPassword.secret }}
+                  key: {{ .Values.containers.app.dbPassword.key }}
+            - name: "CELERY_BROKER_URL"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.containers.celeryWorker.redis.svcBindSecret }}
+                  key: uri
+          volumeMounts:
+            - mountPath: "/google-application-credential.json"
+              subPath: google-application-credential.json
+              name: firebase-admin-key
+              readOnly: true
+          command:
+            - bash
+          args:
+            - run_celery.sh
+
+
+        - name: memcached
+          image: {{ .Values.containers.memcached.image }}
+          ports:
+            - containerPort: {{ .Values.containers.memcached.containerPort }}
+
+      volumes:
+        - name: firebase-admin-key
+          secret:
+            secretName: {{ .Values.volumes.app.firebaseAdminKeySecret }}

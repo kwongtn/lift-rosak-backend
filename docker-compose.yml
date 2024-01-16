@@ -2,7 +2,7 @@ version: "3"
 
 services:
   db:
-    image: postgis/postgis:15-3.3-alpine
+    image: postgis/postgis:15-3.4-alpine
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
     ports:
@@ -28,9 +28,9 @@ services:
       - ./static:/code/static
     depends_on:
       - app
-    restart: always
+    restart: unless-stopped
 
-  app:
+  app: &app
     build:
       context: .
       args:
@@ -45,4 +45,30 @@ services:
       - "8001"
     depends_on:
       - db
-    restart: always
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  celeryworker:
+    <<: *app
+    depends_on:
+      - db
+      - redis
+    command: bash run_celery.sh
+
+  celerybeat:
+    <<: *app
+    volumes:
+      - .:/code
+    env_file:
+      - secrets.dev.env
+    depends_on:
+      - redis
+      - db
+    ports: []
+    command: bash run_celery_beat.sh

@@ -5,7 +5,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("operation", "0002_alter_asset_options_alter_line_options_and_more"),
     ]

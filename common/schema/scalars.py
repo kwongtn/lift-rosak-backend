@@ -1,23 +1,20 @@
-from datetime import date
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Annotated, List, Optional
 
-import pendulum
-from django.db.models import Count, F, Min
+import strawberry
+import strawberry_django
+from django.db.models import Count, F, Q
 from strawberry.types import Info
-from strawberry_django_plus import gql
 
 from common import models
+from common import models as common_models
+from common.schema.orderings import MediaOrder
 from common.schema.types import (
     FavouriteVehicleData,
     UserSpottingTrend,
     WithMostEntriesData,
 )
-from common.utils import (
-    get_date_key,
-    get_default_start_time,
-    get_group_strs,
-    get_result_comparison_tuple,
-)
+from common.utils import get_date_key, get_default_start_time, get_trends
 from generic.schema.enums import DateGroupings
 from operation import models as operation_models
 from rosak.permissions import IsAdmin
@@ -25,27 +22,64 @@ from spotting import models as spotting_models
 from spotting.enums import SpottingEventType
 
 
-@gql.django.type(models.Media)
-class Media:
-    id: str
+@strawberry_django.type(models.Media, pagination=True)
+class MediaScalar:
+    id: strawberry.ID
     uploader: "UserScalar"
+    file: strawberry_django.DjangoImageType
+
+    @strawberry_django.field
+    def width(self) -> int:
+        return self.file.width
+
+    @strawberry_django.field
+    def height(self) -> int:
+        return self.file.height
 
 
-@gql.django.type(models.User)
+@strawberry.type
+class MediasGroupByPeriodScalar:
+    type: DateGroupings
+    date_key: str
+    year: int
+    month: Optional[int]
+    day: Optional[int]
+    count: int
+    medias: List["MediaScalar"]
+
+
+@strawberry_django.type(models.Media, order=MediaOrder)
+class MediaType(strawberry.relay.Node):
+    id: strawberry.relay.NodeID[str]
+    created: datetime
+    uploader: "UserScalar"
+    file: strawberry_django.DjangoFileType
+
+    @strawberry_django.field
+    def width(self) -> int:
+        return self.file.width
+
+    @strawberry_django.field
+    def height(self) -> int:
+        return self.file.height
+
+
+@strawberry_django.type(models.User)
 class UserScalar:
     if TYPE_CHECKING:
         from spotting.schema.scalars import EventScalar
 
-    firebase_id: str = gql.django.field(permission_classes=[IsAdmin])
+    firebase_id: str = strawberry_django.field(permission_classes=[IsAdmin])
+    nickname: str
     credit_balance: int
     free_credit_balance: int
     non_free_credit_balance: int
 
-    @gql.django.field
+    @strawberry_django.field
     def short_id(self) -> str:
         return self.firebase_id[:8]
 
-    @gql.django.field
+    @strawberry_django.field
     def favourite_vehicles(
         self, count: Optional[int] = 1
     ) -> List[FavouriteVehicleData]:
@@ -68,7 +102,7 @@ class UserScalar:
             for elem in vehicle_count_dict
         ]
 
-    @gql.django.field
+    @strawberry_django.field
     def with_most_entries(self, type: DateGroupings) -> WithMostEntriesData:
         groupings = {"year": F("created__year")}
 
@@ -99,123 +133,49 @@ class UserScalar:
             count=max["count"],
         )
 
-    @gql.django.field
+    @strawberry_django.field
     async def spottings(
         self, info: Info
-    ) -> List[Annotated["EventScalar", gql.lazy("spotting.schema.scalars")]]:
+    ) -> List[Annotated["EventScalar", strawberry.lazy("spotting.schema.scalars")]]:
         return await info.context.loaders["common"]["spottings_from_user_loader"].load(
             self.id
         )
 
-    @gql.django.field
+    @strawberry_django.field
     async def spottings_count(self, info: Info) -> int:
-        return spotting_models.Event.objects.filter(reporter_id=self.id).acount()
+        return await spotting_models.Event.objects.filter(reporter_id=self.id).acount()
 
-    @gql.django.field
+    @strawberry_django.field
+    async def media_count(self) -> int:
+        return await common_models.Media.objects.filter(uploader_id=self.id).acount()
+
+    @strawberry_django.field
     def spotting_trends(
         self,
-        start: Optional[date] = gql.UNSET,
-        end: Optional[date] = gql.UNSET,
+        start: Optional[date] = strawberry.UNSET,
+        end: Optional[date] = strawberry.UNSET,
         date_group: Optional[DateGroupings] = DateGroupings.DAY,
         type_group: Optional[bool] = False,
         free_range: Optional[bool] = False,
-    ) -> List[UserSpottingTrend]:
-        if start is gql.UNSET:
+    ) -> List["UserSpottingTrend"]:
+        if start is strawberry.UNSET:
             start = get_default_start_time(type=date_group)
 
-        if end is gql.UNSET:
+        if end is strawberry.UNSET:
             end = date.today()
 
-        (group_strs, range_type) = get_group_strs(
-            grouping=date_group, prefix="spotting_date__"
+        results = get_trends(
+            groupby_field="spotting_date",
+            count_model=spotting_models.Event,
+            filters=Q(reporter_id=self.id),
+            add_zero=True,
+            additional_groupby={
+                "type": [event_type.value for event_type in SpottingEventType],
+            }
+            if type_group
+            else {},
+            free_range=free_range,
         )
-
-        if type_group:
-            group_strs.append("type")
-
-        filter_params = {
-            "reporter_id": self.id,
-            "spotting_date__lte": end,
-            "spotting_date__gte": start,
-        }
-
-        if free_range:
-            filter_params.pop("spotting_date__lte", None)
-            filter_params.pop("spotting_date__gte", None)
-
-        qs = spotting_models.Event.objects.filter(**filter_params)
-
-        results = list(
-            qs.values(*group_strs)
-            .annotate(count=Count("id"))
-            .values(*group_strs, "count")
-            .order_by(*[f"-{group_str}" for group_str in group_strs])
-        )
-
-        period = pendulum.period(
-            qs.aggregate(min=Min("spotting_date"))["min"] if free_range else start,
-            date.today() if free_range else end,
-        )
-        range = period.range(range_type)
-
-        spotting_date__year = results[0].get("spotting_date__year", None)
-        spotting_date__month = results[0].get("spotting_date__month", None)
-        spotting_date__day = results[0].get("spotting_date__day", None)
-
-        if not type_group:
-            result_dates = get_result_comparison_tuple(
-                results=results,
-                prefix="spotting_date__",
-            )
-
-            for elem in range:
-                year_val = elem.year if spotting_date__year is not None else None
-                month_val = elem.month if spotting_date__month is not None else None
-                day_val = elem.day if spotting_date__day is not None else None
-
-                if (year_val, month_val, day_val) not in result_dates:
-                    results.append(
-                        {
-                            "spotting_date__year": year_val,
-                            "spotting_date__month": month_val,
-                            "spotting_date__day": day_val,
-                            "count": 0,
-                        }
-                    )
-
-        else:
-            result_types = get_result_comparison_tuple(
-                results=results,
-                additional_params=["type"],
-                prefix="spotting_date__",
-            )
-            event_types = [event_type.value for event_type in SpottingEventType]
-
-            for elem in range:
-                year_val = elem.year if spotting_date__year is not None else None
-                month_val = elem.month if spotting_date__month is not None else None
-                day_val = elem.day if spotting_date__day is not None else None
-
-                for event_type in event_types:
-                    if (year_val, month_val, day_val, event_type) not in result_types:
-                        results.append(
-                            {
-                                "spotting_date__year": year_val,
-                                "spotting_date__month": month_val,
-                                "spotting_date__day": day_val,
-                                "type": event_type,
-                                "count": 0,
-                            }
-                        )
-
-        for result in results:
-            result["date_key"] = get_date_key(
-                year=result["spotting_date__year"],
-                month=result.get("spotting_date__month", None),
-                day=result.get("spotting_date__day", None),
-            )
-
-        results = sorted(results, key=lambda d: f'{d["date_key"]}')
 
         return [
             UserSpottingTrend(
@@ -225,11 +185,16 @@ class UserScalar:
                 year=value.get("spotting_date__year", None),
                 month=value.get("spotting_date__month", None),
                 day=value.get("spotting_date__day", None),
+                day_of_week=value.get("day_of_week", None),
+                week_of_month=value.get("week_of_month", None),
+                week_of_year=value.get("week_of_year", None),
+                is_last_day_of_month=value.get("is_last_day_of_month", None),
+                is_last_week_of_month=value.get("is_last_week_of_month", None),
             )
             for value in results
         ]
 
 
-@gql.type
+@strawberry.type
 class GenericMutationReturn:
     ok: bool

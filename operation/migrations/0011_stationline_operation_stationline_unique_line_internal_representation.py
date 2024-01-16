@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("operation", "0010_asset_operation_a_short_d_88fa17_btree_and_more"),
     ]

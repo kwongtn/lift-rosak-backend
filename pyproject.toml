@@ -1,0 +1,63 @@
+[tool.poetry]
+name = "rosak-backend"
+version = "0.1.0"
+description = ""
+authors = ["Kwong Tung Nan <tungnan5636@gmail.com>"]
+license = "GNU AGPLv3"
+readme = "README.md"
+packages = [{include = "rosak_backend"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+boto3 = "1.28.*"
+celery = {extras = ["pymemcache", "redis"], version = "*"}
+discord-webhook = "*"
+django = "4.2.*"
+django-admin-rangefilter = "*"
+django-advanced-filters = "*"
+django-cachalot = "*"
+django-celery-beat = "*"
+django-celery-results = "*"
+django-choices-field = "*"
+django-cleanup = "*"
+django-colorfield = "*"
+django-cors-headers = "*"
+django-debug-toolbar = "*"
+django-extensions = "*"
+django-health-check = "*"
+django-hijack = "*"
+django-location-field = "*"
+django-mdeditor = "*"
+django-model-utils = "*"
+django-ordered-model = "*"
+django-storages = "*"
+djangorestframework = "*"
+dotmap = "*"
+firebase-admin = "*"
+gunicorn = "*"
+imgurpython = {git = "https://github.com/BryanH/imgurpython.git", rev = "master"}
+pendulum = {git = "https://github.com/kwongtn/pendulum.git", rev = "for_rosak"}
+pillow = "*"
+pillow-heif = "*"
+polars = "^0.20.4"
+promise = "*"
+psycopg2-binary = "^2.9.9"
+# psycopg = {extras = ["binary", "pool"], version = "3.*"}
+pymemcache = "*"
+redis = {extras = ["hiredis"], version = "*"}
+requests = "*"
+sentry-sdk = "*"
+setuptools = "*"
+strawberry-graphql = "*"
+strawberry-graphql-django = "*"
+uvicorn = {extras = ["standard"], version = "*"}
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry-sort]
+move-optionals-to-bottom = true

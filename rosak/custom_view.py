@@ -5,6 +5,7 @@ import urllib
 
 import requests
 from django.http import HttpRequest, HttpResponse
+from django.shortcuts import redirect
 
 sentry_host = "o1331817.ingest.sentry.io"
 known_project_ids = ["6596136"]
@@ -12,7 +13,7 @@ known_project_ids = ["6596136"]
 
 def sentry(request: HttpRequest):
     try:
-        envelope = request.body.decode("utf-8")
+        envelope = request.body.decode("utf-8", "ignore")
 
         piece = envelope.split("\n")[0]
         header = json.loads(piece)
@@ -32,7 +33,7 @@ def sentry(request: HttpRequest):
     except Exception as e:
         # handle exception in your preferred style,
         # e.g. by logging or forwarding to Sentry
-        logging.exception(e)
+        logging.debug(e)
 
     return HttpResponse({})
 
@@ -46,3 +47,7 @@ def git_version(request: HttpRequest):
             }
         )
     )
+
+
+def redirect_view(request: HttpRequest):
+    return redirect("https://www.youtube.com/watch?v=dQw4w9WgXcQ")

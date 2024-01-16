@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("spotting", "0002_fix_incorrect_spotting_key"),
     ]

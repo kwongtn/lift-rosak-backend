@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "deploy.fullname" . }}-app
+  labels:
+    {{- include "deploy.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: app
+      {{- include "deploy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        app: app
+        {{- include "deploy.selectorLabels" . | nindent 8 }}
+
+    spec:
+      {{- if not .Values.topologySpreadConstraints.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.topologySpreadConstraints.maxSkew }}
+          topologyKey: {{ .Values.topologySpreadConstraints.maxSkew }}
+          whenUnsatisfiable: {{ .Values.topologySpreadConstraints.maxSkew }}
+          labelSelector:
+            matchLabels:
+              {{- include "deploy.labels" . | nindent 4 }}
+      {{- end }}
+
+      containers:
+        - name: web
+          image: {{ .Values.containers.web.image }}
+          ports:
+            - containerPort: {{ .Values.containers.web.containerPort }}
+          volumeMounts:
+            - name: static
+              mountPath: /code/static
+            - mountPath: "/etc/nginx/templates/default.conf.template"
+              subPath: default.conf.template
+              name: nginx-config
+              readOnly: true
+
+        - name: app
+          image: {{ .Values.containers.app.image }}
+          ports:
+            - containerPort: {{ .Values.containers.app.containerPort }}
+          envFrom:
+            {{- range .Values.containers.app.env.configMaps }}
+            - configMapRef:
+                name: {{ . | quote }}
+            {{- end }}
+            {{- range .Values.containers.app.env.secrets }}
+            - secretRef:
+                name: {{ . | quote }}
+            {{- end }}
+          env:
+            - name: "DATABASE_PASSWORD"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.containers.app.dbPassword.secret }}
+                  key: {{ .Values.containers.app.dbPassword.key }}
+            - name: "CELERY_BROKER_URL"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.containers.app.redis.svcBindSecret }}
+                  key: uri
+          volumeMounts:
+            - mountPath: "/google-application-credential.json"
+              subPath: google-application-credential.json
+              name: firebase-admin-key
+              readOnly: true
+            - name: static
+              mountPath: /code/static
+          command:
+            - bash
+          args:
+            - run_app.sh
+
+        - name: memcached
+          image: {{ .Values.containers.memcached.image }}
+          ports:
+            - containerPort: {{ .Values.containers.memcached.containerPort }}
+
+      volumes:
+        - name: static
+        - name: firebase-admin-key
+          secret:
+            secretName: {{ .Values.volumes.app.firebaseAdminKeySecret }}
+        - name: nginx-config
+          configMap:
+            name: {{ .Values.volumes.web.configMap }}

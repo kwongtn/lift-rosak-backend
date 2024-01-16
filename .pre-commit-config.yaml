@@ -1,8 +1,9 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v4.5.0
     hooks:
       - id: check-yaml
+        exclude: ".k8s/charts/templates/*"
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: mixed-line-ending
@@ -10,33 +11,6 @@ repos:
       - id: check-json
       - id: check-case-conflict
       - id: check-added-large-files
-  - repo: https://github.com/psf/black
-    rev: 23.1.0
-    hooks:
-      - id: black
-  - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
-        args:
-          [
-            "--multi-line=3",
-            "--trailing-comma",
-            "--force-grid-wrap=0",
-            "--use-parentheses",
-            "--line-width=88",
-            "--ensure-newline-before-comments",
-          ]
-  - repo: https://github.com/PyCQA/flake8
-    rev: 6.0.0
-    hooks:
-      - id: flake8
-        args:
-          - --exclude=*/*migrations/*, testproject/testproject/settings/*, __init__.py, apps.py
-          - --ignore=E203, E266, E501, W503
-          - --max-complexity=18
-          - --max-line-length=88
-        exclude: "__init__.py"
   # - repo: https://github.com/Lucas-C/pre-commit-hooks-nodejs
   #   rev: v1.1.2
   #   hooks:
@@ -46,7 +20,17 @@ repos:
   #     - id: dockerfile_lint
   #       # optional custom config:
   #       args: [--json, --verbose, --dockerfile]
-  - repo: https://github.com/kwongtn/pipfile-sort
-    rev: v0.3.1
+  - repo: https://github.com/python-poetry/poetry
+    rev: 1.7.0
     hooks:
-      - id: pipfile-sort
+      - id: poetry-check
+  - repo: https://github.com/andrei-shabanski/poetry-plugin-sort
+    rev: v0.2.1
+    hooks:
+      - id: poetry-sort
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.13
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format

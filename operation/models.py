@@ -1,12 +1,25 @@
 from colorfield.fields import ColorField
 from django.contrib.gis.db import models
 from django.contrib.postgres.indexes import BTreeIndex
+from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
 
-from operation.enums import AssetStatus, AssetType, VehicleStatus
+from operation.enums import (
+    AssetStatus,
+    AssetType,
+    LineStatus,
+    VehicleStatus,
+    WheelStatus,
+)
 
 
 class Line(TimeStampedModel):
+    official_numbering = models.CharField(
+        null=True,
+        blank=True,
+        default=None,
+        max_length=5,
+    )
     code = models.CharField(
         null=False,
         blank=False,
@@ -29,9 +42,17 @@ class Line(TimeStampedModel):
         through="operation.VehicleLine",
         related_name="vehicle_lines",
     )
+    status = TextChoicesField(
+        max_length=32,
+        choices_enum=LineStatus,
+        default=LineStatus.ACTIVE,
+    )
 
     def __str__(self) -> str:
-        return f"{self.id} - {self.code}"
+        if self.official_numbering:
+            return f"{self.official_numbering} - {self.display_name}"
+        else:
+            return f"ID:{self.id} - {self.code}"
 
     class Meta:
         ordering = ["code"]
@@ -253,6 +274,14 @@ class Vehicle(models.Model):
         related_name="line_vehicles",
     )
 
+    wheel_status = TextChoicesField(
+        choices_enum=WheelStatus,
+        max_length=16,
+        blank=True,
+        null=True,
+        default=None,
+    )
+
     notes = models.TextField(
         default="",
         blank=True,
@@ -264,7 +293,7 @@ class Vehicle(models.Model):
     )
 
     def __str__(self) -> str:
-        return f"{self.identification_no}"
+        return f"{self.identification_no}_{','.join(self.lines.values_list('code', flat=True))}"
 
     class Meta:
         ordering = ["identification_no"]
@@ -338,3 +367,15 @@ class VehicleType(models.Model):
             BTreeIndex(fields=["internal_name"]),
             BTreeIndex(fields=["display_name"]),
         ]
+
+
+# class VehicleSnapshot(TimeStampedModel):
+#     vehicle = models.ForeignKey(
+#         to="operation.Vehicle",
+#         null=False,
+#         blank=False,
+#         on_delete=models.CASCADE,
+#         related_name="snapshots",
+#         related_query_name="snapshot",
+#         db_constraint=False,
+#     )

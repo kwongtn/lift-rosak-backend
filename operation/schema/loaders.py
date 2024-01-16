@@ -5,8 +5,8 @@ from django.db.models import Count, Max, Q
 from strawberry.dataloader import DataLoader
 
 from incident.models import VehicleIncident
-from operation.enums import VehicleStatus
 from operation.models import Vehicle, VehicleLine
+from spotting.enums import SpottingVehicleStatus
 from spotting.models import Event
 
 
@@ -36,8 +36,9 @@ async def batch_load_vehicle_status_count_from_vehicle_type(keys):
     # Keys in format (vehicle_type_id, status)
     vehicle_object = await Vehicle.objects.aaggregate(
         **{
-            str(key[0])
-            + str(key[1]): Count("id", filter=Q(vehicle_type_id=key[0], status=key[1]))
+            str(key[0]) + str(key[1]): Count(
+                "id", filter=Q(vehicle_type_id=key[0], status=key[1])
+            )
             for key in keys
         }
     )
@@ -57,9 +58,9 @@ async def batch_load_last_spotting_date_from_vehicle_id(keys):
     event_object = await Event.objects.filter(
         ~Q(
             status__in=[
-                VehicleStatus.NOT_SPOTTED,
-                VehicleStatus.DECOMMISSIONED,
-                VehicleStatus.UNKNOWN,
+                SpottingVehicleStatus.NOT_SPOTTED,
+                SpottingVehicleStatus.DECOMMISSIONED,
+                SpottingVehicleStatus.UNKNOWN,
             ]
         )
     ).aaggregate(
@@ -76,6 +77,18 @@ async def batch_load_spotting_count_from_vehicle(keys):
     )
 
     return [event_object.get(str(key[0]), None) for key in keys]
+
+
+async def batch_load_spottings_from_vehicle(keys):
+    spotting_events: List[Event] = Event.objects.filter(
+        vehicle_id__in=keys
+    ).prefetch_related("vehicle")
+
+    vehicle_dict = defaultdict(set)
+    async for spotting_event in spotting_events:
+        vehicle_dict[spotting_event.vehicle_id].add(spotting_event)
+
+    return [list(vehicle_dict.get(key, {})) for key in keys]
 
 
 async def batch_load_incident_from_vehicle(keys):
@@ -98,6 +111,18 @@ async def batch_load_incident_count_from_vehicle(keys):
     return [incident_object.get(str(key), None) for key in keys]
 
 
+async def batch_load_vehicle_from_line(keys):
+    vehicle_lines: List[Vehicle] = VehicleLine.objects.filter(
+        line_id__in=keys
+    ).prefetch_related("vehicle", "line")
+
+    line_dict = defaultdict(set)
+    async for vehicle_line in vehicle_lines:
+        line_dict[vehicle_line.line_id].add(vehicle_line.vehicle)
+
+    return [list(line_dict.get(key, {})) for key in keys]
+
+
 OperationContextLoaders = {
     "vehicle_from_vehicle_type_loader": DataLoader(
         load_fn=batch_load_vehicle_from_vehicle_type
@@ -105,6 +130,7 @@ OperationContextLoaders = {
     "vehicle_type_from_line_loader": DataLoader(
         load_fn=batch_load_vehicle_type_from_line
     ),
+    "vehicle_from_line_loader": DataLoader(load_fn=batch_load_vehicle_from_line),
     "vehicle_status_count_from_vehicle_type_loader": DataLoader(
         load_fn=batch_load_vehicle_status_count_from_vehicle_type
     ),
@@ -116,6 +142,9 @@ OperationContextLoaders = {
     ),
     "spotting_count_from_vehicle_loader": DataLoader(
         load_fn=batch_load_spotting_count_from_vehicle
+    ),
+    "spottings_from_vehicle_loader": DataLoader(
+        load_fn=batch_load_spottings_from_vehicle
     ),
     "incident_from_vehicle_loader": DataLoader(
         load_fn=batch_load_incident_from_vehicle

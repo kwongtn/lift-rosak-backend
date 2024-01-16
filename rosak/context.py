@@ -15,13 +15,15 @@ from common.enums import UserJejakTransactionCategory
 from common.models import UserJejakTransaction
 from common.schema.loaders import CommonContextLoaders
 from common.utils import FirebaseUser, get_charge_credits_objs
+from incident.schema.loaders import IncidentContextLoaders
 from operation.schema.loaders import OperationContextLoaders
 from spotting.schema.loaders import SpottingContextLoaders
 
 ContextLoaders = {
+    "common": CommonContextLoaders,
+    "incident": IncidentContextLoaders,
     "operation": OperationContextLoaders,
     "spotting": SpottingContextLoaders,
-    "common": CommonContextLoaders,
 }
 
 

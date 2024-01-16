@@ -1,0 +1,60 @@
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+
+loadtesterUrl: http://flagger-loadtester.linkerd-flagger/
+skipCanaryAnalysis: false
+
+containers:
+  web:
+    image: nginx:1.24.0-alpine
+    containerPort: 8000
+  app:
+    image: ghcr.io/kwongtn/lift-rosak-backend:aeaa758-31
+    containerPort: 8001
+    dbPassword:
+      secret: postgres-django-postgresql-ha-postgresql
+      key: password
+    env:
+      configMaps:
+        - backend-django-cm
+      secrets:
+        - backend-django-sec
+        - imgur-creds
+    redis:
+      svcBindSecret: redis-svcbind
+  memcached:
+    image: memcached:1.6.20-alpine
+    containerPort: 11211
+  celeryWorker:
+    redis:
+      svcBindSecret: redis-svcbind
+
+volumes:
+  web:
+    configMap: backend-django-nginx-cm
+  app:
+    firebaseAdminKeySecret: firebase-admin
+
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  topologyKey: kubernetes.io/hostname
+  whenUnsatisfiable: DoNotSchedule
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 2
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+  celeryWorker:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 2
+    targetCPUUtilizationPercentage: 80
+    # targetMemoryUtilizationPercentage: 80

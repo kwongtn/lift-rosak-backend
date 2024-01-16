@@ -5,7 +5,6 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("operation", "0009_alter_vehicleline_line_alter_vehicleline_vehicle"),
     ]
