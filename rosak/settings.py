@@ -148,8 +148,9 @@ if DEBUG is not True:
         # If you wish to associate users to errors (assuming you are using
         # django.contrib.auth) you may enable sending PII data.
         send_default_pii=True,
-        profiles_sample_rate=1.0,
-        sample_rate=0.3,
+        profiles_sample_rate=float(
+            os.environ.get("SENTRY_PROFILES_SAMPLING_RATE", "1.0")
+        ),
     )
 
 else:
