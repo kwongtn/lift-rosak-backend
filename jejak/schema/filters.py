@@ -1,15 +1,16 @@
 from datetime import datetime
 from typing import List
 
-from strawberry_django_plus import gql
+import strawberry
+import strawberry_django
 
 from jejak import models
 
 
-@gql.django.filters.filter(models.Location)
+@strawberry_django.filters.filter(models.Location)
 class LocationFilter:
-    id: gql.ID
-    bus_id: gql.ID
+    id: strawberry.ID
+    bus_id: strawberry.ID
     dt_received_range: List[datetime]
     dt_gps_range: List[datetime]
 

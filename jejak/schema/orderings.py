@@ -1,16 +1,17 @@
-from strawberry_django_plus import gql
+import strawberry
+import strawberry_django
 
 from jejak import models
 
 
-@gql.django.ordering.order(models.Location)
+@strawberry_django.ordering.order(models.Location)
 class LocationOrder:
-    id: gql.auto
-    dt_received: gql.auto
-    dt_gps: gql.auto
+    id: strawberry.auto
+    dt_received: strawberry.auto
+    dt_gps: strawberry.auto
 
 
-@gql.django.ordering.order(models.Bus)
+@strawberry_django.ordering.order(models.Bus)
 class BusOrder:
-    id: gql.auto
-    identifier: gql.auto
+    id: strawberry.auto
+    identifier: strawberry.auto

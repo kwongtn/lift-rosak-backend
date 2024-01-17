@@ -1,32 +1,33 @@
 from datetime import datetime
 from typing import List, Optional
 
-from strawberry_django_plus import gql
+import strawberry
+import strawberry_django
 
 from jejak import models
 
 
-@gql.django.type(models.BusType)
+@strawberry_django.type(models.BusType)
 class BusType:
-    id: gql.ID
+    id: strawberry.ID
     title: Optional[str]
     description: Optional[str]
     buses: List["Bus"]
 
 
-@gql.django.type(models.Bus)
+@strawberry_django.type(models.Bus)
 class Bus:
-    id: gql.ID
+    id: strawberry.ID
     identifier: str
     type: Optional[BusType]
 
 
-@gql.django.type(models.Location)
+@strawberry_django.type(models.Location)
 class Location:
-    id: gql.ID
+    id: strawberry.ID
     dt_received: datetime
     dt_gps: datetime
-    location: gql.auto
+    location: strawberry.auto
     dir: Optional[float]
     speed: Optional[float]
     angle: Optional[int]

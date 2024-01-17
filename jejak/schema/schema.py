@@ -1,6 +1,7 @@
 from typing import List, Optional
 
-from strawberry_django_plus import gql
+import strawberry
+import strawberry_django
 
 from jejak.models import Location as LocationModel
 from jejak.schema.filters import LocationFilter
@@ -8,19 +9,19 @@ from jejak.schema.orderings import BusOrder, LocationOrder
 from jejak.schema.scalars import Bus, Location
 
 
-@gql.type
+@strawberry.type
 class JejakScalars:
-    locations: List[Location] = gql.django.field(
+    locations: List[Location] = strawberry_django.field(
         filters=LocationFilter,
         order=LocationOrder,
         pagination=True,
     )
-    buses: List[Bus] = gql.django.field(
+    buses: List[Bus] = strawberry_django.field(
         pagination=True,
         order=BusOrder,
     )
 
-    @gql.field
+    @strawberry.field
     async def locations_count(self, filters: Optional[LocationFilter] = None) -> int:
         query_dict = {
             "bus_id": filters.bus_id,
@@ -41,6 +42,6 @@ class JejakScalars:
         return await LocationModel.objects.filter(**query_dict).acount()
 
 
-@gql.type
+@strawberry.type
 class JejakMutations:
     pass

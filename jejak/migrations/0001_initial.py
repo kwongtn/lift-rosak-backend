@@ -7,7 +7,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = []
@@ -49,6 +48,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "abstract": False,
+                "verbose_name_plural": "Buses",
             },
         ),
         migrations.CreateModel(
@@ -771,7 +771,7 @@ class Migration(migrations.Migration):
                         U1."is_oku_friendly",
                         U2."provider",
                         U3."route",
-                        U4."busstop",
+                        U4."bus_stop",
                         U5."captain",
                         U6."engine_status"
                     FROM
