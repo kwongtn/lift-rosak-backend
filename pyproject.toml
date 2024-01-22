@@ -39,9 +39,9 @@ imgurpython = {git = "https://github.com/BryanH/imgurpython.git", rev = "master"
 pendulum = {git = "https://github.com/kwongtn/pendulum.git", rev = "for_rosak"}
 pillow = "*"
 pillow-heif = "*"
-polars = "*"
+polars = {extras = ["numpy", "pandas"], version = "*"}
 promise = "*"
-psycopg2-binary = "^2.9.9"
+psycopg2-binary = "2.*"
 # psycopg = {extras = ["binary", "pool"], version = "3.*"}
 pymemcache = "*"
 redis = {extras = ["hiredis"], version = "*"}
