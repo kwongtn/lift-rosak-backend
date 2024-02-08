@@ -5,11 +5,9 @@ import time
 import requests
 from discord_webhook import DiscordEmbed, DiscordWebhook
 from django.conf import settings
-from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils.timezone import now
-from imgurpython import ImgurClient
-from PIL import ExifTags, Image, TiffImagePlugin
+from PIL import ExifTags, Image, Jpeg2KImagePlugin, JpegImagePlugin, TiffImagePlugin
 from pillow_heif import register_heif_opener
 
 from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
@@ -123,19 +121,24 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
         with transaction.atomic(), temp_media.file.open() as stream:
             image_open = Image.open(stream)
             image_open.verify()
-            image_get_exif = image_open.getexif()
 
             exif = {}
-            if image_get_exif:
-                exif = {
-                    # Ensure we're not getting "TypeError: Object of type IFDRational is not JSON serializable".
-                    ExifTags.TAGS[k]: v
-                    for k, v in image_get_exif.items()
-                    if k in ExifTags.TAGS
-                    and type(v) not in [bytes, TiffImagePlugin.IFDRational]
-                }
+            if isinstance(
+                image_open,
+                (JpegImagePlugin.JpegImageFile, Jpeg2KImagePlugin.Jpeg2KImageFile),
+            ):
+                if image_get_exif := image_open.getexif():
+                    exif = {
+                        # Ensure we're not getting "TypeError: Object of type IFDRational is not JSON serializable".
+                        ExifTags.TAGS[k]: v
+                        for k, v in image_get_exif.items()
+                        if k in ExifTags.TAGS
+                        and type(v) not in [bytes, TiffImagePlugin.IFDRational]
+                    }
 
-            logger.info(exif)
+                logger.info(exif)
+            else:
+                logger.info(f"No exif data for {temp_media.file.name}")
 
             image_response = requests.get(url=temp_media.file.url)
             webhook = DiscordWebhook(url=settings.DISCORD_MEDIA_WEBHOOK_URL)
@@ -178,7 +181,6 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
 
             media = Media.objects.create(
                 created=temp_media.created,
-                file=ContentFile(temp_media.file.url, name=temp_media.file.name),
                 uploader_id=temp_media.uploader_id,
                 message_id=discord_res["id"],
                 file_id=discord_attachment.get("id", None),
@@ -274,28 +276,3 @@ def add_width_height_to_media_task(self, *, filename, width, height, **kwargs):
     media.width = width
     media.height = height
     media.save()
-
-
-@celery_app.task(bind=True)
-def cleanup_add_width_height_to_media_task(self, *args, **kwargs):
-    from common.models import Media
-
-    # We attempt to fix the entire media library 1 at a time
-    media = Media.objects.filter(
-        width__isnull=True,
-        height__isnull=True,
-    ).first()
-
-    if media:
-        imgur_client = ImgurClient(
-            client_id=settings.IMGUR_CONSUMER_ID,
-            client_secret=settings.IMGUR_CONSUMER_SECRET,
-            access_token=settings.IMGUR_ACCESS_TOKEN,
-            refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
-        )
-
-        metadata = imgur_client.get_image(media.file.name)
-
-        media.width = metadata.width
-        media.height = metadata.height
-        media.save()

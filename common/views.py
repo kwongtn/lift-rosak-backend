@@ -9,7 +9,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from common.enums import TemporaryMediaType
+from common.enums import TemporaryMediaStatus, TemporaryMediaType
 from common.models import TemporaryMedia
 from common.utils import FirebaseUser
 from spotting.models import Event
@@ -67,6 +67,7 @@ class GenericUpload(APIView):
             file=File(file=file, name=extension),
             upload_type=upload_type,
             metadata=metadata,
+            status=TemporaryMediaStatus.BLOCKED,
         )
 
         # Return valid response

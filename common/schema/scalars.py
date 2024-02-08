@@ -27,14 +27,10 @@ class MediaScalar:
     id: strawberry.ID
     uploader: "UserScalar"
     file: strawberry_django.DjangoImageType
-
-    @strawberry_django.field
-    def width(self) -> int:
-        return self.file.width
-
-    @strawberry_django.field
-    def height(self) -> int:
-        return self.file.height
+    width: int
+    height: int
+    url: Optional[str]
+    discord_suffix: str
 
 
 @strawberry.type
@@ -54,14 +50,10 @@ class MediaType(strawberry.relay.Node):
     created: datetime
     uploader: "UserScalar"
     file: strawberry_django.DjangoFileType
-
-    @strawberry_django.field
-    def width(self) -> int:
-        return self.file.width
-
-    @strawberry_django.field
-    def height(self) -> int:
-        return self.file.height
+    width: int
+    height: int
+    url: Optional[str]
+    discord_suffix: str
 
 
 @strawberry_django.type(models.User)
