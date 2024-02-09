@@ -67,7 +67,7 @@ class GenericUpload(APIView):
             file=File(file=file, name=extension),
             upload_type=upload_type,
             metadata=metadata,
-            status=TemporaryMediaStatus.BLOCKED,
+            status=TemporaryMediaStatus.PENDING,
         )
 
         # Return valid response
