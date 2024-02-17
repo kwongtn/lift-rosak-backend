@@ -191,18 +191,18 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
             )
 
             if temp_media.upload_type == TemporaryMediaType.SPOTTING_EVENT:
-                event: Event = Event.objects.get(
+                if event := Event.objects.filter(
                     id=temp_media.metadata["spotting_event_id"]
-                )
-                if temp_media.uploader_id != event.reporter_id:
-                    raise RuntimeError(
-                        f"User {temp_media.uploader_id} is not the event reporter for event {event.id}"
-                    )
+                ).first():
+                    if temp_media.uploader_id != event.reporter_id:
+                        raise RuntimeError(
+                            f"User {temp_media.uploader_id} is not the event reporter for event {event.id}"
+                        )
 
-                EventMedia.objects.create(
-                    media_id=media.id,
-                    event_id=event.id,
-                )
+                    EventMedia.objects.create(
+                        media_id=media.id,
+                        event_id=event.id,
+                    )
 
             elif (
                 temp_media.upload_type == TemporaryMediaType.INCIDENT_CALENDAR_INCIDENT
