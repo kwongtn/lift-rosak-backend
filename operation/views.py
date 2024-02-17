@@ -120,13 +120,16 @@ class VehicleSpottingTrend(APIView):
         sortedResults = sorted(results, key=lambda d: f'{d["dateKey"]}')
 
         combination_dict = {}
+        deduct_by = 0
         for result in sortedResults:
             year = result["dateKey"].split("-")[0]
             dict_key = f"{year}W{result['weekOfYear']}"
 
             dateTarget = pendulum.parse(result["dateKey"])
             if (dateTarget - timedelta(days=6)).year != dateTarget.year:
-                combination_dict[dict_key] = len(combination_dict) - 1
+                if dict_key not in combination_dict.keys():
+                    deduct_by += 1
+                combination_dict[dict_key] = len(combination_dict) - 1 - deduct_by
 
             elif (
                 dateTarget.month == 12
@@ -136,11 +139,11 @@ class VehicleSpottingTrend(APIView):
                 dict_key = f"{year}W{(
                     dateTarget - timedelta(days=6)
                 ).week_of_year + 1}"
-                combination_dict[dict_key] = len(combination_dict)
+                combination_dict[dict_key] = len(combination_dict) - deduct_by
                 result["weekOfYear"] += 52
 
             elif combination_dict.get(dict_key, None) is None:
-                combination_dict[dict_key] = len(combination_dict)
+                combination_dict[dict_key] = len(combination_dict) - deduct_by
 
         return Response(
             {
