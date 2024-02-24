@@ -32,11 +32,11 @@ class TimescaleRouter:
 
         return None
 
-    def allow_migrate(self, db, app_label, model_name=None, **hints):
+    def allow_migrate(self, db: str, app_label: str, model_name=None, **hints):
         """
         Make sure the timescale apps only appear in the 'timescale' database.
         """
-        if app_label in self.route_app_labels:
-            return db == "timescale"
+        if db != "timescale":
+            return False
 
-        return False
+        return app_label in self.route_app_labels
