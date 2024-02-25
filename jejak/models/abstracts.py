@@ -5,6 +5,9 @@ from django.db import models
 class RangeAbstractModel(models.Model):
     dt_range = DateTimeRangeField(default_bounds="[]")
 
+    def __str__(self, *args, **kwargs) -> str:
+        return f"{self.id}-{self.dt_range}"
+
     class Meta:
         abstract = True
 
