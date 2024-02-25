@@ -132,9 +132,7 @@ if DEBUG is not True:
         environment=ENVIRONMENT,
         integrations=[
             DjangoIntegration(),
-            CeleryIntegration(
-                monitor_beat_tasks=True,
-            ),
+            CeleryIntegration(),
             StrawberryIntegration(
                 async_execution=True,
             ),
