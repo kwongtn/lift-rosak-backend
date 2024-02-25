@@ -2,9 +2,11 @@ import argparse
 import os
 
 import django
-import pandas as pd
+import polars as pl
+from django.db import models
+from polars import LazyFrame
 
-from utils.constants import COL_RENAME, DTYPE, EXPECTED_COLS
+from utils.constants import COL_RENAME, EXPECTED_COLS, PL_DTYPE
 from utils.db import wrap_errors
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rosak.settings")
@@ -49,24 +51,34 @@ sleep_time = 5
 DT_TARGET = "dt_gps"
 
 print(f"{FILENAME} ⏩ Reading data...")
-df = pd.read_json(
+df: LazyFrame = pl.scan_ndjson(
     INPUT_FILENAME,
-    lines=True,
-    dtype=DTYPE,
-).rename(columns=COL_RENAME)
+    schema=PL_DTYPE,
+).rename(COL_RENAME)
 
-expected_diff = EXPECTED_COLS.difference(set(df.columns.tolist()))
+expected_diff = EXPECTED_COLS.difference(set(df.columns))
 if expected_diff:
     print(
         f"{FILENAME} Not-expected columns: ",
-        EXPECTED_COLS.difference(set(df.columns.tolist())),
+        EXPECTED_COLS.difference(set(df.columns)),
     )
 
-assert set(df.columns.tolist()) == EXPECTED_COLS
+assert set(df.columns) == EXPECTED_COLS
 
-for model in [Bus, Captain, TripRev, EngineStatus, Accessibility, Provider, BusStop]:
+model: models.Model
+for model in [
+    Bus,
+    Captain,
+    TripRev,
+    EngineStatus,
+    Accessibility,
+    Provider,
+    BusStop,
+]:
     model_name = model.__name__.lower()
-    identifiers = list(df[model_name].dropna().unique())
+    identifiers = (
+        df.select(pl.col(model_name)).drop_nulls().unique().collect()[model_name]
+    )
 
     print(f"{FILENAME} ⏩ Importing data for {model_name}...")
     wrap_errors(
@@ -74,16 +86,16 @@ for model in [Bus, Captain, TripRev, EngineStatus, Accessibility, Provider, BusS
         objs=[model(identifier=identifier) for identifier in identifiers],
         ignore_conflicts=True,
     )
-    print(f"{FILENAME} ✅ Done import for {model_name}...")
+    print(f"{FILENAME} ✅ Done import for {model_name}.")
 
-for (range_model, left_model, right_model) in [
+for range_model, left_model, right_model in [
     (BusProviderRange, Bus, Provider),
     (AccessibilityBusRange, Bus, Accessibility),
     (EngineStatusBusRange, Bus, EngineStatus),
     (TripRevBusRange, Bus, TripRev),
     (BusStopBusRange, Bus, BusStop),
     (CaptainProviderRange, Captain, Provider),
-    (CaptainBusRange, Bus, Captain),
+    (CaptainBusRange, Bus, Captain),  # May have grouping issues
 ]:
     print(
         f"{FILENAME} ⏩ Importing ranges for [{left_model.__name__.lower()}, {right_model.__name__.lower()}]..."
@@ -101,17 +113,10 @@ for (range_model, left_model, right_model) in [
 multi_fk_row_import(
     df=df,
     groupings={
-        "provider": Provider,
         "bus": Bus,
+        "provider": Provider,
     },
     target_model=Trip,
-)
-multi_fk_row_import(
-    df=df,
-    groupings={
-        "provider": Provider,
-    },
-    target_model=Route,
 )
 
 
@@ -120,10 +125,20 @@ single_side_multi_fk_range_import(
     range_model=TripRange,
     side_model=Trip,
     groupings={
-        "provider": Provider,
         "bus": Bus,
+        "provider": Provider,
     },
 )
+
+
+multi_fk_row_import(
+    df=df,
+    groupings={
+        "provider": Provider,
+    },
+    target_model=Route,
+)
+
 
 multi_fk_range_import(
     df=df,

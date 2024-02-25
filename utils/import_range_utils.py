@@ -1,12 +1,13 @@
 import argparse
 import time
 from collections import defaultdict
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List
 
-import numpy as np
+import polars as pl
 from django.db.models import Model, Q
-from pandas import DataFrame
+from polars import DataFrame, LazyFrame
 from psycopg2.extras import DateTimeTZRange
 
 from jejak.models import IdentifierDetailAbstractModel, RangeAbstractModel
@@ -30,11 +31,12 @@ def group_is_close_dt(range_group, model_str: str):
         threshold = GROUP_THRESHOLDS[model_str]
 
         if (
-            datetime.fromisoformat(range_group[index + 1]["start_dt"])
-            - datetime.fromisoformat(range_group[index]["end_dt"])
+            range_group[index + 1]["start_dt"] - range_group[index]["end_dt"]
             < threshold
         ):
-            range_group[index]["end_dt"] = range_group[index + 1]["end_dt"]
+            range_group[index]["end_dt"] = max(
+                range_group[index]["end_dt"], range_group[index + 1]["end_dt"]
+            )
             del range_group[index + 1]
             return True
 
@@ -48,17 +50,17 @@ def aggregate_start_end_dt(
 ):
     ranges = defaultdict(list)
     for df in dfs:
-        operation_dict = {key: df.loc[:, key].iloc[0] for key in grouping_keys}
+        operation_dict = {key: df.select(key)[0].item() for key in grouping_keys}
 
         if None not in operation_dict.values():
-            start_dt = np.min(df[dt_target])
-            end_dt = np.max(df[dt_target])
+            start_dt = datetime.fromisoformat(df.select(pl.min(dt_target)).item())
+            end_dt = datetime.fromisoformat(df.select(pl.max(dt_target)).item())
 
             # print(dt_target, start_dt, end_dt)
             ranges[tuple(operation_dict.values())].append(
                 {
-                    "start_dt": start_dt,
-                    "end_dt": end_dt,
+                    "start_dt": min(start_dt, end_dt),
+                    "end_dt": max(start_dt, end_dt),
                 }
             )
 
@@ -66,19 +68,27 @@ def aggregate_start_end_dt(
 
 
 def sort_split_dataframes(
-    df: DataFrame,
+    df: LazyFrame,
     sort_on: List[str],
     split_on: List[str],
-):
-    grouped = df.sort_values(sort_on)
+) -> List[DataFrame]:
+    computed = pl.concat_str(split_on).fill_null("")
 
-    df_groupings = grouped[split_on[0]].astype(str)
-    for i in range(1, len(split_on)):
-        df_groupings = grouped[split_on[i]].astype(str) + df_groupings
+    grouped = (
+        df.select(pl.col(set([*sort_on, *split_on])))
+        .sort(*sort_on)
+        .select(
+            pl.all(),
+            # Invert cause cumsum adds all True, and that each True means change in data
+            is_same=~computed.eq(computed.shift()).fill_null(False),
+        )
+        .select(
+            pl.exclude("is_same"),
+            group=pl.cum_sum("is_same"),
+        )
+    )
 
-    grouped["group"] = df_groupings.ne(df_groupings.shift()).cumsum()
-
-    return [data for name, data in grouped.groupby("group")]
+    return [data for name, data in grouped.collect().group_by(["group"])]
 
 
 def get_field_name(df_col_name: str) -> str:
@@ -141,7 +151,7 @@ def instance_mapping_fn(
 # As a best practice, left should be the model that has more values
 # We assume that all values have been created
 def single_fk_range_import(
-    df: DataFrame,
+    df: LazyFrame,
     range_model: RangeAbstractModel,
     left_model: IdentifierDetailAbstractModel,
     right_model: IdentifierDetailAbstractModel,
@@ -182,11 +192,21 @@ def single_fk_range_import(
     while True:
         try:
             left_obj_dict = left_model.objects.filter(
-                identifier__in=df[left_key].dropna().unique()
+                identifier__in=df.select(pl.col(left_key))
+                .drop_nulls()
+                .unique()
+                .collect()
+                .get_columns()[0]
+                .to_list()
             ).in_bulk(field_name="identifier")
 
             right_obj_dict = right_model.objects.filter(
-                identifier__in=df[right_key].dropna().unique()
+                identifier__in=df.select(pl.col(right_key))
+                .drop_nulls()
+                .unique()
+                .collect()
+                .get_columns()[0]
+                .to_list()
             ).in_bulk(field_name="identifier")
 
         except Exception as e:
@@ -201,10 +221,7 @@ def single_fk_range_import(
 
     print(f"{FILENAME} ⏩ {debug_prefix} Inserting ranges...")
     to_create = []
-    for (key, range_item) in ranges.items():
-        if "<NA>" in [str(i) for i in key]:
-            continue
-
+    for key, range_item in ranges.items():
         key_data = {
             get_field_name(left_key) + "_id": left_obj_dict[str(key[0])].id,
             get_field_name(right_key) + "_id": right_obj_dict[str(key[1])].id,
@@ -231,12 +248,47 @@ def single_fk_range_import(
     )
 
 
+def replace_identifier_with_id(
+    df_collected: DataFrame,
+    groupings: dict,
+    call_all_from_db=False,
+    drop_replaced=False,
+) -> DataFrame:
+    df = deepcopy(df_collected)
+
+    model: Model
+    for model in groupings.values():
+        model_name = model.__name__.lower()
+
+        # Probably issue is here, cause we collapse everything to identifier only, without taking into account other values
+        providers_dict = (
+            model.objects.all()
+            if call_all_from_db
+            else model.objects.filter(identifier__in=df_collected[model_name].unique())
+        ).in_bulk(field_name="identifier")
+
+        df_dict = defaultdict(tuple)
+        for elem in providers_dict.values():
+            df_dict[f"{model_name}_id"] += (elem.id,)
+            df_dict[model_name] += (elem.identifier,)
+
+        fk_df = pl.DataFrame(df_dict)
+
+        # We deal with the collected one cause we don't wanna do duplicate work
+        df = df.join(fk_df, on=model_name, how="left")
+        if drop_replaced:
+            df = df.drop(model_name)
+
+    return df
+
+
 # We assume that objects that require other objects to be created
 # first are already created
 def multi_fk_row_import(
-    df: DataFrame,
+    df: LazyFrame,
     groupings: Dict[str, Model],
     target_model: IdentifierDetailAbstractModel,
+    call_all_from_db=True,
 ):
     global sleep_time
     target_str = target_model.__name__.lower()
@@ -244,19 +296,24 @@ def multi_fk_row_import(
     debug_prefix = f"[{list(groupings.keys())} -> {target_str}]"
 
     print(f"{FILENAME} 📦 {debug_prefix} Aggregrating values...")
-    df2 = df[[target_str, *groupings.keys()]].dropna().drop_duplicates()
-
-    dicts: dict = {}
+    df_collected: DataFrame = (
+        df.select(target_str, *groupings.keys())
+        .unique()
+        .drop_nulls()
+        .rename({target_str: "identifier"})
+        .collect()
+    )
 
     while True:
         try:
             print(f"{FILENAME} ⏩ {debug_prefix} Obtaining existing values...")
-            dicts = {
-                key: model.objects.filter(
-                    identifier__in=df2[key].dropna().unique(),
-                ).in_bulk(field_name="identifier")
-                for (key, model) in groupings.items()
-            }
+
+            df_collected = replace_identifier_with_id(
+                df_collected=df_collected,
+                groupings=groupings,
+                call_all_from_db=call_all_from_db,
+                drop_replaced=True,
+            )
 
         except Exception as e:
             print(e)
@@ -268,15 +325,12 @@ def multi_fk_row_import(
 
         break
 
-    print(f"{FILENAME} ⏩ {debug_prefix} Iterating & inserting values...")
-    to_bulk_create_dict = []
-    for index, row in df2.iterrows():
-        data_dict = {"identifier": row[target_str]}
+    print(df_collected)
 
-        for key in groupings.keys():
-            data_dict[key + "_id"] = dicts[key].get(row[key]).id
-
-        to_bulk_create_dict.append(data_dict)
+    print(
+        f"{FILENAME} ⏩ {debug_prefix} Iterating & inserting {len(df_collected)} values..."
+    )
+    to_bulk_create_dict = [row for row in df_collected.iter_rows(named=True)]
 
     wrap_errors(
         fn=target_model.objects.bulk_create,
@@ -287,10 +341,26 @@ def multi_fk_row_import(
     )
 
     print(f"{FILENAME} ✅ {debug_prefix} Done import.")
+    return df_collected
+
+
+def get_fk_df(df_collected: DataFrame, groupings: Dict[str, Model], model: Model):
+    model_name = model.__name__.lower()
+    qs = model.objects.filter(identifier__in=df_collected[model_name].unique())
+
+    df_dict = defaultdict(tuple)
+    for elem in qs:
+        for key in groupings.keys():
+            df_dict[f"{key}_id"] += (getattr(elem, f"{key}_id"),)
+
+        df_dict["identifier"] += (elem.identifier,)
+        df_dict[f"{model_name}_id"] += (elem.id,)
+
+    return pl.DataFrame(df_dict)
 
 
 def single_side_multi_fk_range_import(
-    df: DataFrame,
+    df: LazyFrame,
     range_model: RangeAbstractModel,
     groupings: Dict[str, Model],
     side_model: Model,
@@ -302,10 +372,30 @@ def single_side_multi_fk_range_import(
 
     # Aggregate data based on dt grouping
     print(f"{FILENAME} 📦 {debug_prefix} Sorting & aggregrating values...")
+
+    grouping_key_ids = [f"{key}_id" for key in groupings.keys()]
+    to_drop = [side_model_key, *grouping_key_ids]
+    df_collected = df.collect()
+
+    side_df = get_fk_df(df_collected, groupings, side_model)
+
+    new_df = (
+        replace_identifier_with_id(
+            df_collected=df_collected,
+            groupings=groupings,
+            call_all_from_db=True,
+        ).join(
+            side_df.rename({"identifier": side_model_key}),
+            on=to_drop,
+            how="left",
+        )
+        # .sort([*grouping_key_ids, dt_target])
+    )
+
     dfs = sort_split_dataframes(
-        df=df,
-        sort_on=[*groupings.keys(), dt_target],
-        split_on=[*groupings.keys(), side_model_key],
+        df=new_df.lazy(),
+        sort_on=[grouping_key_ids[0], dt_target],
+        split_on=[*grouping_key_ids, f"{side_model_key}_id"],
     )
 
     print(
@@ -314,7 +404,10 @@ def single_side_multi_fk_range_import(
 
     ranges = aggregate_start_end_dt(
         dfs=dfs,
-        grouping_keys=[side_model_key, *groupings.keys()],
+        grouping_keys=[
+            # *grouping_key_ids,
+            f"{side_model_key}_id",
+        ],
     )
 
     print(f"{FILENAME} ⏩ {debug_prefix} Grouping close values...")
@@ -322,28 +415,6 @@ def single_side_multi_fk_range_import(
         if len(ranges[key]) > 1:
             while group_is_close_dt(ranges[key], range_model.__name__):
                 pass
-
-    dicts: dict = {}
-
-    while True:
-        try:
-            print(f"{FILENAME} ⏩ {debug_prefix} Querying dicts...")
-            dicts = {
-                key: model.objects.filter(
-                    identifier__in=df[key].dropna().unique(),
-                ).in_bulk(field_name="identifier")
-                for (key, model) in groupings.items()
-            }
-
-        except Exception as e:
-            print(e)
-            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
-            time.sleep(sleep_time)
-            sleep_time += 5
-
-            continue
-
-        break
 
     ranges_size = len(ranges)
     progress_size = 0
@@ -362,28 +433,11 @@ def single_side_multi_fk_range_import(
 
         progress_suffix = f"[{progress_size:,}/{ranges_size:,}]"
 
-        print(f"{FILENAME} ⏩ {debug_prefix} Generating query... {progress_suffix}")
-        criteria = get_criteria(
-            grouping_keys=groupings.keys(),
-            ranges=chunk,
-            dicts=dicts,
-        )
-
-        print(f"{FILENAME} ⏩ {debug_prefix} Requesting from db... {progress_suffix}")
-
-        instances_dict = wrap_errors(
-            fn=instance_mapping_fn,
-            debug_prefix=debug_prefix,
-            progress_suffix=progress_suffix,
-            criteria=criteria,
-            groupings=groupings,
-            side_model=side_model,
-        )
-
         print(f"{FILENAME} ⏩ {debug_prefix} Inserting values... {progress_suffix}")
         to_create = []
-        for key in chunk:
-            for elem in chunk[key]:
+        for key, elems in chunk.items():
+            for elem in elems:
+                # print(elem)
                 to_create.append(
                     range_model(
                         dt_range=DateTimeTZRange(
@@ -391,7 +445,7 @@ def single_side_multi_fk_range_import(
                             upper=elem["end_dt"],
                             bounds="[]",
                         ),
-                        **{side_model_key + "_id": instances_dict[key]},
+                        **{side_model_key + "_id": key[0]},
                     )
                 )
 
@@ -407,7 +461,7 @@ def single_side_multi_fk_range_import(
 
 
 def multi_fk_range_import(
-    df: DataFrame,
+    df: LazyFrame,
     range_model: RangeAbstractModel,
     left_model: Model,
     right_model: Model,
@@ -416,21 +470,65 @@ def multi_fk_range_import(
     dt_target: str = DT_TARGET,
 ):
     global sleep_time
-    left_groupings_keys = [model.__name__.lower() for model in left_groupings]
-    right_groupings_keys = [model.__name__.lower() for model in right_groupings]
-    grouping_keys_set = set([*left_groupings_keys, *right_groupings_keys])
+    left_groupings: Dict[str, Model] = {
+        model.__name__.lower(): model for model in left_groupings
+    }
+    right_groupings: Dict[str, Model] = {
+        model.__name__.lower(): model for model in right_groupings
+    }
+
+    left_groupings_keys = left_groupings.keys()
+    right_groupings_keys = right_groupings.keys()
 
     left_model_key = left_model.__name__.lower()
     right_model_key = right_model.__name__.lower()
 
     debug_prefix = f"[{str(left_groupings_keys)} -> {str(right_groupings_keys)}]"
+    df_collected = df.collect().drop(
+        "latitude", "longitude", "dt_gps", "dir", "speed", "angle", "accessibility"
+    )
+
+    for groupings, model in [
+        (left_groupings, left_model),
+        (right_groupings, right_model),
+    ]:
+        print(f"{FILENAME} ⏩ {debug_prefix} Requesting {model.__name__} instances... ")
+
+        fk_df = get_fk_df(df_collected, groupings, model)
+        print("fk_df")
+        print(fk_df)
+        model_key = model.__name__.lower()
+
+        df_collected = (
+            replace_identifier_with_id(
+                df_collected=df_collected,
+                groupings=groupings,
+                call_all_from_db=True,
+            ).join(
+                fk_df.rename({"identifier": model_key}),
+                on=[model_key, *[f"{key}_id" for key in groupings.keys()]],
+                how="left",
+            )
+            # .sort([*grouping_key_ids, dt_target])
+        )
+        print(df_collected)
+
+    grouping_ids = [
+        f"{k}_id"
+        for k in [
+            left_model_key,
+            *left_groupings_keys,
+            right_model_key,
+            *right_groupings_keys,
+        ]
+    ]
 
     # Aggregate data based on dt grouping
     print(f"{FILENAME} 📦 {debug_prefix} Sorting & aggregrating values...")
     dfs = sort_split_dataframes(
-        df=df,
-        sort_on=[*grouping_keys_set, left_model_key, dt_target],
-        split_on=[*grouping_keys_set, left_model_key, right_model_key],
+        df=df_collected.lazy(),
+        sort_on=[left_model_key, dt_target],
+        split_on=grouping_ids,
     )
 
     print(
@@ -438,35 +536,14 @@ def multi_fk_range_import(
     )
     ranges = aggregate_start_end_dt(
         dfs=dfs,
-        grouping_keys=[left_model_key, right_model_key, *grouping_keys_set],
+        grouping_keys=grouping_ids,
     )
 
-    print(f"{FILENAME} ⏩ {debug_prefix} Grouping close values...")
-    for key in ranges:
-        if len(ranges[key]) > 1:
-            while group_is_close_dt(ranges[key], range_model.__name__):
-                pass
-
-    dicts: dict = {}
-
-    while True:
-        try:
-            dicts = {
-                model.__name__.lower(): model.objects.filter(
-                    identifier__in=df[model.__name__.lower()].dropna().unique(),
-                ).in_bulk(field_name="identifier")
-                for model in set([*left_groupings, *right_groupings])
-            }
-
-        except Exception as e:
-            print(e)
-            print(f"{FILENAME} ❗ Error, retrying in {sleep_time} seconds...")
-            time.sleep(sleep_time)
-            sleep_time += 5
-
-            continue
-
-        break
+    # print(f"{FILENAME} ⏩ {debug_prefix} Grouping close values...")
+    # for key in ranges:
+    #     if len(ranges[key]) > 1:
+    #         while group_is_close_dt(ranges[key], range_model.__name__):
+    #             pass
 
     ranges_size = len(ranges)
     progress_size = 0
@@ -485,111 +562,24 @@ def multi_fk_range_import(
 
         progress_suffix = f"[{progress_size:,}/{ranges_size:,}]"
 
-        print(
-            f"{FILENAME} ⏩ {debug_prefix} Generating & requesting comparison dict... {progress_suffix}"
-        )
-
-        left_criteria = get_criteria(
-            start_num=0,
-            grouping_keys=left_groupings_keys,
-            ranges=chunk,
-            dicts=dicts,
-        )
-        right_criteria = get_criteria(
-            start_num=1 + len(left_groupings),
-            grouping_keys=right_groupings_keys,
-            ranges=chunk,
-            dicts=dicts,
-        )
-
-        def request_instances(model, criteria, grouping_keys):
-            return model.objects.filter(criteria).select_related(*grouping_keys)
-
-        print(
-            f"{FILENAME} ⏩ {debug_prefix} Requesting left instances... {progress_suffix}"
-        )
-        left_instances = wrap_errors(
-            fn=request_instances,
-            model=left_model,
-            criteria=left_criteria,
-            grouping_keys=left_groupings_keys,
-        )
-        print(
-            f"{FILENAME} ⏩ {debug_prefix} Requesting right instances... {progress_suffix}"
-        )
-        right_instances = wrap_errors(
-            fn=request_instances,
-            model=right_model,
-            criteria=right_criteria,
-            grouping_keys=right_groupings_keys,
-        )
-
-        def get_instances_dict(instances, groupings_keys):
-            instances_dict = {}
-            for instance in instances:
-                instances_dict[
-                    tuple(
-                        [
-                            instance.identifier,
-                            *[
-                                getattr(instance, grouping_key).identifier
-                                for grouping_key in groupings_keys
-                            ],
-                        ]
-                    )
-                ] = instance
-
-            return instances_dict
-
-        print(
-            f"{FILENAME} ⏩ {debug_prefix} Compiling left instances... {progress_suffix}"
-        )
-        left_instances_dict: dict = wrap_errors(
-            fn=get_instances_dict,
-            debug_prefix=debug_prefix,
-            instances=left_instances,
-            groupings_keys=left_groupings_keys,
-        )
-
-        print(
-            f"{FILENAME} ⏩ {debug_prefix} Compiling right instances... {progress_suffix}"
-        )
-        right_instances_dict: dict = wrap_errors(
-            fn=get_instances_dict,
-            debug_prefix=debug_prefix,
-            instances=right_instances,
-            groupings_keys=right_groupings_keys,
-        )
-
         print(f"{FILENAME} ⏩ Inserting values... {progress_suffix}")
         to_create = []
-        for key in chunk:
-            for elem in chunk[key]:
-                to_create.append(
-                    range_model(
-                        dt_range=DateTimeTZRange(
-                            lower=elem["start_dt"],
-                            upper=elem["end_dt"],
-                            bounds="[]",
-                        ),
-                        **{
-                            left_model_key
-                            + "_id": left_instances_dict[
-                                key[0 : 1 + len(left_groupings_keys)]
-                            ].id,
-                            right_model_key
-                            + "_id": right_instances_dict[
-                                key[
-                                    1
-                                    + len(left_groupings_keys) : 1
-                                    + len(left_groupings_keys)
-                                    + 1
-                                    + len(right_groupings_keys)
-                                ]
-                            ].id,
-                        },
-                    )
+        for key, elems in chunk.items():
+            for elem in elems:
+                # print(key, elem)
+                range_obj = range_model(
+                    dt_range=DateTimeTZRange(
+                        lower=elem["start_dt"],
+                        upper=elem["end_dt"],
+                        bounds="[]",
+                    ),
+                    **{left_model_key + "_id": key[0]},
                 )
+
+                for i in range(len(grouping_ids)):
+                    setattr(range_obj, grouping_ids[i], key[i])
+
+                to_create.append(range_obj)
 
         wrap_errors(
             fn=range_model.objects.bulk_create,

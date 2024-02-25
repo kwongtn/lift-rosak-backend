@@ -1,16 +1,37 @@
 from datetime import timedelta
 
+import polars as pl
+
 DTYPE = {
     "latitude": "Float64",
     "longitude": "Float64",
     "dir": "Float32",
     "speed": "Float32",
     "angle": "Float32",
-    "captain_id": "Int32",
-    "trip_rev_kind": "Int32",
-    "engine_status": "Int32",
-    "accessibility": "Int32",
-    "busstop_id": "Int32",
+    "captain_id": "String",
+    "trip_rev_kind": "String",
+    "engine_status": "String",
+    "accessibility": "String",
+    "busstop_id": "String",
+}
+
+PL_DTYPE = {
+    "dt_received": pl.String(),
+    "dt_gps": pl.String(),
+    "latitude": pl.Float64(),
+    "longitude": pl.Float64(),
+    "dir": pl.Float32(),
+    "speed": pl.Float32(),
+    "angle": pl.Float32(),
+    "route": pl.String(),
+    "bus_no": pl.String(),
+    "trip_no": pl.String(),
+    "captain_id": pl.String(),
+    "trip_rev_kind": pl.String(),
+    "engine_status": pl.Int32(),
+    "accessibility": pl.Int32(),
+    "busstop_id": pl.String(),
+    "provider": pl.String(),
 }
 
 COL_RENAME = {
