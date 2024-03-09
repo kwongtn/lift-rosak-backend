@@ -1,12 +1,11 @@
 from datetime import date, datetime
-from typing import List, Optional
+from typing import TYPE_CHECKING, Annotated, List, Optional
 
 import strawberry
 import strawberry_django
 from asgiref.sync import sync_to_async
 from strawberry.types import Info
 
-from common.schema.scalars import MediaScalar
 from incident import models
 from operation.schema.scalars import Line, Station, Vehicle
 
@@ -50,6 +49,9 @@ class CalendarIncidentCategoryScalar:
 
 @strawberry_django.type(models.CalendarIncident)
 class CalendarIncidentScalar:
+    if TYPE_CHECKING:
+        from common.schema.scalars import MediaScalar
+
     id: strawberry.auto
     start_datetime: datetime
     end_datetime: Optional[datetime]
@@ -71,7 +73,9 @@ class CalendarIncidentScalar:
     chronologies: List["CalendarIncidentChronologyScalar"]
 
     @strawberry_django.field
-    async def medias(self, info: Info) -> List["MediaScalar"]:
+    async def medias(
+        self, info: Info
+    ) -> List[Annotated["MediaScalar", strawberry.lazy("common.schema.scalars")]]:
         return await info.context.loaders["incident"][
             "medias_from_calendar_incident_loader"
         ].load(self.id)

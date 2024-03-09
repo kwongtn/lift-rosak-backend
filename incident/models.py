@@ -182,6 +182,7 @@ class CalendarIncident(TimeStampedModel, OrderedModel):
 
     lines = models.ManyToManyField(
         to="operation.Line",
+        related_name="incidents",
         blank=True,
     )
     vehicles = models.ManyToManyField(

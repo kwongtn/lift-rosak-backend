@@ -42,6 +42,11 @@ class Line(TimeStampedModel):
         through="operation.VehicleLine",
         related_name="vehicle_lines",
     )
+    calendar_incidents = models.ManyToManyField(
+        to="incident.CalendarIncident",
+        # through="operation.VehicleLine",
+        related_name="lines",
+    )
     status = TextChoicesField(
         max_length=32,
         choices_enum=LineStatus,
