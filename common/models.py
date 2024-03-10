@@ -99,7 +99,12 @@ class User(TimeStampedModel):
     clearances = models.ManyToManyField(
         to="common.Clearance", through="common.UserClearance"
     )
-    telegram_id = models.TextField(unique=True, default=None, blank=True)
+    telegram_id = models.TextField(
+        unique=True,
+        default=None,
+        null=True,
+        blank=True,
+    )
 
     def __str__(self) -> str:
         return self.firebase_id[:8]
@@ -116,6 +121,7 @@ def get_verification_code():
 class UserVerificationCode(TimeStampedModel):
     user = models.ForeignKey(to="common.User", on_delete=models.CASCADE)
     code = models.PositiveIntegerField(
+        unique=True,
         default=get_verification_code,
         validators=[MinValueValidator(100000), MaxValueValidator(999999)],
     )
