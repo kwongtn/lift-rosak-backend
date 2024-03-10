@@ -1,6 +1,8 @@
 import uuid
+from random import randint
 
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from model_utils.models import TimeStampedModel, UUIDModel
 
@@ -97,6 +99,7 @@ class User(TimeStampedModel):
     clearances = models.ManyToManyField(
         to="common.Clearance", through="common.UserClearance"
     )
+    telegram_id = models.TextField(unique=True, default=None, blank=True)
 
     def __str__(self) -> str:
         return self.firebase_id[:8]
@@ -104,6 +107,18 @@ class User(TimeStampedModel):
     @property
     def display_name(self) -> str:
         return self.nickname or self.firebase_id[:8]
+
+
+def get_verification_code():
+    return randint(100000, 999999)
+
+
+class UserVerificationCode(TimeStampedModel):
+    user = models.ForeignKey(to="common.User", on_delete=models.CASCADE)
+    code = models.PositiveIntegerField(
+        default=get_verification_code,
+        validators=[MinValueValidator(100000), MaxValueValidator(999999)],
+    )
 
 
 class UserClearance(TimeStampedModel):

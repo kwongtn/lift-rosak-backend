@@ -9,6 +9,7 @@ https://docs.djangoproject.com/en/4.0/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.0/ref/settings/
 """
+
 import os
 from pathlib import Path
 
@@ -390,6 +391,8 @@ AWS_S3_OBJECT_PARAMETERS = {
 }
 
 MEDIA_URL = f"{AWS_S3_ENDPOINT_URL}/{AWS_STORAGE_BUCKET_NAME}/media/"
+
+VERIFICATION_CODE_EXPIRE_MINUTES = 1
 
 # RapidAPI Stuff
 RAPID_API_KEY = os.environ.get("RAPID_API_KEY", "")

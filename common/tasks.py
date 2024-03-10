@@ -276,3 +276,13 @@ def add_width_height_to_media_task(self, *, filename, width, height, **kwargs):
     media.width = width
     media.height = height
     media.save()
+
+
+@celery_app.task(bind=True)
+def cleanup_expired_verification_codes(self):
+    from common.models import UserVerificationCode
+
+    UserVerificationCode.objects.filter(
+        created__lte=now()
+        - datetime.timedelta(minutes=settings.VERIFICATION_CODE_EXPIRE_MINUTES)
+    ).delete()

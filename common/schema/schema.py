@@ -7,7 +7,7 @@ from django.db.models import Count, F
 from strawberry.types import Info
 from strawberry_django.relay import ListConnectionWithTotalCount
 
-from common.models import Media, User
+from common.models import Media, User, UserVerificationCode
 from common.schema.inputs import UserInput
 from common.schema.scalars import MediasGroupByPeriodScalar, MediaType, UserScalar
 from common.utils import get_date_key
@@ -75,7 +75,6 @@ class CommonScalars:
 class CommonMutations:
     #     create_medias: List[Media] = strawberry_django.mutations.create(MediaInput)
     #     delete_medias: List[Media] = strawberry_django.mutations.delete()
-    pass
 
     @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def update_user(self, input: UserInput, info: Info) -> UserScalar:
@@ -84,3 +83,12 @@ class CommonMutations:
         await user.asave()
 
         return user
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def request_verification_code(self, info: Info) -> int:
+        user: User = info.context.user
+
+        code_obj: UserVerificationCode = await UserVerificationCode.objects.acreate(
+            user_id=user.id
+        )
+        return code_obj.code
