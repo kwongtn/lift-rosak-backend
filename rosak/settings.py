@@ -401,3 +401,7 @@ RAPID_API_KEY = os.environ.get("RAPID_API_KEY", "")
 RAPID_API_NSFW_TEST_URL = "https://nsfw-image-classification1.p.rapidapi.com/img/nsfw"
 RAPID_API_NSFW_HOST = "nsfw-image-classification1.p.rapidapi.com"
 RAPID_API_NSFW_THRESHOLD = 0.5
+
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", None)
+TELEGRAM_TLD = os.environ.get("TELEGRAM_TLD", None)
+TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")
