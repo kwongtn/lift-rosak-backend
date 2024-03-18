@@ -26,3 +26,8 @@ class SpottingWheelStatus(models.TextChoices):
     FLAT = "FLAT"
     WORN_OUT = "WORN_OUT"
     WORRYING = "WORRYING"
+
+
+class SpottingDataSource(models.TextChoices):
+    SITE = "SITE"
+    TELEGRAM = "TELEGRAM"

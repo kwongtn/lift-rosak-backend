@@ -87,6 +87,14 @@ class Event(TimeStampedModel):
         through="spotting.EventMedia",
     )
 
+    data_source = models.ForeignKey(
+        to="spotting.EventSource",
+        null=True,
+        default=None,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+
     class Meta:
         constraints = [
             models.CheckConstraint(
@@ -163,3 +171,8 @@ class EventMedia(TimeStampedModel):
         to="common.Media",
         on_delete=models.CASCADE,
     )
+
+
+class EventSource(TimeStampedModel):
+    name = models.CharField(max_length=128, unique=True)
+    description = models.TextField(blank=True, null=True, default=None)

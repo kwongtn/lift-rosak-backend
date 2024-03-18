@@ -52,6 +52,12 @@ class Line(TimeStampedModel):
         choices_enum=LineStatus,
         default=LineStatus.ACTIVE,
     )
+    telegram_channel_id = models.TextField(
+        unique=True,
+        default=None,
+        null=True,
+        blank=True,
+    )
 
     def __str__(self) -> str:
         if self.official_numbering:

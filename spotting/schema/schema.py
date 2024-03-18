@@ -11,7 +11,7 @@ from common.schema.scalars import GenericMutationReturn
 from operation.models import StationLine
 from rosak.permissions import IsAdmin, IsLoggedIn, IsRecaptchaChallengePassed
 from spotting import models
-from spotting.enums import SpottingEventType
+from spotting.enums import SpottingDataSource, SpottingEventType
 from spotting.schema.filters import EventFilter
 from spotting.schema.inputs import DeleteEventInput, EventInput, MarkEventAsReadInput
 from spotting.schema.orderings import EventOrder
@@ -102,6 +102,10 @@ class SpottingMutations:
                 else None
             )
 
+        event_source = models.EventSource.objects.filter(
+            name=SpottingDataSource.SITE
+        ).first()
+
         event = models.Event.objects.create(
             spotting_date=input.spotting_date,
             reporter_id=user_id,
@@ -114,6 +118,7 @@ class SpottingMutations:
             is_anonymous=is_anonymous,
             run_number=input.run_number,
             wheel_status=wheel_status,
+            data_source_id=event_source,
         )
 
         if input.location != strawberry.UNSET:

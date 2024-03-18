@@ -103,6 +103,7 @@ INSTALLED_APPS = [
     "incident",
     "mlptf",
     "chartography",
+    "telegram_provider",
     "django_celery_beat",
     "django_celery_results",
     # Must be at bottom
@@ -121,6 +122,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "hijack.middleware.HijackUserMiddleware",
+    "django_asgi_lifespan.middleware.AsyncMiddleware",
     # This must be the last
     "django.middleware.cache.FetchFromCacheMiddleware",
 ]
