@@ -9,7 +9,12 @@ from strawberry_django.relay import ListConnectionWithTotalCount
 
 from common.models import Media, User, UserVerificationCode
 from common.schema.inputs import UserInput
-from common.schema.scalars import MediasGroupByPeriodScalar, MediaType, UserScalar
+from common.schema.scalars import (
+    MediasGroupByPeriodScalar,
+    MediaType,
+    UserScalar,
+    UserVerificationCodeScalar,
+)
 from common.utils import get_date_key
 from generic.schema.enums import DateGroupings
 from rosak.permissions import IsLoggedIn
@@ -85,10 +90,10 @@ class CommonMutations:
         return user
 
     @strawberry.mutation(permission_classes=[IsLoggedIn])
-    async def request_verification_code(self, info: Info) -> int:
+    async def request_verification_code(self, info: Info) -> UserVerificationCodeScalar:
         user: User = info.context.user
 
         code_obj: UserVerificationCode = await UserVerificationCode.objects.acreate(
             user_id=user.id
         )
-        return code_obj.code
+        return code_obj

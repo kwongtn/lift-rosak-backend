@@ -184,6 +184,13 @@ class UserScalar:
         ]
 
 
+@strawberry_django.type(models.UserVerificationCode)
+class UserVerificationCodeScalar:
+    user: "UserScalar"
+    created: datetime
+    code: int
+
+
 @strawberry.type
 class GenericMutationReturn:
     ok: bool
