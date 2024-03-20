@@ -2,6 +2,7 @@ import logging
 from ctypes import ArgumentError
 from typing import TYPE_CHECKING
 
+from django.conf import settings
 from telegram import Update
 from telegram.constants import ReactionEmoji
 
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 async def error_handler(update: object, context: "ContextTypes.DEFAULT_TYPE") -> None:
     update: "Update"
     print(update)
-    print(context)
+    print(context.error)
     # """Log the error and send a telegram message to notify the developer."""
     # # Log the error before we do anything else, so we can see it even if something breaks.
     # logger.error("Exception while handling an update:", exc_info=context.error)
@@ -80,7 +81,10 @@ async def help(update: Update, context: "CustomContext") -> None:
 
 async def ping(update: Update, context: "CustomContext") -> None:
     """Reacts to the sent message to prove that bot is alive and kicking."""
-    await update.message.set_reaction(ReactionEmoji.THUMBS_UP)
+    try:
+        await update.message.set_reaction(ReactionEmoji.THUMBS_UP)
+    except Exception as e:
+        print(e)
     # set_telegram_reaction.apply_async(
     #     kwargs={
     #         "update_payload": update.to_json(),
@@ -99,7 +103,7 @@ async def verify(update: Update, context: "CustomContext") -> None:
             text=(
                 "Please submit according to the following syntax:\n"
                 "<code>/verify [6 digit code]</code> \n"
-                'The code is a 6 digit number obtainable from the side panel at the <a href="https://community.mlptf.org.my">TranSPOT</a> site.'
+                'The code is a 6 digit number obtainable from the side panel at the <a href="https://community.mlptf.org.my">TranSPOT</a> site, or you may visit <a href="https://github.com/kwongtn/rosak_firebase/wiki/Linking-to-Telegram">our wiki<a/> for a detailed tutorial.'
             )
         )
         return
@@ -137,10 +141,16 @@ async def spot(update: Update, context: "CustomContext") -> None:
     # Check if user has verified account
     user = await User.objects.filter(telegram_id=update.message.from_user.id).afirst()
 
+    env_url_dict = {
+        "local": "localhost:4200",
+        "staging": "rosak-7223b--staging-jflqbzzi.web.app",
+        "production": "community.mlptf.org.my",
+    }
+
     # If no, send error and ask user to verify before proceeding
     if user is None:
         await update.message.reply_html(
-            text="Please use the <code>/verify [code]</code> command to verify your telegram account before proceeding."
+            text=f'Please use the <code>/verify [code]</code> command to verify your telegram account before proceeding. You may obtain the code from the <a href="{env_url_dict.get(settings.ENVIRONMENT)}">TranSPOT</a> site, or visit <a href="https://github.com/kwongtn/rosak_firebase/wiki/Linking-to-Telegram">our wiki<a/> for a detailed tutorial.'
         )
         return
 
@@ -151,6 +161,10 @@ async def spot(update: Update, context: "CustomContext") -> None:
         args = parser.parse_args(update.message.text.split(" ")[1:])
         # await update.message.reply_text(text=str(args))
     except ArgumentError as e:
+        print(e)
+        await infinite_retry_on_error(
+            update.message.set_reaction, ReactionEmoji.THUMBS_DOWN
+        )
         raise e
 
     try:
