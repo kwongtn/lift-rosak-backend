@@ -191,6 +191,10 @@ async def spot(update: Update, context: "CustomContext") -> None:
             4: SpottingVehicleStatus.TESTING,
         }
 
+        notes = args.notes or ""
+        if isinstance(notes, list):
+            notes = " ".join(notes)
+
         event_source = await EventSource.objects.filter(
             name=SpottingDataSource.TELEGRAM
         ).afirst()
@@ -199,7 +203,7 @@ async def spot(update: Update, context: "CustomContext") -> None:
             reporter_id=user.id,
             vehicle_id=vehicle.id,
             is_anonymous=args.anon,
-            notes=args.notes,
+            notes=notes,
             status=status_map[args.status],
             type=SpottingEventType.JUST_SPOTTING,
             data_source_id=event_source.id,
