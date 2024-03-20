@@ -36,6 +36,7 @@ class ASGILifespanSignalHandler:
         self.app_config.httpx_client = httpx.AsyncClient()
 
         from telegram_provider.handlers import (
+            dad_joke,
             error_handler,
             help,
             help_spotting,
@@ -52,6 +53,10 @@ class ASGILifespanSignalHandler:
             "help": {
                 "description": "Displays detailed help text",
                 "handler": help,
+            },
+            "dadjoke": {
+                "description": "Who doesn't love those?",
+                "handler": dad_joke,
             },
             "verify": {
                 "description": "Link with Google Account",

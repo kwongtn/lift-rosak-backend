@@ -2,6 +2,7 @@ import logging
 from ctypes import ArgumentError
 from typing import TYPE_CHECKING
 
+import requests
 from django.conf import settings
 from telegram import Update
 from telegram.constants import ReactionEmoji
@@ -67,7 +68,7 @@ async def error_handler(update: object, context: "ContextTypes.DEFAULT_TYPE") ->
 async def help(update: Update, context) -> None:
     """Display a message with instructions on how to use this bot."""
     command_description_dict = {
-        "/ping": "Checks if the bot is still running.",
+        "/ping": "Checks if the bot is still alive and kicking.",
         "/verify [code]": "Enter the verification code to link your telegram account with your Google Account.",
     }
 
@@ -75,6 +76,17 @@ async def help(update: Update, context) -> None:
     for k, v in command_description_dict.items():
         text += f"<code>{k}</code> - {v}\n"
     await update.message.reply_html(text=text)
+
+
+async def dad_joke(update: Update, context) -> None:
+    response = requests.get(
+        url="https://icanhazdadjoke.com/",
+        headers={
+            "Accept": "text/plain",
+            "User-Agent": "MLPTF Community Bot (https://github.com/kwongtn/lift-rosak-backend)",
+        },
+    )
+    await update.message.reply_text(response.text)
 
 
 async def ping(update: Update, context) -> None:
