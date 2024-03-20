@@ -44,13 +44,36 @@ class ASGILifespanSignalHandler:
             verify,
         )
 
+        handlers_dict = {
+            "ping": {
+                "description": "Checks if the bot is still alive and kicking",
+                "handler": ping,
+            },
+            "help": {
+                "description": "Displays detailed help text",
+                "handler": help,
+            },
+            "verify": {
+                "description": "Link with Google Account",
+                "handler": verify,
+            },
+            "help_spotting": {
+                "description": "Syntax for Spotting",
+                "handler": help_spotting,
+            },
+            "spot": {
+                "description": "Enter spotting data",
+                "handler": spot,
+            },
+        }
+
+        await ptb_application.bot.set_my_commands(
+            [(command, elem["description"]) for command, elem in handlers_dict.items()]
+        )
         ptb_application.add_handlers(
             [
-                CommandHandler("ping", ping),
-                CommandHandler("help", help),
-                CommandHandler("verify", verify),
-                CommandHandler("help_spotting", help_spotting),
-                CommandHandler("spot", spot),
+                CommandHandler(command, elem["handler"])
+                for command, elem in handlers_dict.items()
             ]
         )
         ptb_application.add_error_handler(error_handler)
