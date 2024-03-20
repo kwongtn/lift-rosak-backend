@@ -21,8 +21,6 @@ from telegram_provider.utils import infinite_retry_on_error
 if TYPE_CHECKING:
     from telegram.ext import ContextTypes
 
-    from telegram_provider.apps import CustomContext
-
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -66,7 +64,7 @@ async def error_handler(update: object, context: "ContextTypes.DEFAULT_TYPE") ->
     # )
 
 
-async def help(update: Update, context: "CustomContext") -> None:
+async def help(update: Update, context) -> None:
     """Display a message with instructions on how to use this bot."""
     command_description_dict = {
         "/ping": "Checks if the bot is still running.",
@@ -79,7 +77,7 @@ async def help(update: Update, context: "CustomContext") -> None:
     await update.message.reply_html(text=text)
 
 
-async def ping(update: Update, context: "CustomContext") -> None:
+async def ping(update: Update, context) -> None:
     """Reacts to the sent message to prove that bot is alive and kicking."""
     try:
         await update.message.set_reaction(ReactionEmoji.THUMBS_UP)
@@ -96,7 +94,7 @@ async def ping(update: Update, context: "CustomContext") -> None:
     # )
 
 
-async def verify(update: Update, context: "CustomContext") -> None:
+async def verify(update: Update, context) -> None:
     splitted = update.message.text.split(" ")
     if len(splitted) != 2 or len(splitted[1]) != 6:
         await update.message.reply_html(
@@ -129,7 +127,7 @@ async def verify(update: Update, context: "CustomContext") -> None:
     )
 
 
-async def help_spotting(update: Update, context: "CustomContext") -> None:
+async def help_spotting(update: Update, context) -> None:
     parser = spotting_parser()
 
     await update.message.reply_html(
@@ -137,7 +135,7 @@ async def help_spotting(update: Update, context: "CustomContext") -> None:
     )
 
 
-async def spot(update: Update, context: "CustomContext") -> None:
+async def spot(update: Update, context) -> None:
     # Check if user has verified account
     user = await User.objects.filter(telegram_id=update.message.from_user.id).afirst()
 
