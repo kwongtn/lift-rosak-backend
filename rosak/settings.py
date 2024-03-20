@@ -122,7 +122,8 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "hijack.middleware.HijackUserMiddleware",
-    "django_asgi_lifespan.middleware.AsyncMiddleware",
+    # "django_asgi_lifespan.middleware.AsyncMiddleware",
+    "django_asgi_lifespan.middleware.LifespanStateMiddleware",
     # This must be the last
     "django.middleware.cache.FetchFromCacheMiddleware",
 ]

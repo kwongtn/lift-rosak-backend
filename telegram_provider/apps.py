@@ -1,76 +1,40 @@
-from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 import httpx
 from django.apps import AppConfig
 from django.conf import settings
-from django_asgi_lifespan.register import register_lifespan_manager
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CallbackContext,
-    CommandHandler,
-    ContextTypes,
-    ExtBot,
-)
+from telegram.ext import Application, CommandHandler
 
-from telegram_provider.dataclasses import WebhookUpdate
-
-if TYPE_CHECKING:
-    from django_asgi_lifespan.types import State
+ptb_application = None
 
 
-class CustomContext(CallbackContext[ExtBot, dict, dict, dict]):
-    """
-    Custom CallbackContext class that makes `user_data` available for updates of type
-    `WebhookUpdate`.
-    """
-
-    @classmethod
-    def from_update(
-        cls,
-        update: object,
-        application: "Application",
-    ) -> "CustomContext":
-        if isinstance(update, WebhookUpdate):
-            return cls(application=application, user_id=update.user_id)
-        return super().from_update(update, application)
+class HTTPXAppConfig(Protocol):
+    httpx_client: httpx.AsyncClient
 
 
-context_types = ContextTypes(context=CustomContext)
-ptb_application = (
-    Application.builder()
-    .token(settings.TELEGRAM_BOT_TOKEN)
-    .updater(None)
-    .context_types(context_types)
-    .build()
-)
+class ASGILifespanSignalHandler:
+    app_config: HTTPXAppConfig
 
+    def __init__(self, app_config: HTTPXAppConfig):
+        self.app_config = app_config
 
-@asynccontextmanager
-async def httpx_lifespan_manager() -> "State":
-    state = {"httpx_client": httpx.AsyncClient()}
+    async def startup(self, **_):
+        global ptb_application
+        ptb_application = (
+            Application.builder()
+            .token(settings.TELEGRAM_BOT_TOKEN)
+            .updater(None)
+            .build()
+        )
+        await ptb_application.initialize()
+        await ptb_application.start()
+        await ptb_application.bot.set_webhook(
+            url=f"{settings.TELEGRAM_TLD}/telegram_provider/",
+            allowed_updates=Update.ALL_TYPES,
+        )
+        self.app_config.httpx_client = httpx.AsyncClient()
 
-    await ptb_application.bot.set_webhook(
-        url=f"{settings.TELEGRAM_TLD}/telegram_provider/",
-        allowed_updates=Update.ALL_TYPES,
-    )
-
-    async with ptb_application:
-        try:
-            await ptb_application.start()
-            yield state
-        finally:
-            await state["httpx_client"].aclose()
-            await ptb_application.stop()
-
-
-class TelegramProviderConfig(AppConfig):
-    default_auto_field = "django.db.models.BigAutoField"
-    name = "telegram_provider"
-
-    def ready(self):
-        from telegram_provider.apps import httpx_lifespan_manager, ptb_application
         from telegram_provider.handlers import (
             error_handler,
             help,
@@ -80,7 +44,6 @@ class TelegramProviderConfig(AppConfig):
             verify,
         )
 
-        register_lifespan_manager(context_manager=httpx_lifespan_manager)
         ptb_application.add_handlers(
             [
                 CommandHandler("ping", ping),
@@ -90,5 +53,21 @@ class TelegramProviderConfig(AppConfig):
                 CommandHandler("spot", spot),
             ]
         )
-
         ptb_application.add_error_handler(error_handler)
+
+    async def shutdown(self, **_):
+        await ptb_application.stop()
+        await self.app_config.httpx_client.aclose()
+
+
+class TelegramProviderConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "telegram_provider"
+
+    def ready(self):
+        from django_asgi_lifespan.signals import asgi_shutdown, asgi_startup
+
+        handler = ASGILifespanSignalHandler(app_config=self)
+
+        asgi_startup.connect(handler.startup, weak=False)
+        asgi_shutdown.connect(handler.shutdown, weak=False)
