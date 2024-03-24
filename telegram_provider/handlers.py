@@ -171,7 +171,9 @@ async def spot(update: Update, context) -> None:
         args = parser.parse_args(update.message.text.split(" ")[1:])
         # await update.message.reply_text(text=str(args))
     except ArgumentError as e:
-        print(e)
+        await update.message.reply_text(
+            text=str(e),
+        )
         await infinite_retry_on_error(
             update.message.set_reaction, ReactionEmoji.THUMBS_DOWN
         )
