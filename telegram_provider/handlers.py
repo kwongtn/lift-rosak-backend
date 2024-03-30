@@ -67,14 +67,11 @@ async def error_handler(update: object, context: "ContextTypes.DEFAULT_TYPE") ->
 
 async def help(update: Update, context) -> None:
     """Display a message with instructions on how to use this bot."""
-    command_description_dict = {
-        "/ping": "Checks if the bot is still alive and kicking.",
-        "/verify [code]": "Enter the verification code to link your telegram account with your Google Account.",
-    }
+    from telegram_provider.apps import handlers_dict
 
     text = "Command List: \n"
-    for k, v in command_description_dict.items():
-        text += f"<code>{k}</code> - {v}\n"
+    for k, v in handlers_dict.items():
+        text += f"<code>/{v.get("help_prompt", k)}</code> - {v.get("help_text", v["description"])}\n"
     await update.message.reply_html(text=text)
 
 
