@@ -118,7 +118,7 @@ class SpottingMutations:
             is_anonymous=is_anonymous,
             run_number=input.run_number,
             wheel_status=wheel_status,
-            data_source_id=event_source,
+            data_source_id=event_source.id,
         )
 
         if input.location != strawberry.UNSET:
@@ -152,7 +152,7 @@ class SpottingMutations:
             )
 
             models.LocationEvent.objects.create(
-                event=event,
+                event_id=event.id,
                 location=location,
                 accuracy=accuracy,
                 altitude=altitude,
