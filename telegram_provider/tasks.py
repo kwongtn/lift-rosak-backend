@@ -1,13 +1,17 @@
 import asyncio
 import pickle
+from datetime import datetime, timedelta
 
-# from telegram_provider.apps import ptb_application
+from django.conf import settings
 from telegram import Bot, Update
 from telegram.constants import ReactionEmoji
 
 from rosak.celery import app as celery_app
+from telegram_provider.models import TelegramLogs
 
 
+# TODO: When everything is finalized, check if this is still needed
+# from telegram_provider.apps import ptb_application
 @celery_app.task(bind=True)
 def set_telegram_reaction(
     self,
@@ -32,3 +36,14 @@ def set_telegram_reaction(
 
     # update.message.set_reaction(reaction=reaction)
     asyncio.run(asyncfunc(reaction=reaction))
+
+
+@celery_app.task(bind=True)
+def cleanup_telegram_logs(
+    self,
+    *args,
+    **kwargs,
+):
+    TelegramLogs.objects.filter(
+        created__lte=datetime.now() - timedelta(days=settings.TELEGRAM_CLEANUP_DAYS)
+    ).delete()

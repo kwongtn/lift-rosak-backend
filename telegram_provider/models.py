@@ -1,10 +1,11 @@
 from django.db import models
+from model_utils.models import TimeStampedModel
 
 from telegram_provider.enums import MessageDirection
 
 
 # TODO: We only record inbound for now
-class TelegramLogs(models.Model):
+class TelegramLogs(TimeStampedModel):
     direction = models.IntegerField(choices=MessageDirection.choices)
     payload = models.JSONField()
 

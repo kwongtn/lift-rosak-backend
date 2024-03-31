@@ -28,6 +28,10 @@ app.conf.beat_schedule = {
         "task": "common.tasks.cleanup_temporary_media_task",
         "schedule": datetime.timedelta(minutes=1),
     },
+    "cleanup_telegram_logs": {
+        "task": "telegram_provider.tasks.cleanup_telegram_logs",
+        "schedule": crontab(hour="3", minute="0"),
+    },
     "aggregate_line_vehicle_status_mlptf": {
         "task": "chartography.tasks.aggregate_line_vehicle_status_mlptf_task",
         "schedule": crontab(hour="5", minute="0"),
