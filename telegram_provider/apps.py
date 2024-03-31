@@ -30,6 +30,9 @@ handlers_dict = {
     "spot": {
         "description": "Enter spotting data",
     },
+    "spotting_today": {
+        "description": "Displays spotting stats for today",
+    },
 }
 
 
@@ -66,6 +69,7 @@ class ASGILifespanSignalHandler:
             help_spotting,
             ping,
             spot,
+            spotting_today,
             verify,
         )
 
@@ -76,6 +80,7 @@ class ASGILifespanSignalHandler:
             "verify": verify,
             "help_spotting": help_spotting,
             "spot": spot,
+            "spotting_today": spotting_today,
         }
 
         for k, v in handlers_mapping.items():

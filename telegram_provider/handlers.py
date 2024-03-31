@@ -3,6 +3,7 @@ from ctypes import ArgumentError
 from typing import TYPE_CHECKING
 
 import requests
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from telegram import Update
 from telegram.constants import ReactionEmoji
@@ -17,7 +18,7 @@ from spotting.enums import (
 )
 from spotting.models import Event, EventSource
 from telegram_provider.parsers import spotting_parser
-from telegram_provider.utils import infinite_retry_on_error
+from telegram_provider.utils import get_daily_updates, infinite_retry_on_error
 
 if TYPE_CHECKING:
     from telegram.ext import ContextTypes
@@ -248,3 +249,17 @@ async def spot(update: Update, context) -> None:
             update.message.set_reaction, ReactionEmoji.THUMBS_DOWN
         )
         raise e
+
+
+async def spotting_today(update: Update, context) -> None:
+    line = await Line.objects.filter(
+        telegram_channel_id=update.effective_chat.id
+    ).afirst()
+
+    @sync_to_async
+    def aget_daily_updates(*args, **kwargs):
+        return get_daily_updates(*args, **kwargs)
+
+    await update.message.reply_html(
+        text=await aget_daily_updates(line_id=line.id),
+    )
