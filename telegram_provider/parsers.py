@@ -104,7 +104,7 @@ def spotting_parser():
     parser.add_argument(
         "-r",
         "--run-number",
-        type=int,
+        type=str,
         help="Run number",
     )
 
