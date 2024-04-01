@@ -5,10 +5,12 @@ from typing import TYPE_CHECKING
 import requests
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.db.models import Q
 from telegram import Update
 from telegram.constants import ReactionEmoji
 
 from common.models import User, UserVerificationCode
+from operation.enums import VehicleStatus
 from operation.models import Line, Vehicle
 from spotting.enums import (
     SpottingDataSource,
@@ -190,8 +192,13 @@ async def spot(update: Update, context) -> None:
 
         # Search for vehicle
         vehicle = await Vehicle.objects.filter(
-            identification_no=args.vehicle_number,
-            lines__in=lines,
+            Q(identification_no__search=args.vehicle_number, lines__in=lines)
+            & ~Q(
+                vehicle__status__in=[
+                    VehicleStatus.MARRIED,
+                    VehicleStatus.DECOMMISSIONED,
+                ]
+            )
         ).afirst()
 
         if vehicle is None:
