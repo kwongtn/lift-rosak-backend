@@ -23,7 +23,7 @@ async def infinite_retry_on_error(fn: "Coroutine", *args, **kwargs) -> "Coroutin
 
 def get_daily_updates(line_id: int) -> str:
     spotted_today_vehicle_ids = (
-        Event.objects.filter(created__date=date.today())
+        Event.objects.filter(spotting_date=date.today())
         .distinct("vehicle")
         .values_list("vehicle_id", flat=True)
     )
