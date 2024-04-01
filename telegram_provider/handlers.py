@@ -158,7 +158,7 @@ async def spot(update: Update, context) -> None:
     # If no, send error and ask user to verify before proceeding
     if user is None:
         await update.message.reply_html(
-            text=f'Please use the <code>/verify [code]</code> command to verify your telegram account before proceeding. You may obtain the code from the <a href="{env_url_dict.get(settings.ENVIRONMENT)}">TranSPOT</a> site, or visit <a href="https://github.com/kwongtn/rosak_firebase/wiki/Linking-to-Telegram">our wiki<a/> for a detailed tutorial.'
+            text=f'Please use the <code>/verify [code]</code> command to verify your telegram account before proceeding. You may obtain the code from the <a href="{env_url_dict.get(settings.ENVIRONMENT)}">TranSPOT</a> site, or visit <a href="https://github.com/kwongtn/rosak_firebase/wiki/Linking-to-Telegram">our wiki</a> for a detailed tutorial.'
         )
         return
 
