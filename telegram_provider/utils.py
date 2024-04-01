@@ -42,24 +42,34 @@ def get_daily_updates(line_id: int) -> str:
         .order_by("vehicle__identification_no")
     )
 
-    criteria = Q(vehicle__id__in=spotted_today_vehicle_ids)
-    spotted_vehicle_lines = query_prefix.filter(criteria)
-    not_spotted_vehicle_lines = query_prefix.filter(~criteria)
+    base_criteria = Q(vehicle__id__in=spotted_today_vehicle_ids)
+    no_review_criteria = Q(vehicle__status__in=[VehicleStatus.IN_SERVICE])
+    sections_criteria = {
+        "Not Spotted": ~base_criteria,
+        "Spotted Today": base_criteria & no_review_criteria,
+        "Spotted Today, to review": base_criteria & ~no_review_criteria,
+    }
 
-    spotted = ", ".join(x.vehicle.identification_no for x in spotted_vehicle_lines)
-    not_spotted = ", ".join(
-        x.vehicle.identification_no for x in not_spotted_vehicle_lines
-    )
+    output_str_arr = [
+        f"<b><u>{date.today().isoformat()}</u></b>",
+        "",
+    ]
+
+    for title, criteria in sections_criteria.items():
+        output_str_arr.append(f"<u>{title}</u>")
+        results = query_prefix.filter(criteria)
+
+        output_str_arr.append(
+            ", ".join(x.vehicle.identification_no for x in results)
+            if results
+            else "<i>None</i>"
+        )
+        output_str_arr.append("")
 
     return "\n".join(
         [
-            f"<b><u>{date.today().isoformat()}</u></b>",
+            *output_str_arr,
             "",
-            "<u>Not Spotted</u>",
-            not_spotted if not_spotted else "<i>None</i>",
-            "",
-            "<u>Spotted Today</u>",
-            spotted if spotted else "<i>None</i>",
             "",
             '<i>* Does not include vehicles marked "Decommissioned" or "Married"</i>',
         ]
