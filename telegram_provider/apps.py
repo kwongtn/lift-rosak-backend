@@ -27,6 +27,9 @@ handlers_dict = {
     "help_spotting": {
         "description": "Syntax for Spotting",
     },
+    "s": {
+        "description": "Shorthand for /spot you lazy piece of shite",
+    },
     "spot": {
         "description": "Enter spotting data",
     },
@@ -79,6 +82,7 @@ class ASGILifespanSignalHandler:
             "dadjoke": dad_joke,
             "verify": verify,
             "help_spotting": help_spotting,
+            "s": spot,
             "spot": spot,
             "spotting_today": spotting_today,
         }
