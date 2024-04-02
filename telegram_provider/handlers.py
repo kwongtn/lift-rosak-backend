@@ -8,6 +8,7 @@ from django.conf import settings
 from django.db.models import Q
 from telegram import Update
 from telegram.constants import ReactionEmoji
+from zoneinfo import ZoneInfo
 
 from common.models import User, UserVerificationCode
 from operation.enums import VehicleStatus
@@ -230,7 +231,9 @@ async def spot(update: Update, context) -> None:
             name=SpottingDataSource.TELEGRAM
         ).afirst()
         event = Event(
-            spotting_date=update.message.date,
+            spotting_date=update.message.date.astimezone(ZoneInfo("UTC"))
+            .astimezone(ZoneInfo(settings.TIME_ZONE))
+            .date(),
             reporter_id=user.id,
             vehicle_id=vehicle.id,
             is_anonymous=args.anon,
