@@ -35,7 +35,7 @@ def get_daily_updates(line_id: int) -> str:
     )
 
     query_prefix = (
-        VehicleLine.objects.select_related("vehicle", "line")
+        VehicleLine.objects.select_related("vehicle")
         .filter(
             Q(line_id=line_id),
             ~Q(
