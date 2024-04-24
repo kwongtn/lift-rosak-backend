@@ -176,7 +176,7 @@ async def spot(update: Update, context) -> None:
             text=str(e),
         )
         await infinite_retry_on_error(
-            update.message.set_reaction, ReactionEmoji.THUMBS_DOWN
+            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
         )
         raise e
 
@@ -255,7 +255,7 @@ async def spot(update: Update, context) -> None:
             return
 
         await infinite_retry_on_error(
-            update.message.set_reaction, ReactionEmoji.THUMBS_UP
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
         )
 
     except Exception as e:
@@ -266,7 +266,7 @@ async def spot(update: Update, context) -> None:
             return
 
         await infinite_retry_on_error(
-            update.message.set_reaction, ReactionEmoji.THUMBS_DOWN
+            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
         )
         raise e
 
