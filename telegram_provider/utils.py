@@ -1,6 +1,6 @@
 import asyncio
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.db.models import Q
 
@@ -12,10 +12,16 @@ if TYPE_CHECKING:
     from typing import Coroutine
 
 
-async def infinite_retry_on_error(fn: "Coroutine", *args, **kwargs) -> "Coroutine":
+async def infinite_retry_on_error(
+    source_obj: Any, fn_name: "str", *args, **kwargs
+) -> "Coroutine":
     while True:
+        if source_obj is None:
+            print(f"Source obj is None: {source_obj}")
+            return
+
         try:
-            return await fn(*args, **kwargs)
+            return await getattr(source_obj, fn_name)(*args, **kwargs)
         except Exception as e:
             print(e)
             await asyncio.sleep(10)

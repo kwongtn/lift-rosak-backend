@@ -249,12 +249,22 @@ async def spot(update: Update, context) -> None:
         # TODO: Location to determine spotting type
 
         await event.asave()
+        if update.message is None:
+            # Flag message as error and do sentry bug record
+            print(f"Message is None: {update.to_json()}")
+            return
+
         await infinite_retry_on_error(
             update.message.set_reaction, ReactionEmoji.THUMBS_UP
         )
 
     except Exception as e:
         print(e)
+        if update.message is None:
+            # Flag message as error and do sentry bug record
+            print(f"Message is None: {update.to_json()}")
+            return
+
         await infinite_retry_on_error(
             update.message.set_reaction, ReactionEmoji.THUMBS_DOWN
         )
