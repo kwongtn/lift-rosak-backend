@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import requests
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.db.models import Q
+from django.db.models import Count, Q
 from telegram import Update
 from telegram.constants import ReactionEmoji
 from zoneinfo import ZoneInfo
@@ -283,3 +283,38 @@ async def spotting_today(update: Update, context) -> None:
     await update.message.reply_html(
         text=await aget_daily_updates(line_id=line.id),
     )
+
+
+async def favourite_vehicle(update: Update, context) -> None:
+    line = await Line.objects.filter(
+        telegram_channel_id=update.effective_chat.id
+    ).afirst()
+
+    vehicles = Vehicle.objects.filter(lines__in=[line])
+    stat_dict = await (
+        Event.objects.filter(vehicle__in=vehicles)
+        .values("vehicle")
+        .annotate(count=Count("id"))
+        .order_by("-count")
+        .afirst()
+    )
+
+    if stat_dict is None:
+        await update.message.reply_html(
+            text="No favourite vehicle found for this line."
+        )
+        return
+
+    vehicle = await Vehicle.objects.filter(id=stat_dict["vehicle"]).afirst()
+    last_spotting_event = (
+        await Event.objects.filter(vehicle=vehicle).order_by("-spotting_date").afirst()
+    )
+
+    output_html = (
+        "Your favourite vehicle for this line is "
+        f"<code>{vehicle.identification_no}</code> with "
+        f"<b>{stat_dict['count']}</b> spottings. You saw it last on "
+        f"<i>{last_spotting_event.spotting_date}</i>."
+    )
+
+    await update.message.reply_html(text=output_html)

@@ -27,6 +27,9 @@ handlers_dict = {
     "help_spotting": {
         "description": "Syntax for Spotting",
     },
+    "fav": {
+        "description": "Responds favourite vehicle for line",
+    },
     "s": {
         "description": "Shorthand for /spot you lazy piece of shite",
     },
@@ -68,6 +71,7 @@ class ASGILifespanSignalHandler:
         from telegram_provider.handlers import (
             dad_joke,
             error_handler,
+            favourite_vehicle,
             help,
             help_spotting,
             ping,
@@ -82,6 +86,7 @@ class ASGILifespanSignalHandler:
             "dadjoke": dad_joke,
             "verify": verify,
             "help_spotting": help_spotting,
+            "fav": favourite_vehicle,
             "s": spot,
             "spot": spot,
             "spotting_today": spotting_today,
