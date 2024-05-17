@@ -8,7 +8,8 @@ from django.db.models import Count, Min, Q
 from django.http import HttpRequest
 from firebase_admin import auth
 
-from common.models import User
+from common.enums import FeatureFlagType
+from common.models import FeatureFlag, User
 from generic.schema.enums import DateGroupings
 
 if TYPE_CHECKING:
@@ -283,3 +284,8 @@ def get_trends(
             result["is_last_week_of_month"] = new_date.month != result_date.month
 
     return sorted(results, key=lambda d: f'{d["date_key"]}')
+
+
+def should_upload_media():
+    feat_flag = FeatureFlag.objects.filter(name=FeatureFlagType.IMAGE_UPLOAD).first()
+    return feat_flag is not None and feat_flag.enabled

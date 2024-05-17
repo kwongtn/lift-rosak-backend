@@ -10,7 +10,11 @@ from django.utils.timezone import now
 from PIL import ExifTags, Image, Jpeg2KImagePlugin, JpegImagePlugin, TiffImagePlugin
 from pillow_heif import register_heif_opener
 
-from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
+from common.enums import (
+    ClearanceType,
+    TemporaryMediaStatus,
+    TemporaryMediaType,
+)
 from incident.models import CalendarIncidentMedia
 from rosak.celery import app as celery_app
 from spotting.models import Event, EventMedia
@@ -89,6 +93,10 @@ def check_temporary_media_nsfw(self, *, temporary_media_id: str | int):
 @celery_app.task(bind=True)
 def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int):
     from common.models import Media, TemporaryMedia
+    from common.utils import should_upload_media
+
+    if not should_upload_media():
+        return
 
     temp_media: TemporaryMedia = TemporaryMedia.objects.filter(
         id=temporary_media_id
