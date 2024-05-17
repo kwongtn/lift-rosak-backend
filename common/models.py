@@ -6,7 +6,12 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from model_utils.models import TimeStampedModel, UUIDModel
 
-from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
+from common.enums import (
+    ClearanceType,
+    FeatureFlagType,
+    TemporaryMediaStatus,
+    TemporaryMediaType,
+)
 from common.imgur_field import ImgurField
 from common.imgur_storage import ImgurStorage
 from common.mixins import MediaMixin
@@ -136,3 +141,14 @@ class Clearance(TimeStampedModel):
     name = models.CharField(max_length=128, unique=True, choices=ClearanceType.choices)
     description = models.TextField(blank=True, null=True, default=None)
     users = models.ManyToManyField(to="common.User", through="common.UserClearance")
+
+
+class FeatureFlag(TimeStampedModel):
+    name = models.CharField(
+        max_length=128, unique=True, choices=FeatureFlagType.choices
+    )
+    description = models.TextField(blank=True, null=True, default=None)
+    enabled = models.BooleanField(default=False)
+
+    def __str__(self) -> str:
+        return f"{self.name}-{'Enabled' if self.enabled else 'Disabled'}"
