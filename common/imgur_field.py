@@ -1,7 +1,16 @@
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models.fields.files import ImageField, ImageFieldFile
-from imgurpython import ImgurClient
+from imgurpython import ImgurClient as _ImgurClient
+
+
+class ImgurClient(_ImgurClient):
+    def prepare_headers(self, force_anon=False):
+        headers = super().prepare_headers(force_anon=force_anon)
+        headers["Proxy-Authorization"] = settings.IMGUR_PROXY_AUTH_KEY
+
+        return headers
+
 
 client = ImgurClient(
     client_id=settings.IMGUR_CONSUMER_ID,
