@@ -2,6 +2,9 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db.models.fields.files import ImageField, ImageFieldFile
 from imgurpython import ImgurClient as _ImgurClient
+from imgurpython import client as imgurpython_client
+
+imgurpython_client.API_URL = settings.IMGUR_PROXY_API_URL
 
 
 class ImgurClient(_ImgurClient):
