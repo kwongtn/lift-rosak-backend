@@ -3,7 +3,6 @@ import logging
 import os.path
 from io import StringIO
 
-import imgurpython
 import requests
 from django.conf import settings
 from django.core.cache import cache
@@ -14,11 +13,8 @@ from django.core.files.storage import Storage
 from django.utils.deconstruct import deconstructible
 from imgurpython.helpers.error import ImgurClientError
 
+from common.imgur_field import ImgurClient
 from common.tasks import add_width_height_to_media_task
-
-imgurpython.client.API_URL = settings.IMGUR_PROXY_API_URL
-
-from common.imgur_field import ImgurClient  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +32,15 @@ class ImgurStorage(Storage):
                 client_secret=settings.IMGUR_CONSUMER_SECRET,
                 access_token=settings.IMGUR_ACCESS_TOKEN,
                 refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
+                api_url=settings.IMGUR_PROXY_API_URL,
             )
             logger.info("Logged in Imgur storage")
 
             self.account_info = self.client.get_account(settings.IMGUR_USERNAME)
             self.albums = self.client.get_account_albums(settings.IMGUR_USERNAME)
             self.location = location
-            self.base_url = "https://api.imgur.com/3/account/{url}/".format(
-                url=self.account_info.url
+            self.base_url = (
+                f"{settings.IMGUR_PROXY_API_URL}/3/account/{self.account_info.url}/"
             )
             logger.debug(f"account_info: {self.account_info}")
             logger.debug(f"albums: {self.albums}")

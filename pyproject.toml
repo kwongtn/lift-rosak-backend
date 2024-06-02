@@ -31,12 +31,13 @@ django-location-field = "*"
 django-mdeditor = "*"
 django-model-utils = "*"
 django-ordered-model = "*"
+django-revproxy = "^0.12.0"
 django-storages = "*"
 djangorestframework = "*"
 dotmap = "*"
 firebase-admin = "*"
 gunicorn = "*"
-imgurpython = {git = "https://github.com/BryanH/imgurpython.git", rev = "master"}
+imgurpython = {git = "https://github.com/kwongtn/imgurpython.git", rev = "master"}
 pendulum = {git = "https://github.com/kwongtn/pendulum.git", rev = "for_rosak"}
 pillow = "*"
 pillow-heif = "*"
@@ -62,3 +63,9 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry-sort]
 move-optionals-to-bottom = true
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]

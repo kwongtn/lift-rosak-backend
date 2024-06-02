@@ -1,11 +1,7 @@
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models.fields.files import ImageField, ImageFieldFile
-from imgurpython import client as imgurpython_client
-
-imgurpython_client.API_URL = settings.IMGUR_PROXY_API_URL
-
-from imgurpython import ImgurClient as _ImgurClient  # noqa: E402
+from imgurpython import ImgurClient as _ImgurClient
 
 
 class ImgurClient(_ImgurClient):
@@ -21,6 +17,7 @@ client = ImgurClient(
     client_secret=settings.IMGUR_CONSUMER_SECRET,
     access_token=settings.IMGUR_ACCESS_TOKEN,
     refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
+    api_url=settings.IMGUR_PROXY_API_URL,
 )
 
 
