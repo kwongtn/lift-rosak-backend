@@ -14,10 +14,11 @@ from django.core.files.storage import Storage
 from django.utils.deconstruct import deconstructible
 from imgurpython.helpers.error import ImgurClientError
 
-from common.imgur_field import ImgurClient
 from common.tasks import add_width_height_to_media_task
 
 imgurpython.client.API_URL = settings.IMGUR_PROXY_API_URL
+
+from common.imgur_field import ImgurClient  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
