@@ -3,7 +3,7 @@ name: Create and publish a Docker image to ghcr.io
 on:
   push:
     branches:
-      - "main"
+      - "**"
 
 env:
   REGISTRY: ghcr.io
@@ -48,7 +48,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           provenance: false
           push: true
-          tags: ${{ steps.meta.outputs.tags }}-${{ github.run_number }}
+          tags: ${{ steps.meta.outputs.tags }}${{ !startsWith(github.ref, 'main') && format('-{0}', github.ref) }}-${{ github.run_number }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -62,6 +62,6 @@ jobs:
             github.rest.git.createRef({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              ref: 'refs/tags/${{ steps.short-sha.outputs.sha }}-${{ github.run_number }}',
+              ref: 'refs/tags/${{ steps.short-sha.outputs.sha }}${{ !startsWith(github.ref, 'main') && format('-{0}', github.ref) }}-${{ github.run_number }}',
               sha: context.sha
             })
