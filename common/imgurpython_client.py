@@ -180,8 +180,15 @@ class ImgurClient(object):
             "3/%s" % route if "oauth2" not in route else route
         )
 
+        print("Data is: ", data)
+        if data is None:
+            params = {}
+        else:
+            params = data
+        print("Params is: ", params)
+
         if method in ("delete", "get"):
-            response = method_to_call(url, headers=header, params=data, data=data)
+            response = method_to_call(url, headers=header, params=params, data=data)
         else:
             response = method_to_call(url, headers=header, data=data)
 
@@ -189,7 +196,7 @@ class ImgurClient(object):
             self.auth.refresh()
             header = self.prepare_headers()
             if method in ("delete", "get"):
-                response = method_to_call(url, headers=header, params=data, data=data)
+                response = method_to_call(url, headers=header, params=params, data=data)
             else:
                 response = method_to_call(url, headers=header, data=data)
 
