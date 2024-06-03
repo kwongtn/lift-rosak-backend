@@ -1,7 +1,8 @@
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models.fields.files import ImageField, ImageFieldFile
-from imgurpython import ImgurClient as _ImgurClient
+
+from common.imgurpython_client import ImgurClient as _ImgurClient
 
 
 class ImgurClient(_ImgurClient):
