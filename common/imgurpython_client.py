@@ -117,7 +117,7 @@ class ImgurClient(object):
                 access_token, refresh_token, client_id, client_secret, api_url
             )
 
-        self.credits = self.get_credits()
+        # self.credits = self.get_credits()
 
     def set_user_auth(self, access_token, refresh_token):
         self.auth = AuthWrapper(
