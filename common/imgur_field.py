@@ -8,7 +8,7 @@ from common.imgurpython_client import ImgurClient as _ImgurClient
 class ImgurClient(_ImgurClient):
     def prepare_headers(self, force_anon=False):
         headers = super().prepare_headers(force_anon=force_anon)
-        headers["Proxy-Authorization"] = settings.IMGUR_PROXY_AUTH_KEY
+        headers["Proxy-Authorization"] = f"{settings.IMGUR_PROXY_AUTH_KEY}"
 
         return headers
 
