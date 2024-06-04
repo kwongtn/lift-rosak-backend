@@ -36,7 +36,7 @@ jobs:
       - name: Extract image version prefix
         id: image_prefix
         run: |
-          echo "prefix=$(echo \"${{ !startsWith(github.ref, 'main') && format('-{0}', github.ref_name) }}\" | sed 's:.*/::')" >> "$GITHUB_OUTPUT"
+          echo "prefix=$(echo ${{ !startsWith(github.ref, 'main') && github.ref_name }} | sed 's:/.*::')" >> "$GITHUB_OUTPUT"
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
