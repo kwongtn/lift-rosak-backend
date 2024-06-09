@@ -36,6 +36,7 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "is_anonymous",
         "run_number",
         "get_notes",
+        "notes",
     ]
     list_filter = [
         (
