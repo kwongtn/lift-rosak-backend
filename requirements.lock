@@ -184,6 +184,7 @@ protobuf==4.25.3
     # via googleapis-common-protos
     # via grpcio-status
     # via proto-plus
+psutil==5.9.8
 psycopg2-binary==2.9.9
 pyasn1==0.6.0
     # via pyasn1-modules

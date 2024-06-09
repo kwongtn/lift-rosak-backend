@@ -49,6 +49,7 @@ dependencies = [
     "redis[hiredis]>=5.0.5",
     "pendulum @ git+https://github.com/kwongtn/pendulum.git@for_rosak",
     "imgurpython @ git+https://github.com/kwongtn/imgurpython.git@master",
+    "psutil>=5.9.8",
     # psycopg = {extras = ["binary", "pool"], version = "3.*"}
 ]
 readme = "README.md"
