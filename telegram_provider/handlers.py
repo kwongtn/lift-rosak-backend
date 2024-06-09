@@ -237,6 +237,7 @@ async def spot(update: Update, context) -> None:
             reporter_id=user.id,
             vehicle_id=vehicle.id,
             is_anonymous=args.anon,
+            run_number=args.run_number,
             notes=notes,
             status=status_map[args.status],
             type=SpottingEventType.JUST_SPOTTING,
