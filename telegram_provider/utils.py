@@ -24,7 +24,8 @@ async def infinite_retry_on_error(
             return await getattr(source_obj, fn_name)(*args, **kwargs)
         except Exception as e:
             print(e)
-            print(e.__class__.__name__)
+            print(e.__class__)
+            print(dir(e))
             await asyncio.sleep(10)
 
 
