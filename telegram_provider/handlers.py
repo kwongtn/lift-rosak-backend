@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from ctypes import ArgumentError
 from typing import TYPE_CHECKING
@@ -5,7 +6,7 @@ from typing import TYPE_CHECKING
 import requests
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Subquery
 from telegram import Update
 from telegram.constants import ReactionEmoji
 from zoneinfo import ZoneInfo
@@ -20,6 +21,7 @@ from spotting.enums import (
     SpottingWheelStatus,
 )
 from spotting.models import Event, EventSource
+from telegram_provider.models import TelegramLogs, TelegramSpottingEventLog
 from telegram_provider.parsers import spotting_parser
 from telegram_provider.utils import get_daily_updates, infinite_retry_on_error
 
@@ -37,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 env_url_dict = {
     "local": "localhost:4200",
-    "staging": "rosak-7223b--staging-jflqbzzi.web.app",
+    "staging": "staging-community.mlptf.org.my",
     "production": "community.mlptf.org.my",
 }
 
@@ -139,11 +141,13 @@ async def verify(update: Update, context) -> None:
     # Else link to account
     user: User = await User.objects.aget(id=code_obj.user_id)
     user.telegram_id = update.message.from_user.id
-    await user.asave()
-    await code_obj.adelete()
 
-    await update.message.reply_html(
-        text=f"🎉 Success! Account linked to <code>{user.display_name}</code>. Happy spotting!"
+    await asyncio.gather(
+        user.asave(),
+        code_obj.adelete(),
+        update.message.reply_html(
+            text=f"🎉 Success! Account linked to <code>{user.display_name}</code>. Happy spotting!"
+        ),
     )
 
 
@@ -173,11 +177,13 @@ async def spot(update: Update, context) -> None:
         args = parser.parse_args(update.message.text.split(" ")[1:])
         # await update.message.reply_text(text=str(args))
     except ArgumentError as e:
-        await update.message.reply_text(
-            text=str(e),
-        )
-        await infinite_retry_on_error(
-            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
+        await asyncio.gather(
+            update.message.reply_text(
+                text=str(e),
+            ),
+            infinite_retry_on_error(
+                update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
+            ),
         )
         raise e
 
@@ -250,7 +256,20 @@ async def spot(update: Update, context) -> None:
 
         # TODO: Location to determine spotting type
 
-        await event.asave()
+        telegram_log, _ = await asyncio.gather(
+            TelegramLogs.objects.filter(
+                payload__message__message_id=update.message.message_id
+            )
+            .order_by("-id")
+            .afirst(),
+            event.asave(),
+        )
+
+        await TelegramSpottingEventLog.objects.acreate(
+            spotting_event_id=event.id,
+            telegram_log_id=telegram_log.id,
+        )
+
         if update.message is None:
             # Flag message as error and do sentry bug record
             print(f"Message is None: {update.to_json()}")
@@ -317,9 +336,17 @@ async def favourite_vehicle(update: Update, context) -> None:
         )
         return
 
-    vehicle = await Vehicle.objects.filter(id=stat_dict["vehicle"]).afirst()
-    last_spotting_event = (
-        await Event.objects.filter(vehicle=vehicle).order_by("-spotting_date").afirst()
+    vehicle, last_spotting_event = await asyncio.gather(
+        Vehicle.objects.filter(id=stat_dict["vehicle"]).afirst(),
+        Event.objects.filter(
+            vehicle_id__in=Subquery(
+                Vehicle.objects.filter(id=stat_dict["vehicle"]).values_list(
+                    "id", flat=True
+                )
+            )
+        )
+        .order_by("-spotting_date")
+        .afirst(),
     )
 
     output_html = (
