@@ -36,6 +36,7 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "is_anonymous",
         "run_number",
         "get_notes",
+        "notes",
     ]
     list_filter = [
         (
@@ -76,10 +77,10 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "destination_station__display_name",
         "spotting_date",
     ]
-    # list_editable = [
-    #     "run_number",
-    #     "notes",
-    # ]
+    list_editable = [
+        "run_number",
+        "notes",
+    ]
     readonly_fields = ("images_widget",)
     date_hierarchy = "created"
 
