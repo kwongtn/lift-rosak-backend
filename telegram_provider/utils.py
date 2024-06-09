@@ -3,6 +3,7 @@ from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from django.db.models import Q
+from telegram.error import BadRequest
 
 from operation.enums import VehicleStatus
 from operation.models import VehicleLine
@@ -22,10 +23,12 @@ async def infinite_retry_on_error(
 
         try:
             return await getattr(source_obj, fn_name)(*args, **kwargs)
+        except BadRequest as e:
+            if "Message to react not found" in e.message:
+                return
         except Exception as e:
             print(e)
             print(e.__class__)
-            print(dir(e))
             await asyncio.sleep(10)
 
 
