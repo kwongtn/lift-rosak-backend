@@ -34,21 +34,50 @@ class CalendarIncidentFilter:
 
     @strawberry_django.filter_field
     def date(self, value: DateFilterLookup["date"], prefix) -> Q:
-        assert value.start != strawberry.UNSET and value.end != strawberry.UNSET
-        assert abs(value.end - value.start) <= timedelta(days=60)
+        root_q = Q()
 
-        if value.start == value.end:
-            return Q(start_datetime__date__lte=value.end) & Q(
-                Q(end_datetime__date__gte=value.start) | Q(end_datetime__isnull=True)
+        if value.range != strawberry.UNSET:
+            assert (
+                value.range.start != strawberry.UNSET
+                and value.range.end != strawberry.UNSET
             )
-        else:
-            return Q(
-                Q(start_datetime__date__lte=value.end)
-                & Q(start_datetime__date__gte=value.start)
-            ) & Q(
-                Q(end_datetime__isnull=True)
-                | Q(
-                    Q(end_datetime__date__gte=value.start)
-                    & Q(end_datetime__date__lte=value.end)
+            assert abs(value.range.end - value.range.start) <= timedelta(days=60)
+
+            if value.range.start == value.range.end:
+                root_q &= Q(start_datetime__date__lte=value.range.end) & Q(
+                    Q(end_datetime__date__gte=value.range.start)
+                    | Q(end_datetime__isnull=True)
                 )
+            else:
+                root_q &= Q(
+                    Q(start_datetime__date__lte=value.range.end)
+                    & Q(start_datetime__date__gte=value.range.start)
+                ) & Q(
+                    Q(end_datetime__isnull=True)
+                    | Q(
+                        Q(end_datetime__date__gte=value.range.start)
+                        & Q(end_datetime__date__lte=value.range.end)
+                    )
+                )
+
+        if value.exact != strawberry.UNSET:
+            root_q &= Q(start_datetime__date__lte=value.exact) & Q(
+                Q(end_datetime__isnull=True) | Q(end_datetime__date__gte=value.exact)
             )
+
+        # TODO: Optimize code to be more less repetitive
+        if value.month != strawberry.UNSET:
+            if value.month.exact != strawberry.UNSET:
+                root_q &= Q(start_datetime__month__lte=value.month.exact + 1) & Q(
+                    Q(end_datetime__isnull=True)
+                    | Q(end_datetime__month__gte=value.month.exact + 1)
+                )
+
+        if value.year != strawberry.UNSET:
+            if value.year.exact != strawberry.UNSET:
+                root_q &= Q(start_datetime__year__lte=value.year.exact) & Q(
+                    Q(end_datetime__isnull=True)
+                    | Q(end_datetime__year__gte=value.year.exact)
+                )
+
+        return root_q
