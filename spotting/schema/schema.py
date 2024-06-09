@@ -2,6 +2,7 @@ import typing
 from datetime import timedelta
 
 import strawberry
+import strawberry_django
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
 from django.utils.timezone import now
@@ -21,10 +22,10 @@ from spotting.schema.scalars import EventScalar
 
 @strawberry.type
 class SpottingScalars:
-    events: typing.List[EventScalar] = strawberry.django.field(
+    events: typing.List[EventScalar] = strawberry_django.field(
         filters=EventFilter, pagination=True, order=EventOrder
     )
-    events_count: int = strawberry.django.field(
+    events_count: int = strawberry_django.field(
         resolver=get_events_count,
         description="Number of events",
     )
