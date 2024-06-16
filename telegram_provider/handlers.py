@@ -1,5 +1,8 @@
 import asyncio
+import html
+import json
 import logging
+import traceback
 from ctypes import ArgumentError
 from typing import TYPE_CHECKING
 
@@ -49,27 +52,28 @@ async def error_handler(update: object, context: "ContextTypes.DEFAULT_TYPE") ->
     print(update)
     print(context.error)
     # """Log the error and send a telegram message to notify the developer."""
-    # # Log the error before we do anything else, so we can see it even if something breaks.
-    # logger.error("Exception while handling an update:", exc_info=context.error)
+    # Log the error before we do anything else, so we can see it even if something breaks.
+    logger.error("Exception while handling an update:", exc_info=context.error)
 
-    # # traceback.format_exception returns the usual python message about an exception, but as a
-    # # list of strings rather than a single string, so we have to join them together.
-    # tb_list = traceback.format_exception(
-    #     None, context.error, context.error.__traceback__
-    # )
-    # tb_string = "".join(tb_list)
+    # traceback.format_exception returns the usual python message about an exception, but as a
+    # list of strings rather than a single string, so we have to join them together.
+    tb_list = traceback.format_exception(
+        None, context.error, context.error.__traceback__
+    )
+    tb_string = "".join(tb_list)
 
-    # # Build the message with some markup and additional information about what happened.
-    # # You might need to add some logic to deal with messages longer than the 4096 character limit.
-    # update_str = update.to_dict() if isinstance(update, Update) else str(update)
-    # message = (
-    #     "An exception was raised while handling an update\n"
-    #     f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
-    #     "</pre>\n\n"
-    #     f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n\n"
-    #     f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n\n"
-    #     f"<pre>{html.escape(tb_string)}</pre>"
-    # )
+    # Build the message with some markup and additional information about what happened.
+    # You might need to add some logic to deal with messages longer than the 4096 character limit.
+    update_str = update.to_dict() if isinstance(update, Update) else str(update)
+    message = (
+        "An exception was raised while handling an update\n"
+        f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
+        "</pre>\n\n"
+        f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n\n"
+        f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n\n"
+        f"<pre>{html.escape(tb_string)}</pre>"
+    )
+    print(message)
 
     # # Finally, send the message
     # # TODO: Fix this
@@ -85,7 +89,7 @@ async def help(update: Update, context) -> None:
     text = "Command List: \n"
     for k, v in handlers_dict.items():
         text += f"<code>/{v.get("help_prompt", k)}</code> - {v.get("help_text", v["description"])}\n"
-    await update.message.reply_html(text=text)
+    await infinite_retry_on_error(update.message, "reply_html", text=text)
 
 
 async def dad_joke(update: Update, context) -> None:
@@ -96,7 +100,7 @@ async def dad_joke(update: Update, context) -> None:
             "User-Agent": "MLPTF Community Bot (https://github.com/kwongtn/lift-rosak-backend)",
         },
     )
-    await update.message.reply_text(response.text)
+    await infinite_retry_on_error(update.message, "reply_text", response.text)
 
 
 async def ping(update: Update, context) -> None:
@@ -178,9 +182,7 @@ async def spot(update: Update, context) -> None:
         # await update.message.reply_text(text=str(args))
     except ArgumentError as e:
         await asyncio.gather(
-            update.message.reply_text(
-                text=str(e),
-            ),
+            infinite_retry_on_error(update.message, "reply_text", text=str(e)),
             infinite_retry_on_error(
                 update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
             ),
@@ -281,6 +283,7 @@ async def spot(update: Update, context) -> None:
 
     except Exception as e:
         print(e)
+        print(e.__class__)
         if update.message is None:
             # Flag message as error and do sentry bug record
             print(f"Message is None: {update.to_json()}")
