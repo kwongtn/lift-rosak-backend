@@ -20,6 +20,7 @@ from spotting.enums import (
     SpottingWheelStatus,
 )
 from spotting.models import Event, EventSource
+from telegram_provider.models import TelegramLogs, TelegramSpottingEventLog
 from telegram_provider.parsers import spotting_parser
 from telegram_provider.utils import get_daily_updates, infinite_retry_on_error
 
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 env_url_dict = {
     "local": "localhost:4200",
-    "staging": "rosak-7223b--staging-jflqbzzi.web.app",
+    "staging": "staging-community.mlptf.org.my",
     "production": "community.mlptf.org.my",
 }
 
@@ -249,6 +250,19 @@ async def spot(update: Update, context) -> None:
             event.wheel_status = wheel_status_map[args.wheel_status]
 
         # TODO: Location to determine spotting type
+
+        telegram_log = await (
+            TelegramLogs.objects.filter(
+                payload__message__message_id=update.message.message_id
+            )
+            .order_by("-id")
+            .afirst()
+        )
+
+        await TelegramSpottingEventLog.objects.acreate(
+            spotting_event_id=event.id,
+            telegram_log_id=telegram_log.id,
+        )
 
         await event.asave()
         if update.message is None:
