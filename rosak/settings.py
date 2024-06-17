@@ -170,6 +170,7 @@ else:
 CSRF_TRUSTED_ORIGINS = [
     "https://rosak-7223b--pr8-ng-zorro-antd-l1wpy6qj.web.app",
     "https://community.mlptf.org.my",
+    "https://staging-community.mlptf.org.my",
     "https://api-community.mlptf.org.my",
     "http://localhost:8000",
     "https://*.kwongtn.xyz",
@@ -179,6 +180,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://rosak-7223b--pr8-ng-zorro-antd-l1wpy6qj.web.app",
     "https://community.mlptf.org.my",
     "http://localhost:4200",
+    "https://staging-community.mlptf.org.my",
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [

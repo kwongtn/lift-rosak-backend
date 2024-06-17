@@ -13,5 +13,5 @@ ignore = [
     # "W503"
 ]
 
-[mccabe]
+[lint.mccabe]
 max-complexity = 18

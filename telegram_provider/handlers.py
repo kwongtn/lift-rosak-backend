@@ -1,11 +1,15 @@
+import asyncio
+import html
+import json
 import logging
+import traceback
 from ctypes import ArgumentError
 from typing import TYPE_CHECKING
 
 import requests
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Subquery
 from telegram import Update
 from telegram.constants import ReactionEmoji
 from zoneinfo import ZoneInfo
@@ -20,6 +24,7 @@ from spotting.enums import (
     SpottingWheelStatus,
 )
 from spotting.models import Event, EventSource
+from telegram_provider.models import TelegramLogs, TelegramSpottingEventLog
 from telegram_provider.parsers import spotting_parser
 from telegram_provider.utils import get_daily_updates, infinite_retry_on_error
 
@@ -37,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 env_url_dict = {
     "local": "localhost:4200",
-    "staging": "rosak-7223b--staging-jflqbzzi.web.app",
+    "staging": "staging-community.mlptf.org.my",
     "production": "community.mlptf.org.my",
 }
 
@@ -47,27 +52,28 @@ async def error_handler(update: object, context: "ContextTypes.DEFAULT_TYPE") ->
     print(update)
     print(context.error)
     # """Log the error and send a telegram message to notify the developer."""
-    # # Log the error before we do anything else, so we can see it even if something breaks.
-    # logger.error("Exception while handling an update:", exc_info=context.error)
+    # Log the error before we do anything else, so we can see it even if something breaks.
+    logger.error("Exception while handling an update:", exc_info=context.error)
 
-    # # traceback.format_exception returns the usual python message about an exception, but as a
-    # # list of strings rather than a single string, so we have to join them together.
-    # tb_list = traceback.format_exception(
-    #     None, context.error, context.error.__traceback__
-    # )
-    # tb_string = "".join(tb_list)
+    # traceback.format_exception returns the usual python message about an exception, but as a
+    # list of strings rather than a single string, so we have to join them together.
+    tb_list = traceback.format_exception(
+        None, context.error, context.error.__traceback__
+    )
+    tb_string = "".join(tb_list)
 
-    # # Build the message with some markup and additional information about what happened.
-    # # You might need to add some logic to deal with messages longer than the 4096 character limit.
-    # update_str = update.to_dict() if isinstance(update, Update) else str(update)
-    # message = (
-    #     "An exception was raised while handling an update\n"
-    #     f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
-    #     "</pre>\n\n"
-    #     f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n\n"
-    #     f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n\n"
-    #     f"<pre>{html.escape(tb_string)}</pre>"
-    # )
+    # Build the message with some markup and additional information about what happened.
+    # You might need to add some logic to deal with messages longer than the 4096 character limit.
+    update_str = update.to_dict() if isinstance(update, Update) else str(update)
+    message = (
+        "An exception was raised while handling an update\n"
+        f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
+        "</pre>\n\n"
+        f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n\n"
+        f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n\n"
+        f"<pre>{html.escape(tb_string)}</pre>"
+    )
+    print(message)
 
     # # Finally, send the message
     # # TODO: Fix this
@@ -83,7 +89,7 @@ async def help(update: Update, context) -> None:
     text = "Command List: \n"
     for k, v in handlers_dict.items():
         text += f"<code>/{v.get("help_prompt", k)}</code> - {v.get("help_text", v["description"])}\n"
-    await update.message.reply_html(text=text)
+    await infinite_retry_on_error(update.message, "reply_html", text=text)
 
 
 async def dad_joke(update: Update, context) -> None:
@@ -94,7 +100,7 @@ async def dad_joke(update: Update, context) -> None:
             "User-Agent": "MLPTF Community Bot (https://github.com/kwongtn/lift-rosak-backend)",
         },
     )
-    await update.message.reply_text(response.text)
+    await infinite_retry_on_error(update.message, "reply_text", response.text)
 
 
 async def ping(update: Update, context) -> None:
@@ -139,11 +145,13 @@ async def verify(update: Update, context) -> None:
     # Else link to account
     user: User = await User.objects.aget(id=code_obj.user_id)
     user.telegram_id = update.message.from_user.id
-    await user.asave()
-    await code_obj.adelete()
 
-    await update.message.reply_html(
-        text=f"🎉 Success! Account linked to <code>{user.display_name}</code>. Happy spotting!"
+    await asyncio.gather(
+        user.asave(),
+        code_obj.adelete(),
+        update.message.reply_html(
+            text=f"🎉 Success! Account linked to <code>{user.display_name}</code>. Happy spotting!"
+        ),
     )
 
 
@@ -173,11 +181,11 @@ async def spot(update: Update, context) -> None:
         args = parser.parse_args(update.message.text.split(" ")[1:])
         # await update.message.reply_text(text=str(args))
     except ArgumentError as e:
-        await update.message.reply_text(
-            text=str(e),
-        )
-        await infinite_retry_on_error(
-            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
+        await asyncio.gather(
+            infinite_retry_on_error(update.message, "reply_text", text=str(e)),
+            infinite_retry_on_error(
+                update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
+            ),
         )
         raise e
 
@@ -250,7 +258,20 @@ async def spot(update: Update, context) -> None:
 
         # TODO: Location to determine spotting type
 
-        await event.asave()
+        telegram_log, _ = await asyncio.gather(
+            TelegramLogs.objects.filter(
+                payload__message__message_id=update.message.message_id
+            )
+            .order_by("-id")
+            .afirst(),
+            event.asave(),
+        )
+
+        await TelegramSpottingEventLog.objects.acreate(
+            spotting_event_id=event.id,
+            telegram_log_id=telegram_log.id,
+        )
+
         if update.message is None:
             # Flag message as error and do sentry bug record
             print(f"Message is None: {update.to_json()}")
@@ -262,6 +283,7 @@ async def spot(update: Update, context) -> None:
 
     except Exception as e:
         print(e)
+        print(e.__class__)
         if update.message is None:
             # Flag message as error and do sentry bug record
             print(f"Message is None: {update.to_json()}")
@@ -317,9 +339,17 @@ async def favourite_vehicle(update: Update, context) -> None:
         )
         return
 
-    vehicle = await Vehicle.objects.filter(id=stat_dict["vehicle"]).afirst()
-    last_spotting_event = (
-        await Event.objects.filter(vehicle=vehicle).order_by("-spotting_date").afirst()
+    vehicle, last_spotting_event = await asyncio.gather(
+        Vehicle.objects.filter(id=stat_dict["vehicle"]).afirst(),
+        Event.objects.filter(
+            vehicle_id__in=Subquery(
+                Vehicle.objects.filter(id=stat_dict["vehicle"]).values_list(
+                    "id", flat=True
+                )
+            )
+        )
+        .order_by("-spotting_date")
+        .afirst(),
     )
 
     output_html = (
