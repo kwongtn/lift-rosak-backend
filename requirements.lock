@@ -144,7 +144,7 @@ h11==0.14.0
     # via uvicorn
 hiredis==2.3.2
     # via redis
-httpcore==1.0.5
+httpcore==1.0.4
     # via httpx
 httplib2==0.22.0
     # via google-api-python-client
