@@ -6,6 +6,7 @@ authors = ["Kwong Tung Nan <tungnan5636@gmail.com>"]
 license = "GNU AGPLv3"
 readme = "README.md"
 packages = [{include = "rosak_backend"}]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -53,9 +54,6 @@ setuptools = "*"
 strawberry-graphql = "*"
 strawberry-graphql-django = "*"
 uvicorn = {extras = ["standard"], version = "*"}
-
-[tool.poetry]
-package-mode = false
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "*"

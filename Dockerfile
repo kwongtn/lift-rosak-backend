@@ -27,5 +27,4 @@ RUN poetry config virtualenvs.create false \
 # Obtained via `pipenv run which python`
 # RUN export PYTHONPATH=/root/.local/share/virtualenvs/code-_Py8Si6I/bin/python
 
-
 COPY . /code/
