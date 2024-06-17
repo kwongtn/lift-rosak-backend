@@ -50,7 +50,7 @@ python-telegram-bot = "^20.8"
 redis = {extras = ["hiredis"], version = "*"}
 requests = "*"
 sentry-sdk = "*"
-setuptools = "*"
+setuptools = "~69.1"
 strawberry-graphql = "*"
 strawberry-graphql-django = "*"
 uvicorn = {extras = ["standard"], version = "*"}
