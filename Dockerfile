@@ -9,22 +9,23 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     && apt-get update && apt-get install -y \
     curl gdal-bin git gcc jq python3-dev
 
-ADD --chmod=755 https://astral.sh/uv/install.sh /install.sh
-RUN /install.sh && rm /install.sh
+RUN POETRY_VERSION=$(curl https://api.github.com/repos/python-poetry/poetry/releases/latest -s | jq .name -r) && \
+    pip install "poetry==$POETRY_VERSION"
 
 RUN mkdir /code
 WORKDIR /code
 
-COPY requirements.lock ./
-COPY requirements-dev.lock ./
+COPY pyproject.toml /code/pyproject.toml
+COPY poetry.lock /code/poetry.lock
 
-RUN --mount=type=cache,target=/root/.cache/uv if [ "$ENVIRONMENT" = "dev" ]; \
-    then \
-        /root/.cargo/bin/uv \
-        pip install --system --no-cache -r requirements-dev.lock \
-    ; else \
-        /root/.cargo/bin/uv \
-        pip install --system --no-cache -r requirements.lock \
-    ; fi
+RUN poetry config virtualenvs.create false \
+    && poetry install $(test "$ENVIRONMENT" == "dev" && echo "--with=dev") \
+    --no-interaction \
+    --no-ansi \
+    --no-root
+
+# Obtained via `pipenv run which python`
+# RUN export PYTHONPATH=/root/.local/share/virtualenvs/code-_Py8Si6I/bin/python
+
 
 COPY . /code/
