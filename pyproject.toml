@@ -102,6 +102,9 @@ strawberry-graphql = "*"
 strawberry-graphql-django = "*"
 uvicorn = {extras = ["standard"], version = "*"}
 
+[tool.poetry]
+package-mode = false
+
 [tool.poetry.group.dev.dependencies]
 ipykernel = "*"
 
