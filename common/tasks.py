@@ -5,12 +5,17 @@ import time
 import requests
 from discord_webhook import DiscordEmbed, DiscordWebhook
 from django.conf import settings
+from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils.timezone import now
 from PIL import ExifTags, Image, Jpeg2KImagePlugin, JpegImagePlugin, TiffImagePlugin
 from pillow_heif import register_heif_opener
 
-from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
+from common.enums import (
+    ClearanceType,
+    TemporaryMediaStatus,
+    TemporaryMediaType,
+)
 from incident.models import CalendarIncidentMedia
 from rosak.celery import app as celery_app
 from spotting.models import Event, EventMedia
@@ -89,6 +94,10 @@ def check_temporary_media_nsfw(self, *, temporary_media_id: str | int):
 @celery_app.task(bind=True)
 def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int):
     from common.models import Media, TemporaryMedia
+    from common.utils import should_upload_media
+
+    if not should_upload_media():
+        return
 
     temp_media: TemporaryMedia = TemporaryMedia.objects.filter(
         id=temporary_media_id
@@ -181,6 +190,7 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
 
             media = Media.objects.create(
                 created=temp_media.created,
+                file=ContentFile(temp_media.file.url, name=temp_media.file.name),
                 uploader_id=temp_media.uploader_id,
                 message_id=discord_res["id"],
                 file_id=discord_attachment.get("id", None),

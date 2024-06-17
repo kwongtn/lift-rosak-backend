@@ -35,6 +35,13 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
+env_url_dict = {
+    "local": "localhost:4200",
+    "staging": "rosak-7223b--staging-jflqbzzi.web.app",
+    "production": "community.mlptf.org.my",
+}
+
+
 async def error_handler(update: object, context: "ContextTypes.DEFAULT_TYPE") -> None:
     update: "Update"
     print(update)
@@ -151,12 +158,6 @@ async def help_spotting(update: Update, context) -> None:
 async def spot(update: Update, context) -> None:
     # Check if user has verified account
     user = await User.objects.filter(telegram_id=update.message.from_user.id).afirst()
-
-    env_url_dict = {
-        "local": "localhost:4200",
-        "staging": "rosak-7223b--staging-jflqbzzi.web.app",
-        "production": "community.mlptf.org.my",
-    }
 
     # If no, send error and ask user to verify before proceeding
     if user is None:
@@ -287,13 +288,23 @@ async def spotting_today(update: Update, context) -> None:
 
 
 async def favourite_vehicle(update: Update, context) -> None:
+    # Check if user has verified account
+    user = await User.objects.filter(telegram_id=update.message.from_user.id).afirst()
+
+    # If no, send error and ask user to verify before proceeding
+    if user is None:
+        await update.message.reply_html(
+            text=f'Please use the <code>/verify [code]</code> command to verify your telegram account before proceeding. You may obtain the code from the <a href="{env_url_dict.get(settings.ENVIRONMENT)}">TranSPOT</a> site, or visit <a href="https://github.com/kwongtn/rosak_firebase/wiki/Linking-to-Telegram">our wiki</a> for a detailed tutorial.'
+        )
+        return
+
     line = await Line.objects.filter(
         telegram_channel_id=update.effective_chat.id
     ).afirst()
 
     vehicles = Vehicle.objects.filter(lines__in=[line])
     stat_dict = await (
-        Event.objects.filter(vehicle__in=vehicles)
+        Event.objects.filter(vehicle__in=vehicles, reporter_id=user.id)
         .values("vehicle")
         .annotate(count=Count("id"))
         .order_by("-count")

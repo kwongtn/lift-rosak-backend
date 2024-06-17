@@ -29,3 +29,7 @@ class TemporaryMediaStatus(models.TextChoices):
 
 class ClearanceType(models.TextChoices):
     TRUSTED_MEDIA_UPLOADER = "TRUSTED_MEDIA_UPLOADER"
+
+
+class FeatureFlagType(models.TextChoices):
+    IMAGE_UPLOAD = "IMAGE_UPLOAD"

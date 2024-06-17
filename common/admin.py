@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from common.models import Clearance, Media, TemporaryMedia, User, UserClearance
+from common.models import (
+    Clearance,
+    FeatureFlag,
+    Media,
+    TemporaryMedia,
+    User,
+    UserClearance,
+)
 from mlptf.admin import UserBadgeStackedInline
 
 
@@ -110,7 +117,19 @@ class ClearanceAdmin(admin.ModelAdmin):
     pass
 
 
+class FeatureFlagAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "name",
+        "enabled",
+    ]
+    list_editable = [
+        "enabled",
+    ]
+
+
 admin.site.register(Media, MediaAdmin)
 admin.site.register(TemporaryMedia, TemporaryMediaAdmin)
 admin.site.register(User, UserAdmin)
 admin.site.register(Clearance, ClearanceAdmin)
+admin.site.register(FeatureFlag, FeatureFlagAdmin)
