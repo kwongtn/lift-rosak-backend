@@ -10,7 +10,7 @@
 
 amqp==5.2.0
     # via kombu
-anyio==4.4.0
+anyio==4.3.0
     # via httpx
     # via watchfiles
 asgiref==3.8.1
@@ -151,7 +151,7 @@ httplib2==0.22.0
     # via google-auth-httplib2
 httptools==0.6.1
     # via uvicorn
-httpx==0.26.0
+httpx==0.27.0
     # via python-telegram-bot
 idna==3.7
     # via anyio
@@ -211,7 +211,7 @@ python-dotenv==1.0.1
     # via uvicorn
 python-memcached==1.62
     # via celery
-python-telegram-bot==20.8
+python-telegram-bot==21.3
 pyyaml==6.0.1
     # via uvicorn
 redis==5.0.6
