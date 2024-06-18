@@ -333,7 +333,12 @@ async def favourite_vehicle(update: Update, context) -> None:
 
     vehicle = await Vehicle.objects.filter(id=stat_dict["vehicle"]).afirst()
     last_spotting_event = (
-        await Event.objects.filter(vehicle=vehicle).order_by("-spotting_date").afirst()
+        await Event.objects.filter(
+            vehicle_id=vehicle.id,
+            reporter_id=user.id,
+        )
+        .order_by("-spotting_date")
+        .afirst()
     )
 
     output_html = (
