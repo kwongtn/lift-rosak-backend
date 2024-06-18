@@ -4,10 +4,12 @@ from advanced_filters.admin import AdminAdvancedFiltersMixin
 from django.contrib import admin
 from django.db import models
 from django.forms import Textarea, TextInput
+from ordered_model.admin import OrderedTabularInline
 from rangefilter.filters import DateRangeFilterBuilder, DateTimeRangeFilterBuilder
 
 from generic.views import GeometricForm
 from spotting.models import Event, LocationEvent
+from telegram_provider.models import TelegramSpottingEventLog
 
 
 class LocationEventForm(GeometricForm):
@@ -15,6 +17,16 @@ class LocationEventForm(GeometricForm):
     required = False
     GeometricForm.Meta.model = LocationEvent
     # GeometricForm.Meta.widgets = {field_name: forms.HiddenInput()}
+
+
+class TelegramSpottingEventLogInlineAdmin(OrderedTabularInline):
+    model = TelegramSpottingEventLog
+    readonly_fields = ("move_up_down_links",)
+    extra = 0
+    fields = (
+        "telegram_log",
+        "spotting_event",
+    )
 
 
 class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
@@ -38,6 +50,7 @@ class EventAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
         "get_notes",
         "notes",
     ]
+    inlines = (TelegramSpottingEventLogInlineAdmin,)
     list_filter = [
         (
             "spotting_date",
