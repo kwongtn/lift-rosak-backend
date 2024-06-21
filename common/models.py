@@ -63,7 +63,7 @@ class Media(TimeStampedModel, UUIDModel, MediaMixin):
         return f"https://cdn.discordapp.com/attachments/{self.discord_suffix}"
 
     @property
-    def resizer_url(self) -> str:
+    def discord_resizer_url(self) -> str:
         if self.file_id is None or self.file_name is None:
             return None
 

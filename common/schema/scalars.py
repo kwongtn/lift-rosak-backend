@@ -26,7 +26,7 @@ from spotting.enums import SpottingEventType
 class MediaScalar:
     id: strawberry.ID
     uploader: "UserScalar"
-    file: strawberry_django.DjangoImageType
+    file: Optional[strawberry_django.DjangoImageType]
     width: int
     height: int
     url: Optional[str]
@@ -44,7 +44,7 @@ class MediasGroupByPeriodScalar:
     medias: List["MediaScalar"]
 
 
-@strawberry_django.type(models.Media, order=MediaOrder)
+@strawberry_django.type(models.Media, order=MediaOrder, pagination=True)
 class MediaType(strawberry.relay.Node):
     id: strawberry.relay.NodeID[str]
     created: datetime
@@ -52,8 +52,10 @@ class MediaType(strawberry.relay.Node):
     file: strawberry_django.DjangoFileType
     width: int
     height: int
-    url: Optional[str]
-    discord_suffix: str
+
+    @strawberry_django.field
+    def created_date(self) -> str:
+        return self.created.date()
 
 
 @strawberry_django.type(models.User)
