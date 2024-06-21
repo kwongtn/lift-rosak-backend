@@ -6,7 +6,6 @@ import requests
 from discord_webhook import DiscordEmbed, DiscordWebhook
 from django.conf import settings
 from django.core.files.base import ContentFile
-from django.db import transaction
 from django.utils.timezone import now
 from PIL import ExifTags, Image, Jpeg2KImagePlugin, JpegImagePlugin, TiffImagePlugin
 from pillow_heif import register_heif_opener
@@ -127,7 +126,7 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
         raise RuntimeError(f"Invalid upload type: {temp_media.upload_type}")
 
     try:
-        with transaction.atomic(), temp_media.file.open() as stream:
+        with temp_media.file.open() as stream:
             image_open = Image.open(stream)
             image_open.verify()
 
@@ -150,43 +149,53 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
                 logger.info(f"No exif data for {temp_media.file.name}")
 
             image_response = requests.get(url=temp_media.file.url)
-            webhook = DiscordWebhook(url=settings.DISCORD_MEDIA_WEBHOOK_URL)
-            webhook.add_file(
-                file=image_response.content,
-                filename=temp_media.file.name.split("/")[-1],
-            )
 
-            title = "Unknown Event"
-            if temp_media.upload_type == TemporaryMediaType.SPOTTING_EVENT:
-                title = "Spotting"
-
-            elif (
-                temp_media.upload_type == TemporaryMediaType.INCIDENT_CALENDAR_INCIDENT
-            ):
-                title = "Calendar Incident"
-
-            embed = DiscordEmbed(
-                title=title,
-                color=settings.DISCORD_MEDIA_WEBHOOK_EMBED_COLOR,
-            )
-            embed.set_timestamp()
-            embed.set_author(name=temp_media.uploader.display_name)
-
-            for k, v in exif.items():
-                embed.add_embed_field(
-                    name=k,
-                    value=v if isinstance(v, (str, int)) else str(v),
+            # Do not reupload if already uploaded to discord
+            if not temp_media.uploaded_discord:
+                webhook = DiscordWebhook(url=settings.DISCORD_MEDIA_WEBHOOK_URL)
+                webhook.add_file(
+                    file=image_response.content,
+                    filename=temp_media.file.name.split("/")[-1],
                 )
 
-            # TODO: Add a link to the entry
-            # TODO: Add GPS coordinate data
-            webhook.add_embed(embed)
-            discord_res = webhook.execute().json()
+                title = "Unknown Event"
+                if temp_media.upload_type == TemporaryMediaType.SPOTTING_EVENT:
+                    title = "Spotting"
 
-            logger.info(discord_res)
+                elif (
+                    temp_media.upload_type
+                    == TemporaryMediaType.INCIDENT_CALENDAR_INCIDENT
+                ):
+                    title = "Calendar Incident"
 
-            # If there is no attachment, there is a big issue
-            discord_attachment: dict = discord_res["attachments"][0]
+                embed = DiscordEmbed(
+                    title=title,
+                    color=settings.DISCORD_MEDIA_WEBHOOK_EMBED_COLOR,
+                )
+                embed.set_timestamp()
+                embed.set_author(name=temp_media.uploader.display_name)
+
+                for k, v in exif.items():
+                    embed.add_embed_field(
+                        name=k,
+                        value=v if isinstance(v, (str, int)) else str(v),
+                    )
+
+                # TODO: Add a link to the entry
+                # TODO: Add GPS coordinate data
+                webhook.add_embed(embed)
+                discord_res = webhook.execute().json()
+
+                logger.info(discord_res)
+
+                # If there is no attachment, there is a big issue
+                discord_attachment: dict = discord_res["attachments"][0]
+
+                temp_media.uploaded_discord = True
+                temp_media.discord_res = discord_res
+                temp_media.save()
+            else:
+                discord_res = temp_media.discord_res
 
             media = Media.objects.create(
                 created=temp_media.created,

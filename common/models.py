@@ -95,6 +95,9 @@ class TemporaryMedia(TimeStampedModel, UUIDModel, MediaMixin):
         default=TemporaryMediaStatus.PENDING,
     )
 
+    uploaded_discord = models.BooleanField(default=False)
+    discord_res = models.JSONField(default=dict, blank=True)
+
 
 class User(TimeStampedModel):
     firebase_id = models.TextField(unique=True)
