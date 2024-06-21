@@ -258,13 +258,13 @@ async def spot(update: Update, context) -> None:
             .order_by("-id")
             .afirst()
         )
+        await event.asave()
 
         await TelegramSpottingEventLog.objects.acreate(
             spotting_event_id=event.id,
             telegram_log_id=telegram_log.id,
         )
 
-        await event.asave()
         if update.message is None:
             # Flag message as error and do sentry bug record
             print(f"Message is None: {update.to_json()}")
