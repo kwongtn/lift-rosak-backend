@@ -1,4 +1,8 @@
+import asyncio
+import html
+import json
 import logging
+import traceback
 from ctypes import ArgumentError
 from typing import TYPE_CHECKING
 
@@ -48,27 +52,28 @@ async def error_handler(update: object, context: "ContextTypes.DEFAULT_TYPE") ->
     print(update)
     print(context.error)
     # """Log the error and send a telegram message to notify the developer."""
-    # # Log the error before we do anything else, so we can see it even if something breaks.
-    # logger.error("Exception while handling an update:", exc_info=context.error)
+    # Log the error before we do anything else, so we can see it even if something breaks.
+    logger.error("Exception while handling an update:", exc_info=context.error)
 
-    # # traceback.format_exception returns the usual python message about an exception, but as a
-    # # list of strings rather than a single string, so we have to join them together.
-    # tb_list = traceback.format_exception(
-    #     None, context.error, context.error.__traceback__
-    # )
-    # tb_string = "".join(tb_list)
+    # traceback.format_exception returns the usual python message about an exception, but as a
+    # list of strings rather than a single string, so we have to join them together.
+    tb_list = traceback.format_exception(
+        None, context.error, context.error.__traceback__
+    )
+    tb_string = "".join(tb_list)
 
-    # # Build the message with some markup and additional information about what happened.
-    # # You might need to add some logic to deal with messages longer than the 4096 character limit.
-    # update_str = update.to_dict() if isinstance(update, Update) else str(update)
-    # message = (
-    #     "An exception was raised while handling an update\n"
-    #     f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
-    #     "</pre>\n\n"
-    #     f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n\n"
-    #     f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n\n"
-    #     f"<pre>{html.escape(tb_string)}</pre>"
-    # )
+    # Build the message with some markup and additional information about what happened.
+    # You might need to add some logic to deal with messages longer than the 4096 character limit.
+    update_str = update.to_dict() if isinstance(update, Update) else str(update)
+    message = (
+        "An exception was raised while handling an update\n"
+        f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
+        "</pre>\n\n"
+        f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n\n"
+        f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n\n"
+        f"<pre>{html.escape(tb_string)}</pre>"
+    )
+    print(message)
 
     # # Finally, send the message
     # # TODO: Fix this
@@ -140,11 +145,13 @@ async def verify(update: Update, context) -> None:
     # Else link to account
     user: User = await User.objects.aget(id=code_obj.user_id)
     user.telegram_id = update.message.from_user.id
-    await user.asave()
-    await code_obj.adelete()
 
-    await update.message.reply_html(
-        text=f"🎉 Success! Account linked to <code>{user.display_name}</code>. Happy spotting!"
+    await asyncio.gather(
+        user.asave(),
+        code_obj.adelete(),
+        update.message.reply_html(
+            text=f"🎉 Success! Account linked to <code>{user.display_name}</code>. Happy spotting!"
+        ),
     )
 
 
@@ -251,14 +258,14 @@ async def spot(update: Update, context) -> None:
 
         # TODO: Location to determine spotting type
 
-        telegram_log = await (
+        telegram_log, _ = await asyncio.gather(
             TelegramLogs.objects.filter(
                 payload__message__message_id=update.message.message_id
             )
             .order_by("-id")
-            .afirst()
+            .afirst(),
+            event.asave(),
         )
-        await event.asave()
 
         await TelegramSpottingEventLog.objects.acreate(
             spotting_event_id=event.id,
@@ -276,6 +283,7 @@ async def spot(update: Update, context) -> None:
 
     except Exception as e:
         print(e)
+        print(e.__class__)
         if update.message is None:
             # Flag message as error and do sentry bug record
             print(f"Message is None: {update.to_json()}")

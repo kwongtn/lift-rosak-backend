@@ -10,7 +10,7 @@
 
 amqp==5.2.0
     # via kombu
-anyio==4.4.0
+anyio==4.3.0
     # via httpx
     # via watchfiles
 asgiref==3.8.1
@@ -138,13 +138,13 @@ grpcio==1.64.1
     # via grpcio-status
 grpcio-status==1.62.2
     # via google-api-core
-gunicorn==22.0.0
+gunicorn==21.2.0
 h11==0.14.0
     # via httpcore
     # via uvicorn
 hiredis==2.3.2
     # via redis
-httpcore==1.0.5
+httpcore==1.0.4
     # via httpx
 httplib2==0.22.0
     # via google-api-python-client
