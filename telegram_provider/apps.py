@@ -1,3 +1,4 @@
+import logging
 from typing import Protocol
 
 import httpx
@@ -7,6 +8,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler
 
 ptb_application = None
+logger = logging.getLogger(__name__)
 
 # Help function prioritizes help_prompt. If that does not exist, the key will be used.
 # Help description prioritizes help_text. If that does not exist, description will be used.
@@ -62,11 +64,21 @@ class ASGILifespanSignalHandler:
         )
         await ptb_application.initialize()
         await ptb_application.start()
-        await ptb_application.bot.set_webhook(
-            url=f"{settings.TELEGRAM_TLD}/telegram_provider/",
-            allowed_updates=Update.ALL_TYPES,
+
+        webhook_info = await ptb_application.bot.get_webhook_info()
+        webhook_url = f"{settings.TELEGRAM_TLD}/telegram_provider/"
+        if webhook_url != webhook_info.url:
+            logger.info(
+                f"Webhook URL does not match. Changing from {webhook_info.url} to {webhook_url}."
+            )
+            await ptb_application.bot.set_webhook(
+                url=webhook_url,
+                allowed_updates=Update.ALL_TYPES,
+            )
+
+        self.app_config.httpx_client = httpx.AsyncClient(
+            timeout=settings.TELEGRAM_HTTPX_TIMEOUT,
         )
-        self.app_config.httpx_client = httpx.AsyncClient()
 
         from telegram_provider.handlers import (
             dad_joke,
@@ -95,9 +107,23 @@ class ASGILifespanSignalHandler:
         for k, v in handlers_mapping.items():
             handlers_dict[k]["handler"] = v
 
-        await ptb_application.bot.set_my_commands(
-            [(command, elem["description"]) for command, elem in handlers_dict.items()]
-        )
+        for bot_command in await ptb_application.bot.get_my_commands():
+            command = bot_command.command
+            if (
+                command not in handlers_dict.keys()
+                or handlers_dict[command]["description"] != bot_command.description
+            ):
+                logger.info(
+                    "Modification to bot command list required, updating now..."
+                )
+                await ptb_application.bot.set_my_commands(
+                    [
+                        (command, elem["description"])
+                        for command, elem in handlers_dict.items()
+                    ]
+                )
+                break
+
         ptb_application.add_handlers(
             [
                 CommandHandler(command, elem["handler"])
