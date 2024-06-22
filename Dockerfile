@@ -2,6 +2,7 @@ FROM python:3.12-slim-bookworm
 
 ARG ENVIRONMENT
 ENV PYTHONUNBUFFERED 1
+ENV UV_HTTP_TIMEOUT 300
 ENV GOOGLE_APPLICATION_CREDENTIALS /google-application-credential.json
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \
