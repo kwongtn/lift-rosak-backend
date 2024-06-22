@@ -12,7 +12,8 @@ jobs:
       - name: Delete old images
         uses: snok/container-retention-policy@v2
         with:
-          image-names: dev/*
+          image-names: lift-rosak-backend
+          filter-tags: ".*-(dev|fix)-.*"
           cut-off: One month ago UTC
           keep-at-least: 5
           account-type: personal
