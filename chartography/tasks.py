@@ -75,7 +75,7 @@ def aggregate_line_vehicle_status_mtrec_task(self, *args, **kwargs):
     source: Source = Source.objects.get(name=DataSources.MTREC)
 
     res = requests.get(
-        "https://spotters.mtrec.name.my/api/listall",
+        "https://spotters.mtrec.name.my/api/list/analytics?type=spotters-analytics",
         headers={"referer": "https://spotters.mtrec.name.my/analytics-2.html"},
     ).json()
 
