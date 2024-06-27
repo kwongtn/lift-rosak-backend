@@ -3,7 +3,7 @@ from typing import List
 import strawberry
 import strawberry_django
 from django.contrib.postgres.aggregates import ArrayAgg
-from django.db.models import Count, F
+from django.db.models import Count, F, Q
 from strawberry.types import Info
 from strawberry_django.relay import ListConnectionWithTotalCount
 
@@ -46,7 +46,7 @@ class CommonScalars:
                 groupings["day"] = F("created__day")
 
         annotations = (
-            Media.objects.filter(file="")
+            Media.objects.filter(~Q(file=""))
             .annotate(**groupings)
             .values(*groupings.keys())
             .annotate(
