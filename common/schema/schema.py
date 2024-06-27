@@ -46,7 +46,8 @@ class CommonScalars:
                 groupings["day"] = F("created__day")
 
         annotations = (
-            Media.objects.annotate(**groupings)
+            Media.objects.filter(file__isnull=False)
+            .annotate(**groupings)
             .values(*groupings.keys())
             .annotate(
                 count=Count("id"), medias=ArrayAgg(F("id"), distinct=True, default=[])
