@@ -1,7 +1,10 @@
+from datetime import timedelta
+
 from django.contrib.gis.db import models
 from django.contrib.postgres.indexes import BTreeIndex
 from django.db.models import F, Q
 from django.utils.safestring import mark_safe
+from django.utils.timezone import now
 from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
 
@@ -128,6 +131,11 @@ class Event(TimeStampedModel):
             BTreeIndex(fields=["vehicle", "-spotting_date"]),
             BTreeIndex(fields=["vehicle", "run_number", "-spotting_date"]),
         ]
+
+    async def auser_deletion(self):
+        if self.created + timedelta(days=3) < now():
+            raise Exception("Event deletion is not allowed after 3 days of creation")
+        return await self.adelete()
 
     def images_widget(self):
         html = '<div style="display: flex;\

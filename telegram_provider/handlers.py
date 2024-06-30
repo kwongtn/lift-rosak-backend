@@ -163,6 +163,51 @@ async def help_spotting(update: Update, context) -> None:
     )
 
 
+async def delete(update: Update, context) -> None:
+    # Check if user has verified account
+    user = await User.objects.filter(telegram_id=update.message.from_user.id).afirst()
+
+    # If no, send error and ask user to verify before proceeding
+    if user is None:
+        await update.message.reply_html(
+            text=f'Please use the <code>/verify [code]</code> command to verify your telegram account before proceeding. You may obtain the code from the <a href="{env_url_dict.get(settings.ENVIRONMENT)}">TranSPOT</a> site, or visit <a href="https://github.com/kwongtn/rosak_firebase/wiki/Linking-to-Telegram">our wiki</a> for a detailed tutorial.'
+        )
+        return
+
+    # Check if is a reply for another message
+    source_message = update.message.reply_to_message
+    if source_message is None:
+        await update.message.reply_html(
+            text="Please reply to the spotting entry you want to delete."
+        )
+        return
+
+    event_log = (
+        await TelegramSpottingEventLog.objects.filter(
+            telegram_log__payload__message__message_id=source_message.message_id,
+        )
+        .select_related("spotting_event")
+        .afirst()
+    )
+    if event_log is None:
+        await update.message.reply_html(
+            text="No spotting entry found for this message."
+        )
+        return
+
+    event: "Event" = event_log.spotting_event
+    try:
+        await event.auser_deletion()
+        await infinite_retry_on_error(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
+        )
+    except Exception as e:
+        await update.message.reply_html(
+            text=f"Failed to delete spotting entry for {event.id}: {str(e)}"
+        )
+        return
+
+
 async def spot(update: Update, context) -> None:
     # Check if user has verified account
     user = await User.objects.filter(telegram_id=update.message.from_user.id).afirst()

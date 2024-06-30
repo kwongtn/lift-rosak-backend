@@ -38,6 +38,9 @@ handlers_dict = {
     "spot": {
         "description": "Enter spotting data",
     },
+    "delete": {
+        "description": "Delete spotting entry",
+    },
     "spotting_today": {
         "description": "Displays spotting stats for today",
     },
@@ -82,6 +85,7 @@ class ASGILifespanSignalHandler:
 
         from telegram_provider.handlers import (
             dad_joke,
+            delete,
             error_handler,
             favourite_vehicle,
             help,
@@ -102,11 +106,13 @@ class ASGILifespanSignalHandler:
             "s": spot,
             "spot": spot,
             "spotting_today": spotting_today,
+            "delete": delete,
         }
 
         for k, v in handlers_mapping.items():
             handlers_dict[k]["handler"] = v
 
+        # TODO: Add logic for when a new command is added
         for bot_command in await ptb_application.bot.get_my_commands():
             command = bot_command.command
             if (
