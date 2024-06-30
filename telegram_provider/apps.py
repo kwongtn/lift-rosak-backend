@@ -112,23 +112,27 @@ class ASGILifespanSignalHandler:
         for k, v in handlers_mapping.items():
             handlers_dict[k]["handler"] = v
 
-        # TODO: Add logic for when a new command is added
+        has_changes = False
+        existing_commands = set()
         for bot_command in await ptb_application.bot.get_my_commands():
             command = bot_command.command
+            existing_commands.add(command)
             if (
                 command not in handlers_dict.keys()
                 or handlers_dict[command]["description"] != bot_command.description
             ):
-                logger.info(
-                    "Modification to bot command list required, updating now..."
-                )
-                await ptb_application.bot.set_my_commands(
-                    [
-                        (command, elem["description"])
-                        for command, elem in handlers_dict.items()
-                    ]
-                )
-                break
+                has_changes = True
+
+        if has_changes or set(handlers_dict.keys()).symmetric_difference(
+            existing_commands
+        ):
+            logger.info("Modification to bot command list required, updating now...")
+            await ptb_application.bot.set_my_commands(
+                [
+                    (command, elem["description"])
+                    for command, elem in handlers_dict.items()
+                ]
+            )
 
         ptb_application.add_handlers(
             [
