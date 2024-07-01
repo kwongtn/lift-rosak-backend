@@ -188,14 +188,14 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
 
                 logger.info(discord_res)
 
-                # If there is no attachment, there is a big issue
-                discord_attachment: dict = discord_res["attachments"][0]
-
                 temp_media.uploaded_discord = True
                 temp_media.discord_res = discord_res
                 temp_media.save()
             else:
                 discord_res = temp_media.discord_res
+
+            # If there is no attachment, there is a big issue
+            discord_attachment: dict = discord_res["attachments"][0]
 
             media = Media.objects.create(
                 created=temp_media.created,
