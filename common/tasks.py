@@ -247,6 +247,10 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
 @celery_app.task(bind=True)
 def cleanup_temporary_media_task(self, *args, **kwargs):
     from common.models import TemporaryMedia
+    from common.utils import should_upload_media
+
+    if not should_upload_media():
+        return
 
     for temp_media in TemporaryMedia.objects.filter(
         created__lte=now() - datetime.timedelta(minutes=5),
