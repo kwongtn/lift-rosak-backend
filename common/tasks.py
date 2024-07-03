@@ -279,7 +279,15 @@ def cleanup_temporary_media_task(self, *args, **kwargs):
 
 
 @celery_app.task(bind=True)
-def add_width_height_to_media_task(self, *, filename, width, height, **kwargs):
+def add_width_height_to_media_task(
+    self,
+    *,
+    filename,
+    width,
+    height,
+    content_type,
+    **kwargs,
+):
     from common.models import Media
 
     # We assume that filename is unique
@@ -292,12 +300,14 @@ def add_width_height_to_media_task(self, *, filename, width, height, **kwargs):
                 "filename": filename,
                 "width": width,
                 "height": height,
+                "content_type": content_type,
             }
         )
         return
 
     media.width = width
     media.height = height
+    media.content_type = content_type
     media.save()
 
 

@@ -125,6 +125,7 @@ class ImgurStorage(Storage):
                 "filename": filename,
                 "width": response["width"],
                 "height": response["height"],
+                "content_type": response["type"],
             }
         )
 
