@@ -32,16 +32,13 @@ class ImgurStorage(Storage):
                 client_secret=settings.IMGUR_CONSUMER_SECRET,
                 access_token=settings.IMGUR_ACCESS_TOKEN,
                 refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
-                api_url=settings.IMGUR_PROXY_API_URL,
             )
             logger.info("Logged in Imgur storage")
 
             self.account_info = self.client.get_account(settings.IMGUR_USERNAME)
             self.albums = self.client.get_account_albums(settings.IMGUR_USERNAME)
             self.location = location
-            self.base_url = (
-                f"{settings.IMGUR_PROXY_API_URL}/3/account/{self.account_info.url}/"
-            )
+            self.base_url = f"https://api.imgur.com/3/account/{self.account_info.url}/"
             logger.debug(f"account_info: {self.account_info}")
             logger.debug(f"albums: {self.albums}")
             logger.debug(f"location: {self.location}")

@@ -8,7 +8,6 @@ client = ImgurClient(
     client_secret=settings.IMGUR_CONSUMER_SECRET,
     access_token=settings.IMGUR_ACCESS_TOKEN,
     refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
-    api_url=settings.IMGUR_PROXY_API_URL,
 )
 
 
