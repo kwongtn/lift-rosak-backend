@@ -81,7 +81,7 @@ class ImgurStorage(Storage):
 
         album = self.check_or_create_directory(directory)
         config = {
-            "album": album.id,
+            "album": album.deletehash,
             "name": name,
             "title": name,
         }
@@ -135,7 +135,7 @@ class ImgurStorage(Storage):
         self,
         img_str: str,
         config=None,
-        anon=False,
+        anon=True,
         type: str = "base64",
     ):
         """use a file descriptor to perform a make_request"""
@@ -154,7 +154,7 @@ class ImgurStorage(Storage):
                 )
             }
         )
-        return self.client.make_request("POST", "upload", data, anon)
+        return self.client.make_request("POST", "image", data, anon)
 
     def delete(self, name):
         name = name.split(".")[0]
