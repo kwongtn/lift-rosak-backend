@@ -167,7 +167,7 @@ idna==3.7
     # via anyio
     # via httpx
     # via requests
-imgurpython @ git+https://github.com/kwongtn/imgurpython.git@7c0ef4c02ecae09731cf1789e5d23470f9faeba1
+imgurpython @ git+https://github.com/kwongtn/imgurpython.git@0e65e2f7de26c5970ce7e569965f985d6f515590
 ipykernel==6.29.4
 ipython==8.25.0
     # via ipykernel
