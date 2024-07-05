@@ -247,7 +247,7 @@ async def spot(update: Update, context) -> None:
 
         # Search for vehicle
         vehicle = await Vehicle.objects.filter(
-            Q(identification_no__startswith=args.vehicle_number, lines__in=lines)
+            Q(identification_no__istartswith=args.vehicle_number, lines__in=lines)
             & ~Q(
                 status__in=[
                     VehicleStatus.MARRIED,
