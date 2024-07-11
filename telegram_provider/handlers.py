@@ -185,6 +185,7 @@ async def delete(update: Update, context) -> None:
     event_log = (
         await TelegramSpottingEventLog.objects.filter(
             telegram_log__payload__message__message_id=source_message.message_id,
+            telegram_log__payload__message__chat__id=source_message.chat.id,
         )
         .select_related("spotting_event")
         .afirst()
