@@ -193,6 +193,7 @@ pyasn1-modules==0.4.0
     # via google-auth
 pycparser==2.22
     # via cffi
+pygments==2.18.0
 pyjwt==2.8.0
     # via firebase-admin
 pymemcache==4.0.0

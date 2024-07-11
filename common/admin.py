@@ -58,7 +58,7 @@ class MediaAdmin(admin.ModelAdmin):
 
 
 class TemporaryMediaAdmin(admin.ModelAdmin):
-    fields = [
+    fields = (
         "id",
         "created",
         "modified",
@@ -66,19 +66,21 @@ class TemporaryMediaAdmin(admin.ModelAdmin):
         "image_widget",
         "uploader",
         "status",
-        "metadata",
+        "prettified_metadata",
         "fail_count",
-    ]
+    )
+
     readonly_fields = [
         "id",
         "created",
         "modified",
         "image_widget",
-        "metadata",
+        "uploader",
+        "prettified_metadata",
         "fail_count",
     ]
     list_display = [
-        "__str__",
+        "id",
         "created",
         "uploader",
         "status",
@@ -92,6 +94,9 @@ class TemporaryMediaAdmin(admin.ModelAdmin):
     search_fields = [
         "uploader",
     ]
+
+    def prettified_metadata(self, instance):
+        self.prettify_json(instance.metadata)
 
 
 class UserClearanceStackedInline(admin.StackedInline):
@@ -119,7 +124,6 @@ class ClearanceAdmin(admin.ModelAdmin):
 
 class FeatureFlagAdmin(admin.ModelAdmin):
     list_display = [
-        "id",
         "name",
         "enabled",
     ]
