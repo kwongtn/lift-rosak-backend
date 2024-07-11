@@ -132,7 +132,9 @@ class Event(TimeStampedModel):
             BTreeIndex(fields=["vehicle", "run_number", "-spotting_date"]),
         ]
 
-    async def auser_deletion(self):
+    async def auser_deletion(self, user_id: int):
+        if user_id != self.reporter_id:
+            raise Exception("Only the event reporter can delete the event")
         if self.created + timedelta(days=3) < now():
             raise Exception("Event deletion is not allowed after 3 days of creation")
         return await self.adelete()

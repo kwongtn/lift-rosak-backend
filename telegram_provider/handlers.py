@@ -198,7 +198,7 @@ async def delete(update: Update, context) -> None:
 
     event: "Event" = event_log.spotting_event
     try:
-        await event.auser_deletion()
+        await event.auser_deletion(user_id=user.id)
         await infinite_retry_on_error(
             update.message, "set_reaction", ReactionEmoji.THUMBS_UP
         )
