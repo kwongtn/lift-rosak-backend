@@ -12,7 +12,7 @@ export PYTHONPATH=$(which python)
 
 if [ "$DEBUG" == 'True' ]; then
     python manage.py check # Doing it manually since checks aren't run by WSGI stack
-    gunicorn rosak.asgi:application -w 1 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8001 --reload --config gunicorn.dev.conf.py
+    granian --interface asgi rosak.asgi:application --host 0.0.0.0 --port 8001 --reload
 else
-    gunicorn rosak.asgi:application -w 2 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8001
+    granian --interface asgi rosak.asgi:application --host 0.0.0.0 --port 8001
 fi
