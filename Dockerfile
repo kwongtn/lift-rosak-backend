@@ -19,13 +19,14 @@ WORKDIR /code
 COPY requirements.lock ./
 COPY requirements-dev.lock ./
 
-RUN --mount=type=cache,target=/root/.cache/uv if [ "$ENVIRONMENT" = "dev" ]; \
-    then \
-        /root/.cargo/bin/uv \
-        pip install --system --no-cache -r requirements-dev.lock \
-    ; else \
-        /root/.cargo/bin/uv \
-        pip install --system --no-cache -r requirements.lock \
-    ; fi
+ENV UV_HTTP_TIMEOUT 300
+ENV UV_INSTALL_DIR /root/.local/bin
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ "$ENVIRONMENT" = "dev" ]; then \
+        "$UV_INSTALL_DIR/uv" pip install --no-cache-dir --system -r requirements-dev.lock; \
+    else \
+        "$UV_INSTALL_DIR/uv" pip install --no-cache-dir --system -r requirements.lock; \
+    fi
+
 
 COPY . /code/
