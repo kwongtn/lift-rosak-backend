@@ -81,19 +81,23 @@ def get_default_start_time(type: DateGroupings) -> date:
         raise RuntimeError(f"Unknown date groupings type: {type}")
 
 
-def get_group_strs(grouping: DateGroupings, prefix: str = "") -> Tuple[List[str], str]:
+def get_group_strs(
+    grouping: DateGroupings,
+    prefix: str = "",
+    use_iso_year: bool = False,
+) -> Tuple[List[str], str]:
     if grouping == DateGroupings.YEAR:
-        return ([f"{prefix}year"], "years")
+        return ([f"{prefix}__year"], "years")
     elif grouping == DateGroupings.MONTH:
-        return ([f"{prefix}year", f"{prefix}month"], "months")
+        return ([f"{prefix}__year", f"{prefix}__month"], "months")
     elif grouping == DateGroupings.WEEK:
-        return ([f"{prefix}year", f"{prefix}week"], "weeks")
+        return ([f"{prefix}__iso_year", f"{prefix}__week"], "weeks")
     elif grouping == DateGroupings.DAY:
         return (
             [
-                f"{prefix}year",
-                f"{prefix}month",
-                f"{prefix}day",
+                f"{prefix}__year",
+                f"{prefix}__month",
+                f"{prefix}__day",
             ],
             "days",
         )
@@ -109,10 +113,10 @@ def get_result_comparison_tuple(
 
     for result in results:
         to_append = (
-            result.get(f"{prefix}year", None),
-            result.get(f"{prefix}month", None),
-            result.get(f"{prefix}week", None),
-            result.get(f"{prefix}day", None),
+            result.get(f"{prefix}__year", None),
+            result.get(f"{prefix}__month", None),
+            result.get(f"{prefix}__week", None),
+            result.get(f"{prefix}__day", None),
         )
         for param in additional_params:
             to_append = to_append + (result.get(param, None),)
@@ -149,13 +153,14 @@ def get_trends(
     date_group: DateGroupings = DateGroupings.DAY,
     free_range: bool = False,
     add_zero: bool = False,
+    use_iso_year: bool = False,
 ):
     if start is None:
         start = get_default_start_time(type=date_group)
 
     (group_strs, range_type) = get_group_strs(
         grouping=date_group,
-        prefix=f"{groupby_field}__",
+        prefix=groupby_field,
     )
 
     for k in additional_groupby.keys():
@@ -185,33 +190,39 @@ def get_trends(
     )
     range = interval.range(range_type)
 
+    display_year = date_group in [
+        DateGroupings.DAY,
+        DateGroupings.MONTH,
+        DateGroupings.WEEK,
+        DateGroupings.YEAR,
+    ]
+    display_month = date_group in [DateGroupings.DAY, DateGroupings.MONTH]
+    display_week = date_group in [DateGroupings.WEEK]
+    display_day = date_group in [DateGroupings.DAY]
+
+    year_type = "iso_year" if display_week else "year"
+
     if add_zero:
         result_types = get_result_comparison_tuple(
             results=results,
             additional_params=[k for k in additional_groupby.keys()],
-            prefix=f"{groupby_field}__",
+            prefix=groupby_field,
         )
 
         combinations = get_combinations(additional_groupby)
-        display_year = date_group in [
-            DateGroupings.DAY,
-            DateGroupings.MONTH,
-            DateGroupings.WEEK,
-            DateGroupings.YEAR,
-        ]
-        display_month = date_group in [DateGroupings.DAY, DateGroupings.MONTH]
-        display_week = date_group in [DateGroupings.WEEK]
-        display_day = date_group in [DateGroupings.DAY]
-
         for elem in range:
-            year_val = elem.year if display_year else None
+            year_val = (
+                (elem.isocalendar().year if use_iso_year else elem.year)
+                if display_year
+                else None
+            )
             month_val = elem.month if display_month else None
             week_of_year_val = elem.week_of_year if display_week else None
             day_val = elem.day if display_day else None
 
             if not combinations:
                 to_append = {
-                    f"{groupby_field}__year": year_val,
+                    f"{groupby_field}__{year_type}": year_val,
                     "count": 0,
                 }
                 if (
@@ -233,7 +244,7 @@ def get_trends(
             for val in combinations:
                 to_append = {
                     **val,
-                    f"{groupby_field}__year": year_val,
+                    f"{groupby_field}__{year_type}": year_val,
                     "count": 0,
                 }
                 if (
@@ -254,7 +265,7 @@ def get_trends(
 
     for result in results:
         result["date_key"] = get_date_key(
-            year=result[f"{groupby_field}__year"],
+            year=result[f"{groupby_field}__{year_type}"],
             month=result.get(f"{groupby_field}__month", None),
             day=result.get(f"{groupby_field}__day", None),
             week=result[f"{groupby_field}__week"]
@@ -264,7 +275,7 @@ def get_trends(
 
         if result.get(f"{groupby_field}__day", None):
             result_date = pendulum.date(
-                year=result[f"{groupby_field}__year"],
+                year=result[f"{groupby_field}__{year_type}"],
                 month=result[f"{groupby_field}__month"],
                 day=result[f"{groupby_field}__day"],
             )
@@ -283,7 +294,7 @@ def get_trends(
             new_date = result_date + timedelta(days=7)
             result["is_last_week_of_month"] = new_date.month != result_date.month
 
-    return sorted(results, key=lambda d: f'{d["date_key"]}')
+    return sorted(results, key=lambda d: f"{d['date_key']}")
 
 
 def should_upload_media():
