@@ -12,7 +12,7 @@ export PYTHONPATH=$(which python)
 
 if [ "$DEBUG" == 'True' ]; then
     python manage.py check # Doing it manually since checks aren't run by WSGI stack
-    granian --interface asgi rosak.asgi:application --host 0.0.0.0 --port 8001 --reload
+    granian --interface asgi rosak.asgi:application --host 0.0.0.0 --port 8001 --reload --workers-kill-timeout 1
 else
     granian --interface asgi rosak.asgi:application --host 0.0.0.0 --port 8001
 fi
