@@ -286,7 +286,10 @@ def get_trends(
             else:
                 new_date = result_date
             result["week_of_month"] = new_date.week_of_month
-            result["week_of_year"] = new_date.week_of_year
+
+            result["year_week"] = (
+                f"{result_date.isocalendar().year}W{result_date.isocalendar().week}"
+            )
 
             new_date = result_date + timedelta(days=1)
             result["is_last_day_of_month"] = new_date.month != result_date.month
