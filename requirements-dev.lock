@@ -192,7 +192,7 @@ packaging==24.2
     # via ipykernel
 parso==0.8.4
     # via jedi
-pendulum @ git+https://github.com/kwongtn/pendulum.git@d8768d4bd4a949202b2f872d70a0ce710c81cdfc
+pendulum==3.0.0
 pexpect==4.9.0
     # via ipython
 pillow==11.1.0

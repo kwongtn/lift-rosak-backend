@@ -36,7 +36,7 @@ dependencies = [
     "firebase-admin>=6.5.0",
     "httpcore==1.0.4",
     "imgurpython @ git+https://github.com/kwongtn/imgurpython.git@master",
-    "pendulum @ git+https://github.com/kwongtn/pendulum.git@for_rosak",
+    "pendulum>=3.0.0",
     "pillow-heif>=0.16.0",
     "pillow>=10.3.0",
     "promise>=2.3",

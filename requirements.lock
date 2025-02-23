@@ -163,7 +163,7 @@ kombu==5.4.2
     # via celery
 msgpack==1.1.0
     # via cachecontrol
-pendulum @ git+https://github.com/kwongtn/pendulum.git@d8768d4bd4a949202b2f872d70a0ce710c81cdfc
+pendulum==3.0.0
 pillow==11.1.0
     # via django-colorfield
     # via pillow-heif
