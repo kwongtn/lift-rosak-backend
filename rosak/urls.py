@@ -34,9 +34,11 @@ urlpatterns = (
         re_path("^advanced_filters/", include("advanced_filters.urls")),
         path(
             "graphql/",
-            CustomGraphQLView.as_view(
-                graphiql=True if settings.DEBUG else False,
-                schema=schema,
+            csrf_exempt(
+                CustomGraphQLView.as_view(
+                    graphiql=True if settings.DEBUG else False,
+                    schema=schema,
+                )
             ),
         ),
         path("upload/", common_views.GenericUpload.as_view()),
