@@ -1,6 +1,6 @@
 import dataclasses
 from datetime import date, timedelta
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, List, Literal, Tuple
 
 import pendulum
 from asgiref.sync import sync_to_async
@@ -84,7 +84,6 @@ def get_default_start_time(type: DateGroupings) -> date:
 def get_group_strs(
     grouping: DateGroupings,
     prefix: str = "",
-    use_iso_year: bool = False,
 ) -> Tuple[List[str], str]:
     if grouping == DateGroupings.YEAR:
         return ([f"{prefix}__year"], "years")
@@ -107,13 +106,16 @@ def get_group_strs(
 
 
 def get_result_comparison_tuple(
-    results: List[dict], additional_params: List[str] = [], prefix: str = ""
+    results: List[dict],
+    additional_params: List[str] = [],
+    prefix: str = "",
+    year_type: Literal["year", "iso_year"] = "year",
 ):
     return_results = []
 
     for result in results:
         to_append = (
-            result.get(f"{prefix}__year", None),
+            result.get(f"{prefix}__{year_type}", None),
             result.get(f"{prefix}__month", None),
             result.get(f"{prefix}__week", None),
             result.get(f"{prefix}__day", None),
@@ -207,6 +209,7 @@ def get_trends(
             results=results,
             additional_params=[k for k in additional_groupby.keys()],
             prefix=groupby_field,
+            year_type=year_type,
         )
 
         combinations = get_combinations(additional_groupby)
