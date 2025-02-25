@@ -3,6 +3,7 @@ from django.contrib.gis.db import models
 from django.contrib.postgres.indexes import BTreeIndex
 from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
+from simple_history.models import HistoricalRecords
 
 from operation.enums import (
     AssetStatus,
@@ -226,6 +227,8 @@ class Asset(TimeStampedModel):
         choices=AssetStatus.choices,
     )
 
+    history = HistoricalRecords()
+
     class Meta:
         ordering = ["officialid"]
         constraints = [
@@ -302,6 +305,8 @@ class Vehicle(models.Model):
         null=True,
         blank=True,
     )
+
+    history = HistoricalRecords()
 
     def __str__(self) -> str:
         return f"{self.identification_no}_{','.join(self.lines.values_list('code', flat=True))}"

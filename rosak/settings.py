@@ -94,6 +94,7 @@ INSTALLED_APPS = [
     # "health_check.contrib.s3boto3_storage",  # requires boto3 and S3BotoStorage backend
     # "health_check.contrib.rabbitmq",  # requires RabbitMQ broker
     "health_check.contrib.redis",  # requires Redis broker
+    "simple_history",
     "cachalot",
     "operation",
     "common",
@@ -122,6 +123,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "hijack.middleware.HijackUserMiddleware",
+    "simple_history.middleware.HistoryRequestMiddleware",
     # "django_asgi_lifespan.middleware.AsyncMiddleware",
     "django_asgi_lifespan.middleware.LifespanStateMiddleware",
     # This must be the last
