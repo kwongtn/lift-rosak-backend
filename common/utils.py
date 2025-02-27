@@ -170,6 +170,7 @@ def get_trends(
     display_day = date_group in [DateGroupings.DAY]
 
     year_type = "year"
+    use_iso_year = False
     if display_week:
         year_type = "iso_year"
         use_iso_year = True
