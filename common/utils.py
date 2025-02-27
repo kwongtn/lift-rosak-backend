@@ -155,10 +155,32 @@ def get_trends(
     date_group: DateGroupings = DateGroupings.DAY,
     free_range: bool = False,
     add_zero: bool = False,
-    use_iso_year: bool = False,
 ):
     if start is None:
         start = get_default_start_time(type=date_group)
+
+    display_year = date_group in [
+        DateGroupings.DAY,
+        DateGroupings.MONTH,
+        DateGroupings.WEEK,
+        DateGroupings.YEAR,
+    ]
+    display_month = date_group in [DateGroupings.DAY, DateGroupings.MONTH]
+    display_week = date_group in [DateGroupings.WEEK]
+    display_day = date_group in [DateGroupings.DAY]
+
+    year_type = "year"
+    if display_week:
+        year_type = "iso_year"
+        use_iso_year = True
+
+        # Adjust start to Monday of the week
+        if start.weekday() != 0:
+            start -= timedelta(days=start.weekday())
+
+        # Adjust end to Sunday of the week
+        if end.weekday() != 6:
+            end += timedelta(days=(6 - end.weekday()))
 
     (group_strs, range_type) = get_group_strs(
         grouping=date_group,
@@ -191,18 +213,6 @@ def get_trends(
         date.today() if free_range else end,
     )
     range = interval.range(range_type)
-
-    display_year = date_group in [
-        DateGroupings.DAY,
-        DateGroupings.MONTH,
-        DateGroupings.WEEK,
-        DateGroupings.YEAR,
-    ]
-    display_month = date_group in [DateGroupings.DAY, DateGroupings.MONTH]
-    display_week = date_group in [DateGroupings.WEEK]
-    display_day = date_group in [DateGroupings.DAY]
-
-    year_type = "iso_year" if display_week else "year"
 
     if add_zero:
         result_types = get_result_comparison_tuple(

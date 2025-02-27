@@ -41,6 +41,7 @@ dependencies = [
     "pendulum>=3.0.0",
     "pillow-heif>=0.16.0",
     "pillow>=10.3.0",
+    "polars>=1.23.0",
     "promise>=2.3",
     "psutil>=5.9.8",
     "psycopg2-binary>=2.9.9",

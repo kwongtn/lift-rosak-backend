@@ -170,6 +170,7 @@ pillow==11.1.0
     # via django-colorfield
     # via pillow-heif
 pillow-heif==0.21.0
+polars==1.23.0
 promise==2.3
 prompt-toolkit==3.0.50
     # via click-repl

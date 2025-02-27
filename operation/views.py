@@ -1,6 +1,7 @@
 import pendulum
+import polars as pl
 from django.db.models import OuterRef, Q, QuerySet, Subquery
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.request import Request
@@ -15,7 +16,14 @@ from spotting import models as spotting_models
 
 
 class LineVehiclesSpottingTrend(APIView):
-    def get(self, request: Request | HttpRequest, line_id, start_date, end_date):
+    def get(
+        self,
+        request: Request | HttpRequest,
+        line_id,
+        start_date,
+        end_date,
+        **kwargs,
+    ):
         vehicles = operation_models.Vehicle.objects.filter(lines=line_id).in_bulk()
 
         trends = get_trends(
@@ -40,8 +48,10 @@ class LineVehiclesSpottingTrend(APIView):
             for trend in trends
         ]
 
-        return Response(
-            sorted(results, key=lambda d: f"{d['vehicle']}"),
+        csv_data = pl.DataFrame(results).sort("vehicle", "dateKey").write_csv(file=None)
+        return HttpResponse(
+            csv_data,
+            content_type="text/csv",
             status=status.HTTP_200_OK,
         )
 

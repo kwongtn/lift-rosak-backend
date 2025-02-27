@@ -203,6 +203,7 @@ pillow==11.1.0
 pillow-heif==0.21.0
 platformdirs==4.3.6
     # via jupyter-core
+polars==1.23.0
 promise==2.3
 prompt-toolkit==3.0.50
     # via click-repl
