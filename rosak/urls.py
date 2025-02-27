@@ -67,7 +67,7 @@ if settings.DEBUG:
         path("__debug__/", include(debug_toolbar.urls)),
         path("sentry-debug/", trigger_error),
     ]
-
-urlpatterns += [
-    re_path("", csrf_exempt(custom_view.redirect_view)),
-]
+else:
+    urlpatterns += [
+        re_path("", csrf_exempt(custom_view.redirect_view)),
+    ]
