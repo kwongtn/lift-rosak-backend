@@ -3,9 +3,11 @@ from typing import Optional
 
 import strawberry
 import strawberry_django
-from django.db.models import Q
+from django.contrib.gis.db.models import Q
+from strawberry_django import DateFilterLookup
 
 from incident import models
+from operation.schema.filters import StationFilter, VehicleFilter
 
 
 class IncidentAbstractFilter:
@@ -14,70 +16,68 @@ class IncidentAbstractFilter:
     severity: strawberry.auto
     is_last: Optional[bool]
 
-    def filter_id(self, queryset):
-        return queryset.filter(id=self.id)
-
-    def filter_date(self, queryset):
-        return queryset.filter(date=self.date)
-
-    def filter_severity(self, queryset):
-        return queryset.filter(severity=self.severity)
-
-    def filter_is_last(self, queryset):
-        return queryset.filter(is_last=self.is_last)
-
 
 @strawberry_django.filters.filter(models.VehicleIncident)
 class VehicleIncidentFilter(IncidentAbstractFilter):
-    vehicle_id: Optional[strawberry.ID]
-
-    def filter_vehicle_id(self, queryset):
-        return queryset.filter(vehicle_id=self.vehicle_id)
+    vehicle: Optional["VehicleFilter"]
 
 
 @strawberry_django.filters.filter(models.StationIncident)
 class StationIncidentFilter(IncidentAbstractFilter):
-    station_id: Optional[strawberry.ID]
-
-    def filter_station_id(self, queryset):
-        return queryset.filter(station_id=self.station_id)
+    station: Optional["StationFilter"]
 
 
 @strawberry_django.filters.filter(models.CalendarIncident)
 class CalendarIncidentFilter:
     id: Optional[strawberry.ID]
     severity: Optional[str]
-    date: Optional[date]
 
-    start_date: Optional[date]
-    end_date: Optional[date]
+    @strawberry_django.filter_field
+    def date(self, value: DateFilterLookup["date"], prefix) -> Q:
+        root_q = Q()
 
-    def filter_date(self, queryset):
-        return queryset.filter(
-            Q(start_datetime__date__lte=self.date)
-            & Q(Q(end_datetime__date__gte=self.date) | Q(end_datetime__isnull=True))
-        )
-
-    def filter_start_date(self, queryset):
-        assert self.start_date != strawberry.UNSET and self.end_date != strawberry.UNSET
-        assert abs(self.end_date - self.start_date) <= timedelta(days=60)
-
-        return queryset.filter(
-            Q(
-                Q(start_datetime__date__lte=self.end_date)
-                & Q(start_datetime__date__gte=self.start_date)
+        if value.range != strawberry.UNSET:
+            assert (
+                value.range.start != strawberry.UNSET
+                and value.range.end != strawberry.UNSET
             )
-            & Q(
-                Q(end_datetime__isnull=True)
-                | Q(
-                    Q(end_datetime__date__gte=self.start_date)
-                    & Q(end_datetime__date__lte=self.end_date)
+            assert abs(value.range.end - value.range.start) <= timedelta(days=60)
+
+            if value.range.start == value.range.end:
+                root_q &= Q(start_datetime__date__lte=value.range.end) & Q(
+                    Q(end_datetime__date__gte=value.range.start)
+                    | Q(end_datetime__isnull=True)
                 )
+            else:
+                root_q &= Q(
+                    Q(start_datetime__date__lte=value.range.end)
+                    & Q(start_datetime__date__gte=value.range.start)
+                ) & Q(
+                    Q(end_datetime__isnull=True)
+                    | Q(
+                        Q(end_datetime__date__gte=value.range.start)
+                        & Q(end_datetime__date__lte=value.range.end)
+                    )
+                )
+
+        if value.exact != strawberry.UNSET:
+            root_q &= Q(start_datetime__date__lte=value.exact) & Q(
+                Q(end_datetime__isnull=True) | Q(end_datetime__date__gte=value.exact)
             )
-        )
 
-    def filter_end_date(self, queryset):
-        assert self.start_date != strawberry.UNSET and self.end_date != strawberry.UNSET
-        assert abs(self.end_date - self.start_date) <= timedelta(days=60)
+        # TODO: Optimize code to be more less repetitive
+        if value.month != strawberry.UNSET:
+            if value.month.exact != strawberry.UNSET:
+                root_q &= Q(start_datetime__month__lte=value.month.exact + 1) & Q(
+                    Q(end_datetime__isnull=True)
+                    | Q(end_datetime__month__gte=value.month.exact + 1)
+                )
 
-        return queryset
+        if value.year != strawberry.UNSET:
+            if value.year.exact != strawberry.UNSET:
+                root_q &= Q(start_datetime__year__lte=value.year.exact) & Q(
+                    Q(end_datetime__isnull=True)
+                    | Q(end_datetime__year__gte=value.year.exact)
+                )
+
+        return root_q

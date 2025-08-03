@@ -3,6 +3,7 @@ import logging
 import os.path
 from io import StringIO
 
+import imgurpython
 import requests
 from django.conf import settings
 from django.core.cache import cache
@@ -11,10 +12,13 @@ from django.core.files.base import ContentFile
 from django.core.files.images import ImageFile
 from django.core.files.storage import Storage
 from django.utils.deconstruct import deconstructible
-from imgurpython import ImgurClient
 from imgurpython.helpers.error import ImgurClientError
 
 from common.tasks import add_width_height_to_media_task
+
+imgurpython.client.API_URL = settings.IMGUR_PROXY_API_URL
+
+from common.imgur_field import ImgurClient  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +36,15 @@ class ImgurStorage(Storage):
                 client_secret=settings.IMGUR_CONSUMER_SECRET,
                 access_token=settings.IMGUR_ACCESS_TOKEN,
                 refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
+                api_url=settings.IMGUR_PROXY_API_URL,
             )
             logger.info("Logged in Imgur storage")
 
             self.account_info = self.client.get_account(settings.IMGUR_USERNAME)
             self.albums = self.client.get_account_albums(settings.IMGUR_USERNAME)
             self.location = location
-            self.base_url = "https://api.imgur.com/3/account/{url}/".format(
-                url=self.account_info.url
+            self.base_url = (
+                f"{settings.IMGUR_PROXY_API_URL}/3/account/{self.account_info.url}/"
             )
             logger.debug(f"account_info: {self.account_info}")
             logger.debug(f"albums: {self.albums}")
@@ -76,12 +81,12 @@ class ImgurStorage(Storage):
 
         album = self.check_or_create_directory(directory)
         config = {
-            "album": album.id,
+            "album": album.deletehash,
             "name": name,
             "title": name,
         }
 
-        if type(content) == ContentFile:
+        if type(content) is ContentFile:
             name = name.split("/")[-1]
             config["name"] = name
             config["title"] = name
@@ -120,6 +125,7 @@ class ImgurStorage(Storage):
                 "filename": filename,
                 "width": response["width"],
                 "height": response["height"],
+                "content_type": response["type"],
             }
         )
 
@@ -129,7 +135,7 @@ class ImgurStorage(Storage):
         self,
         img_str: str,
         config=None,
-        anon=False,
+        anon=True,
         type: str = "base64",
     ):
         """use a file descriptor to perform a make_request"""
@@ -148,7 +154,7 @@ class ImgurStorage(Storage):
                 )
             }
         )
-        return self.client.make_request("POST", "upload", data, anon)
+        return self.client.make_request("POST", "image", data, anon)
 
     def delete(self, name):
         name = name.split(".")[0]

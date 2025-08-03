@@ -2,7 +2,6 @@ import strawberry
 from django.conf import settings
 from graphql.validation import NoSchemaIntrospectionCustomRule
 from strawberry.extensions import AddValidationRules
-from strawberry.extensions.tracing import SentryTracingExtension
 from strawberry_django.optimizer import DjangoOptimizerExtension
 
 from chartography.schema.schema import ChartographyMutations, ChartographyScalars
@@ -45,7 +44,6 @@ class Mutation(
 #     pass
 
 extensions = [
-    SentryTracingExtension,
     DjangoOptimizerExtension,
 ]
 

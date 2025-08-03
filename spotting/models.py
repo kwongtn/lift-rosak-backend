@@ -1,7 +1,10 @@
+from datetime import timedelta
+
 from django.contrib.gis.db import models
 from django.contrib.postgres.indexes import BTreeIndex
 from django.db.models import F, Q
 from django.utils.safestring import mark_safe
+from django.utils.timezone import now
 from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
 
@@ -87,6 +90,14 @@ class Event(TimeStampedModel):
         through="spotting.EventMedia",
     )
 
+    data_source = models.ForeignKey(
+        to="spotting.EventSource",
+        null=True,
+        default=None,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+
     class Meta:
         constraints = [
             models.CheckConstraint(
@@ -120,6 +131,13 @@ class Event(TimeStampedModel):
             BTreeIndex(fields=["vehicle", "-spotting_date"]),
             BTreeIndex(fields=["vehicle", "run_number", "-spotting_date"]),
         ]
+
+    async def auser_deletion(self, user_id: int):
+        if user_id != self.reporter_id:
+            raise Exception("Only the event reporter can delete the event")
+        if self.created + timedelta(days=3) < now():
+            raise Exception("Event deletion is not allowed after 3 days of creation")
+        return await self.adelete()
 
     def images_widget(self):
         html = '<div style="display: flex;\
@@ -163,3 +181,11 @@ class EventMedia(TimeStampedModel):
         to="common.Media",
         on_delete=models.CASCADE,
     )
+
+
+class EventSource(TimeStampedModel):
+    name = models.CharField(max_length=128, unique=True)
+    description = models.TextField(blank=True, null=True, default=None)
+
+    def __str__(self) -> str:
+        return f"{self.name}"

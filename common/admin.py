@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from common.models import (
     Clearance,
+    FeatureFlag,
     Media,
     TemporaryMedia,
     User,
@@ -58,7 +59,7 @@ class MediaAdmin(admin.ModelAdmin):
 
 
 class TemporaryMediaAdmin(admin.ModelAdmin):
-    fields = [
+    fields = (
         "id",
         "created",
         "modified",
@@ -66,19 +67,21 @@ class TemporaryMediaAdmin(admin.ModelAdmin):
         "image_widget",
         "uploader",
         "status",
-        "metadata",
+        "prettified_metadata",
         "fail_count",
-    ]
+    )
+
     readonly_fields = [
         "id",
         "created",
         "modified",
         "image_widget",
-        "metadata",
+        "uploader",
+        "prettified_metadata",
         "fail_count",
     ]
     list_display = [
-        "__str__",
+        "id",
         "created",
         "uploader",
         "status",
@@ -92,6 +95,9 @@ class TemporaryMediaAdmin(admin.ModelAdmin):
     search_fields = [
         "uploader",
     ]
+
+    def prettified_metadata(self, instance):
+        self.prettify_json(instance.metadata)
 
 
 class UserClearanceStackedInline(admin.StackedInline):
@@ -147,8 +153,19 @@ class ClearanceAdmin(admin.ModelAdmin):
     pass
 
 
+class FeatureFlagAdmin(admin.ModelAdmin):
+    list_display = [
+        "name",
+        "enabled",
+    ]
+    list_editable = [
+        "enabled",
+    ]
+
+
 admin.site.register(Media, MediaAdmin)
 admin.site.register(TemporaryMedia, TemporaryMediaAdmin)
 admin.site.register(User, UserAdmin)
 admin.site.register(UserJejakTransaction, UserJejakTransactionAdmin)
 admin.site.register(Clearance, ClearanceAdmin)
+admin.site.register(FeatureFlag, FeatureFlagAdmin)

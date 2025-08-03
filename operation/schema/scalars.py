@@ -39,6 +39,9 @@ class StationLine:
 
 @strawberry_django.type(models.Line)
 class Line:
+    if TYPE_CHECKING:
+        from incident.schema.scalars import CalendarIncidentScalar
+
     id: strawberry.ID
     code: str
     display_name: str
@@ -48,6 +51,9 @@ class Line:
     station_lines: List["StationLine"]
     # line_vehicles: List["Vehicle"]
     status: strawberry.auto
+    calendar_incidents: List[
+        Annotated["CalendarIncidentScalar", strawberry.lazy("incident.schema.scalars")]
+    ]
 
     @strawberry_django.field
     async def vehicle_types(self, info: Info) -> List["VehicleType"]:
@@ -56,9 +62,13 @@ class Line:
         ].load(self.id)
 
     @strawberry_django.field
-    async def vehicles(self, info: Info) -> List["Vehicle"]:
+    async def vehicles(
+        self,
+        info: Info,
+        spotted_today: Optional[bool] = None,
+    ) -> List["Vehicle"]:
         return await info.context.loaders["operation"]["vehicle_from_line_loader"].load(
-            self.id
+            (self.id, spotted_today)
         )
 
     @strawberry_django.field

@@ -1,3 +1,6 @@
+line-length = 88
+
+[lint]
 select = [
     "E", # pycodestyle - error
     "W", # pycodestyle - warning
@@ -10,7 +13,5 @@ ignore = [
     # "W503"
 ]
 
-line-length = 88
-
-[mccabe]
+[lint.mccabe]
 max-complexity = 18

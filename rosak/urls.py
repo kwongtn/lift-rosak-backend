@@ -13,6 +13,7 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
@@ -33,9 +34,11 @@ urlpatterns = (
         re_path("^advanced_filters/", include("advanced_filters.urls")),
         path(
             "graphql/",
-            CustomGraphQLView.as_view(
-                graphiql=True if settings.DEBUG else False,
-                schema=schema,
+            csrf_exempt(
+                CustomGraphQLView.as_view(
+                    graphiql=True if settings.DEBUG else False,
+                    schema=schema,
+                )
             ),
         ),
         path("upload/", common_views.GenericUpload.as_view()),
@@ -43,6 +46,7 @@ urlpatterns = (
         path("version/", csrf_exempt(custom_view.git_version)),
         path("mdeditor/", include("mdeditor.urls")),
         path("operation/", include("operation.urls")),
+        path("telegram_provider/", include("telegram_provider.urls")),
         # path("oauth2/v1/", include("oauth2.urls", namespace="oauth2_v1")),
     ]
     # These are served in debug mode only
@@ -63,7 +67,7 @@ if settings.DEBUG:
         path("__debug__/", include(debug_toolbar.urls)),
         path("sentry-debug/", trigger_error),
     ]
-
-urlpatterns += [
-    re_path("", csrf_exempt(custom_view.redirect_view)),
-]
+else:
+    urlpatterns += [
+        re_path("", csrf_exempt(custom_view.redirect_view)),
+    ]

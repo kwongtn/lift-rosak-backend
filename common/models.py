@@ -1,7 +1,9 @@
 import uuid
+from random import randint
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
 from model_utils.models import TimeStampedModel, UUIDModel
@@ -9,6 +11,7 @@ from model_utils.models import TimeStampedModel, UUIDModel
 from common.enums import (
     ClearanceType,
     CreditType,
+    FeatureFlagType,
     TemporaryMediaStatus,
     TemporaryMediaType,
     UserJejakTransactionCategory,
@@ -64,7 +67,7 @@ class Media(TimeStampedModel, UUIDModel, MediaMixin):
         return f"https://cdn.discordapp.com/attachments/{self.discord_suffix}"
 
     @property
-    def resizer_url(self) -> str:
+    def discord_resizer_url(self) -> str:
         if self.file_id is None or self.file_name is None:
             return None
 
@@ -96,6 +99,9 @@ class TemporaryMedia(TimeStampedModel, UUIDModel, MediaMixin):
         default=TemporaryMediaStatus.PENDING,
     )
 
+    uploaded_discord = models.BooleanField(default=False)
+    discord_res = models.JSONField(default=dict, blank=True)
+
 
 class User(TimeStampedModel):
     firebase_id = models.TextField(unique=True)
@@ -104,6 +110,12 @@ class User(TimeStampedModel):
     badges = models.ManyToManyField(to="mlptf.Badge", through="mlptf.UserBadge")
     clearances = models.ManyToManyField(
         to="common.Clearance", through="common.UserClearance"
+    )
+    telegram_id = models.TextField(
+        unique=True,
+        default=None,
+        null=True,
+        blank=True,
     )
 
     @property
@@ -178,6 +190,19 @@ class UserJejakTransaction(TimeStampedModel):
     )
 
 
+def get_verification_code():
+    return randint(100000, 999999)
+
+
+class UserVerificationCode(TimeStampedModel):
+    user = models.ForeignKey(to="common.User", on_delete=models.CASCADE)
+    code = models.PositiveIntegerField(
+        unique=True,
+        default=get_verification_code,
+        validators=[MinValueValidator(100000), MaxValueValidator(999999)],
+    )
+
+
 class UserClearance(TimeStampedModel):
     user = models.ForeignKey(to="common.User", on_delete=models.CASCADE)
     clearance = models.ForeignKey(to="common.Clearance", on_delete=models.CASCADE)
@@ -187,3 +212,14 @@ class Clearance(TimeStampedModel):
     name = models.CharField(max_length=128, unique=True, choices=ClearanceType.choices)
     description = models.TextField(blank=True, null=True, default=None)
     users = models.ManyToManyField(to="common.User", through="common.UserClearance")
+
+
+class FeatureFlag(TimeStampedModel):
+    name = models.CharField(
+        max_length=128, unique=True, choices=FeatureFlagType.choices
+    )
+    description = models.TextField(blank=True, null=True, default=None)
+    enabled = models.BooleanField(default=False)
+
+    def __str__(self) -> str:
+        return f"{self.name}-{'Enabled' if self.enabled else 'Disabled'}"

@@ -1,8 +1,7 @@
-from datetime import timedelta
-
 import pendulum
+import polars as pl
 from django.db.models import OuterRef, Q, QuerySet, Subquery
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.request import Request
@@ -17,7 +16,14 @@ from spotting import models as spotting_models
 
 
 class LineVehiclesSpottingTrend(APIView):
-    def get(self, request: Request | HttpRequest, line_id, start_date, end_date):
+    def get(
+        self,
+        request: Request | HttpRequest,
+        line_id,
+        start_date,
+        end_date,
+        **kwargs,
+    ):
         vehicles = operation_models.Vehicle.objects.filter(lines=line_id).in_bulk()
 
         trends = get_trends(
@@ -42,8 +48,10 @@ class LineVehiclesSpottingTrend(APIView):
             for trend in trends
         ]
 
-        return Response(
-            sorted(results, key=lambda d: f'{d["vehicle"]}'),
+        csv_data = pl.DataFrame(results).sort("vehicle", "dateKey").write_csv(file=None)
+        return HttpResponse(
+            csv_data,
+            content_type="text/csv",
             status=status.HTTP_200_OK,
         )
 
@@ -86,7 +94,7 @@ class LineVehiclesStatusTrendCount(APIView):
         ]
 
         return Response(
-            sorted(results, key=lambda d: f'{d["date"]}__{d["status"]}'),
+            sorted(results, key=lambda d: f"{d['date']}__{d['status']}"),
             status=status.HTTP_200_OK,
         )
 
@@ -110,46 +118,37 @@ class VehicleSpottingTrend(APIView):
                 "count": trend["count"],
                 "dateKey": trend["date_key"],
                 "dayOfWeek": trend["day_of_week"],
-                "weekOfYear": trend["week_of_year"],
+                "yearWeek": trend["year_week"],
                 "isLastDayOfMonth": trend["is_last_day_of_month"],
                 "isLastWeekOfMonth": trend["is_last_week_of_month"],
             }
             for trend in trends
         ]
 
-        sortedResults = sorted(results, key=lambda d: f'{d["dateKey"]}')
+        date_week_index_set = set()
+        for result in results:
+            year, month, day = result["dateKey"].split("-")
+            result_date = pendulum.datetime(
+                year=int(year), month=int(month), day=int(day)
+            )
 
-        combination_dict = {}
-        deduct_by = 0
-        for result in sortedResults:
-            year = result["dateKey"].split("-")[0]
-            dict_key = f"{year}W{result['weekOfYear']}"
+            date_week_index_set.add(
+                (result_date.isocalendar().year, result_date.isocalendar().week)
+            )
 
-            dateTarget = pendulum.parse(result["dateKey"])
-            if (dateTarget - timedelta(days=6)).year != dateTarget.year:
-                if dict_key not in combination_dict.keys():
-                    deduct_by += 1
-                combination_dict[dict_key] = len(combination_dict) - 1 - deduct_by
-
-            elif (
-                dateTarget.month == 12
-                and result["isLastWeekOfMonth"]
-                and result["weekOfYear"] < 10
-            ):  # < 10 is just a random number
-                dict_key = f"{year}W{(
-                    dateTarget - timedelta(days=6)
-                ).week_of_year + 1}"
-                combination_dict[dict_key] = len(combination_dict) - deduct_by
-                result["weekOfYear"] += 52
-
-            elif combination_dict.get(dict_key, None) is None:
-                combination_dict[dict_key] = len(combination_dict) - deduct_by
+        date_week_index_dict = {}
+        week_index = 0
+        for year, week in sorted(
+            list(date_week_index_set), key=lambda i: f"{i[0]}W{i[1]}"
+        ):
+            date_week_index_dict[f"{year}W{week}"] = week_index
+            week_index += 1
 
         return Response(
             {
-                "data": sortedResults,
+                "data": results,
                 "mappings": {
-                    "yearWeek": combination_dict,
+                    "yearWeek": date_week_index_dict,
                 },
             },
             status=status.HTTP_200_OK,

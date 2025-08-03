@@ -9,6 +9,7 @@ https://docs.djangoproject.com/en/4.0/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.0/ref/settings/
 """
+
 import os
 from pathlib import Path
 
@@ -87,6 +88,13 @@ INSTALLED_APPS = [
     "health_check.cache",
     "health_check.storage",
     "health_check.contrib.migrations",
+    # "health_check.contrib.celery",  # requires celery
+    "health_check.contrib.celery_ping",  # requires celery
+    "health_check.contrib.psutil",  # disk and memory utilization; requires psutil
+    # "health_check.contrib.s3boto3_storage",  # requires boto3 and S3BotoStorage backend
+    # "health_check.contrib.rabbitmq",  # requires RabbitMQ broker
+    "health_check.contrib.redis",  # requires Redis broker
+    "simple_history",
     "cachalot",
     "operation",
     "common",
@@ -97,6 +105,7 @@ INSTALLED_APPS = [
     "mlptf",
     "jejak",
     "chartography",
+    "telegram_provider",
     "django_celery_beat",
     "django_celery_results",
     # Must be at bottom
@@ -115,6 +124,9 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "hijack.middleware.HijackUserMiddleware",
+    "simple_history.middleware.HistoryRequestMiddleware",
+    # "django_asgi_lifespan.middleware.AsyncMiddleware",
+    "django_asgi_lifespan.middleware.LifespanStateMiddleware",
     # This must be the last
     "django.middleware.cache.FetchFromCacheMiddleware",
 ]
@@ -161,6 +173,7 @@ else:
 CSRF_TRUSTED_ORIGINS = [
     "https://rosak-7223b--pr8-ng-zorro-antd-l1wpy6qj.web.app",
     "https://community.mlptf.org.my",
+    "https://staging-community.mlptf.org.my",
     "https://api-community.mlptf.org.my",
     "http://localhost:8000",
     "https://*.kwongtn.xyz",
@@ -170,6 +183,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://rosak-7223b--pr8-ng-zorro-antd-l1wpy6qj.web.app",
     "https://community.mlptf.org.my",
     "http://localhost:4200",
+    "https://staging-community.mlptf.org.my",
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
@@ -378,6 +392,8 @@ IMGUR_USERNAME = os.environ.get("IMGUR_USERNAME", "")
 IMGUR_ACCESS_TOKEN = os.environ.get("IMGUR_ACCESS_TOKEN", "")
 IMGUR_ACCESS_TOKEN_REFRESH = os.environ.get("IMGUR_ACCESS_TOKEN_REFRESH", "")
 IMGUR_ALBUM = os.environ.get("IMGUR_ALBUM", "media")
+IMGUR_PROXY_AUTH_KEY = os.environ.get("IMGUR_PROXY_AUTH_KEY", "")
+IMGUR_PROXY_API_URL = os.environ.get("IMGUR_PROXY_API_URL", "")
 
 DISCORD_MEDIA_WEBHOOK_URL = os.environ.get("DISCORD_MEDIA_WEBHOOK_URL", "")
 DISCORD_MEDIA_WEBHOOK_CHANNEL = os.environ.get("DISCORD_MEDIA_WEBHOOK_CHANNEL", "")
@@ -419,8 +435,16 @@ AWS_S3_OBJECT_PARAMETERS = {
 
 MEDIA_URL = f"{AWS_S3_ENDPOINT_URL}/{AWS_STORAGE_BUCKET_NAME}/media/"
 
+VERIFICATION_CODE_EXPIRE_MINUTES = 1
+
 # RapidAPI Stuff
 RAPID_API_KEY = os.environ.get("RAPID_API_KEY", "")
 RAPID_API_NSFW_TEST_URL = "https://nsfw-image-classification1.p.rapidapi.com/img/nsfw"
 RAPID_API_NSFW_HOST = "nsfw-image-classification1.p.rapidapi.com"
 RAPID_API_NSFW_THRESHOLD = 0.5
+
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", None)
+TELEGRAM_TLD = os.environ.get("TELEGRAM_TLD", None)
+TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")
+TELEGRAM_CLEANUP_DAYS = os.environ.get("TELEGRAM_CLEANUP_DAYS", 30)
+TELEGRAM_HTTPX_TIMEOUT = os.environ.get("TELEGRAM_HTTPX_TIMEOUT", 30)

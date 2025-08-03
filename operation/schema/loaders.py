@@ -1,6 +1,8 @@
 from collections import defaultdict
-from typing import List
+from datetime import date
+from typing import List, Optional, Tuple
 
+from django.contrib.gis.db.models import Subquery
 from django.db.models import Count, Max, Q
 from strawberry.dataloader import DataLoader
 
@@ -111,16 +113,38 @@ async def batch_load_incident_count_from_vehicle(keys):
     return [incident_object.get(str(key), None) for key in keys]
 
 
-async def batch_load_vehicle_from_line(keys):
+async def batch_load_vehicle_from_line(keys: List[Tuple[int, Optional[bool]]]):
+    # keys: (line_id, is_spotted_today)
+    # We assume that is_spotted_today is same for all requests in same loop cause
+    # there is only one point of instantation
+    is_spotted_today = keys[0][1]
+
+    spotted_vehicle_ids_today = (
+        Event.objects.filter(spotting_date=date.today())
+        .distinct("vehicle_id")
+        .values_list("vehicle_id", flat=True)
+    )
+
     vehicle_lines: List[Vehicle] = VehicleLine.objects.filter(
-        line_id__in=keys
-    ).prefetch_related("vehicle", "line")
+        line_id__in=[key[0] for key in keys]
+    )
+
+    if is_spotted_today is True:
+        vehicle_lines = vehicle_lines.filter(
+            vehicle_id__in=Subquery(spotted_vehicle_ids_today)
+        )
+    elif is_spotted_today is False:
+        vehicle_lines = vehicle_lines.filter(
+            ~Q(vehicle_id__in=Subquery(spotted_vehicle_ids_today))
+        )
+
+    vehicle_lines = vehicle_lines.prefetch_related("vehicle", "line")
 
     line_dict = defaultdict(set)
     async for vehicle_line in vehicle_lines:
         line_dict[vehicle_line.line_id].add(vehicle_line.vehicle)
 
-    return [list(line_dict.get(key, {})) for key in keys]
+    return [list(line_dict.get(key[0], {})) for key in keys]
 
 
 OperationContextLoaders = {

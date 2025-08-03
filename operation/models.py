@@ -3,6 +3,7 @@ from django.contrib.gis.db import models
 from django.contrib.postgres.indexes import BTreeIndex
 from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
+from simple_history.models import HistoricalRecords
 
 from operation.enums import (
     AssetStatus,
@@ -42,10 +43,21 @@ class Line(TimeStampedModel):
         through="operation.VehicleLine",
         related_name="vehicle_lines",
     )
+    calendar_incidents = models.ManyToManyField(
+        to="incident.CalendarIncident",
+        # through="operation.VehicleLine",
+        # related_name="lines",
+    )
     status = TextChoicesField(
         max_length=32,
         choices_enum=LineStatus,
         default=LineStatus.ACTIVE,
+    )
+    telegram_channel_id = models.TextField(
+        unique=True,
+        default=None,
+        null=True,
+        blank=True,
     )
 
     def __str__(self) -> str:
@@ -215,6 +227,8 @@ class Asset(TimeStampedModel):
         choices=AssetStatus.choices,
     )
 
+    history = HistoricalRecords()
+
     class Meta:
         ordering = ["officialid"]
         constraints = [
@@ -291,6 +305,8 @@ class Vehicle(models.Model):
         null=True,
         blank=True,
     )
+
+    history = HistoricalRecords()
 
     def __str__(self) -> str:
         return f"{self.identification_no}_{','.join(self.lines.values_list('code', flat=True))}"

@@ -2,6 +2,7 @@ import typing
 from datetime import timedelta
 
 import strawberry
+import strawberry_django
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
 from django.utils.timezone import now
@@ -11,7 +12,7 @@ from common.schema.scalars import GenericMutationReturn
 from operation.models import StationLine
 from rosak.permissions import IsAdmin, IsLoggedIn, IsRecaptchaChallengePassed
 from spotting import models
-from spotting.enums import SpottingEventType
+from spotting.enums import SpottingDataSource, SpottingEventType
 from spotting.schema.filters import EventFilter
 from spotting.schema.inputs import DeleteEventInput, EventInput, MarkEventAsReadInput
 from spotting.schema.orderings import EventOrder
@@ -21,10 +22,10 @@ from spotting.schema.scalars import EventScalar
 
 @strawberry.type
 class SpottingScalars:
-    events: typing.List[EventScalar] = strawberry.django.field(
+    events: typing.List[EventScalar] = strawberry_django.field(
         filters=EventFilter, pagination=True, order=EventOrder
     )
-    events_count: int = strawberry.django.field(
+    events_count: int = strawberry_django.field(
         resolver=get_events_count,
         description="Number of events",
     )
@@ -102,6 +103,10 @@ class SpottingMutations:
                 else None
             )
 
+        event_source = models.EventSource.objects.filter(
+            name=SpottingDataSource.SITE
+        ).first()
+
         event = models.Event.objects.create(
             spotting_date=input.spotting_date,
             reporter_id=user_id,
@@ -114,6 +119,7 @@ class SpottingMutations:
             is_anonymous=is_anonymous,
             run_number=input.run_number,
             wheel_status=wheel_status,
+            data_source_id=event_source.id,
         )
 
         if input.location != strawberry.UNSET:
@@ -147,7 +153,7 @@ class SpottingMutations:
             )
 
             models.LocationEvent.objects.create(
-                event=event,
+                event_id=event.id,
                 location=location,
                 accuracy=accuracy,
                 altitude=altitude,
