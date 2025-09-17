@@ -40,6 +40,10 @@ app.conf.beat_schedule = {
         "task": "chartography.tasks.aggregate_line_vehicle_status_mtrec_task",
         "schedule": crontab(hour="1", minute="0"),
     },
+    "report_spotting_today": {
+        "task": "spotting.tasks.report_spotting_today",
+        "schedule": crontab(hour="0", minute="0", seconds="0"),
+    },
 }
 
 
