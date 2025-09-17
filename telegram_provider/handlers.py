@@ -5,6 +5,7 @@ import logging
 import traceback
 from ctypes import ArgumentError
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 import requests
 from asgiref.sync import sync_to_async
@@ -12,7 +13,6 @@ from django.conf import settings
 from django.db.models import Count, Q
 from telegram import Update
 from telegram.constants import ReactionEmoji
-from zoneinfo import ZoneInfo
 
 from common.models import User, UserVerificationCode
 from operation.enums import VehicleStatus
@@ -88,7 +88,7 @@ async def help(update: Update, context) -> None:
 
     text = "Command List: \n"
     for k, v in handlers_dict.items():
-        text += f"<code>/{v.get("help_prompt", k)}</code> - {v.get("help_text", v["description"])}\n"
+        text += f"<code>/{v.get('help_prompt', k)}</code> - {v.get('help_text', v['description'])}\n"
     await update.message.reply_html(text=text)
 
 
@@ -109,15 +109,6 @@ async def ping(update: Update, context) -> None:
         await update.message.set_reaction(ReactionEmoji.THUMBS_UP)
     except Exception as e:
         print(e)
-    # set_telegram_reaction.apply_async(
-    #     kwargs={
-    #         "update_payload": update.to_json(),
-    #         "reaction": ReactionEmoji.THUMBS_UP,
-    #         # "pickled_bot": pickle.dumps(update.get_bot()),
-    #         "pickled_update": pickle.dumps(update),
-    #         "bot_payload": update.get_bot().to_json(),
-    #     }
-    # )
 
 
 async def verify(update: Update, context) -> None:
