@@ -42,7 +42,7 @@ app.conf.beat_schedule = {
     },
     "report_spotting_today": {
         "task": "spotting.tasks.report_spotting_today",
-        "schedule": crontab(hour="0", minute="0", seconds="0"),
+        "schedule": crontab(hour="0", minute="0"),
     },
 }
 
