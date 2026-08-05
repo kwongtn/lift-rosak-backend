@@ -72,7 +72,6 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.sessions",
     "django.contrib.staticfiles",
-    "location_field.apps.DefaultConfig",
     "hijack",
     "hijack.contrib.admin",
     "colorfield",
