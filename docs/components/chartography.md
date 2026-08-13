@@ -1,0 +1,89 @@
+# Component: chartography
+
+> **Naming caveat:** despite the geo-sounding name, `chartography` is **not** a geospatial app. It is *chart*-ography — time-series **charting/analytics data**. There are **zero** GeoDjango fields, no `django.contrib.gis` imports, no SRIDs, and no reference to the `jejak/` directory (which is not even in `INSTALLED_APPS`). Route/geometry concerns live elsewhere (`operation`, `jejak`).
+
+## 📌 Purpose & Scope
+
+- **Core Responsibility:** Capture and retain **daily point-in-time snapshots of vehicle-status counts per rail line**, sourced from multiple third-party fleet trackers, so the frontend can render longitudinal "how many trainsets were in service / not spotted / decommissioned on date X" trend charts. It is the historical/time-series ledger that the live `operation` models cannot provide (those hold only *current* state).
+- **Domain/Layer:** Django business-logic + batch-ingest layer. Three faces: Celery periodic tasks (write path), Django admin (curation), Strawberry GraphQL + DRF (read/trigger path).
+- **Scale:** small app — 4 models, 1 enum, 1 mutation, 1 GraphQL type, 2 Celery tasks, 4 migrations.
+
+## 🔌 Interface & Data Flow
+
+### Inputs
+
+| Input | Kind | Detail |
+| --- | --- | --- |
+| `chartography.tasks.aggregate_line_vehicle_status_mlptf_task` | Celery beat, `crontab(hour=5, minute=0)` | **Internal aggregation.** No network. Kwargs: `triggered_by_id=None`, `force=False`. |
+| `chartography.tasks.aggregate_line_vehicle_status_mtrec_task` | Celery beat, `crontab(hour=1, minute=0)` | **External scrape.** `GET https://spotters.mtrec.name.my/api/list/analytics?type=spotters-analytics` with a spoofed `referer` header. |
+| `triggerLineVehicleStatusSnapshot(input: TriggerInput)` | GraphQL mutation | `TriggerInput { force: Boolean }`; guarded by `IsLoggedIn, IsAdmin`; async resolver that `apply_async`s the MLPTF task with the caller's `info.context.user.id` as `triggered_by_id`. |
+| Django admin | HTTP | `Source`, `Snapshot` (with inline `LineVehicleStatusCountHistory`, date-range filters via `rangefilter`), `SourceCustomLine`, `LineVehicleStatusCountHistory`. |
+
+Both beat schedules are registered centrally in `/home/kwongtn/rosak_backend/rosak/celery.py` (lines 35–42), not locally.
+
+### Outputs
+
+- **Rows**, not payloads: the tasks are fire-and-forget writers producing `Snapshot` + bulk `LineVehicleStatusCountHistory` (`bulk_create(ignore_conflicts=True)`).
+- `GenericMutationReturn(ok=True)` from the mutation (fires immediately; no task result awaited).
+- **GraphQL type** `Source` (`chartography/schema/scalars.py`): `id, name, description, official_site, icon_url`. `ChartographyScalars` is an **empty** `@strawberry.type` — chartography exposes **no root queries of its own**; all reads are borrowed by `operation` (see below).
+- **DRF read endpoint (owned by `operation`, backed entirely by chartography data):** `GET /operation/line_vehicles_status_trend_count/<line_id>/<source_str>/<start_date>/<end_date>/` → sorted `[{status, count, date}]`. Notably it unions direct `line_id` matches with `custom_line__mapped_lines=line`, so custom-line aliases resolve transparently to canonical lines.
+
+### Dependencies
+
+- **Cross-app (chartography → others):** `operation.Line` (FK ×2), `operation.enums.VehicleStatus`, `operation.models.VehicleLine`/`Line` (aggregation source in tasks), `common.User` (`Snapshot.triggered_by`), `common.schema.scalars.GenericMutationReturn`, `rosak.permissions.IsAdmin/IsLoggedIn`, `rosak.celery.app`.
+- **Cross-app (others → chartography):** `operation/schema/scalars.py` imports `chartography.schema.scalars.Source` and resolves `Line.chartography_sources` (which sources have data for this line); `operation/views.py::LineVehiclesStatusTrendCount` reads `Source`/`Snapshot`/`LineVehicleStatusCountHistory` directly; `rosak/schema.py` mixes `ChartographyScalars` into `Query` and `ChartographyMutations` into `Mutation`.
+- **Third-party:** `requests`, `django_choices_field.TextChoicesField`, `model_utils.TimeStampedModel`, `django.contrib.postgres.indexes.BTreeIndex`, `rangefilter`, `strawberry` / `strawberry_django`.
+
+## ⚙️ Internal State & Logic
+
+**Data model (all state is PostgreSQL; no cache, no in-process state):**
+
+- **`Source`** — the provider registry, `name` constrained to `DataSources` (`PRASARANA`, `MLPTF`, `MTREC`, `MRFC`) and uniquely indexed. Only `MLPTF` and `MTREC` currently have ingest tasks; `PRASARANA` and `MRFC` are declared-but-unimplemented slots.
+- **`Snapshot`** (`TimeStampedModel`) — one ingest run: `date`, FK `Source`, nullable FK `common.User` `triggered_by`, optional `url`. Idempotency is enforced by a **pair of conditional `UniqueConstraint`s**: `(date, source)` unique when `triggered_by IS NULL` (scheduled runs), `(date, source, triggered_by)` when it is set — so an admin can force an ad-hoc snapshot alongside the day's automated one without collision.
+- **`SourceCustomLine`** + **`SourceCustomLineLineMapping`** (explicit `through`) — the **vocabulary-reconciliation layer**. When an upstream feed reports a grouping that does not map onto a canonical `operation.Line` (e.g. MTREC's `DMU`, `Locomotive`), it is auto-`get_or_create`d as a custom line under that source and can later be many-to-many mapped to one or more real `Line`s by an admin. Unique on `(source, name)`.
+- **`LineVehicleStatusCountHistory`** — the fact table: FK `Snapshot`, **mutually exclusive** nullable FKs `line` / `custom_line` (enforced by a `CheckConstraint`), `status` (`VehicleStatus`), `count`. Two conditional unique constraints mirror the exclusivity; `BTreeIndex(["line", "status"])` serves the trend queries.
+
+**Ingest logic:**
+
+- *MLPTF* is a **self-aggregation**: it builds a `defaultdict` of `Count("id", filter=Q(line_id=…, vehicle__status=…))` for **every `Line` × every `VehicleStatus`** and issues a *single* `VehicleLine.objects.aggregate(**query_dict)` — one wide query instead of N×M. Results are keyed `"{line_id}__{status}"` and split back apart. The snapshot is dated `now() - 1 day` because it runs at 05:00 for the prior day.
+- *MTREC* is a **scrape + normalize**: parses `Last_Updated` with `"%d %B %Y, %I:%M:%S %p"`, then walks `Data[]` mapping a hardcoded `Line_Short_Code → [line_ids]` dict (`KGL→[2]`, `AGSPL→[5,9]`, `Komuter→[13,14]`, `DMU/Locomotive→[]`) and a `key_status_map` covering only `Decommissioned`, `In_Service`, `Not_Spotted`. Empty id-lists route to the `SourceCustomLine` fallback.
+
+**Known fragilities worth flagging:**
+
+- `Snapshot.date` is a `DateField` assigned a *datetime* (`now() - timedelta(...)`, `timestamp - timedelta(...)`) — relies on implicit coercion and is timezone-sensitive at day boundaries.
+- The MTREC `short_code_line_ids_map` hardcodes **numeric primary keys**, which silently rots if `operation.Line` rows are reseeded.
+- `force` is accepted by the mutation and the task signature but is **never read** in the task body — a dead parameter; conflicting snapshots will raise on `Snapshot.objects.create` rather than being replaced.
+- `Snapshot.url` is never populated by either task.
+- `assert isinstance(line_ids, list)` is the only guard against an unrecognized upstream short code, and asserts are stripped under `python -O`.
+
+## 🧩 Extension Points & Hooks
+
+- **New data source = new enum member + new task.** The `DataSources` enum, the `Source` table, and the `Snapshot.source` FK make providers first-class; adding `PRASARANA`/`MRFC` requires only a `Source` row, an `aggregate_line_vehicle_status_<src>_task`, and a `beat_schedule` entry. No model change needed.
+- **`SourceCustomLine` mapping** is the sanctioned escape hatch for upstream taxonomies that do not match canonical lines — mappings are admin-editable at runtime and are automatically honoured by both read paths.
+- **`ChartographyScalars` is an empty type** — the obvious, non-breaking place to attach root queries (`snapshots`, `statusTrends`) so charting stops depending on the ad-hoc DRF endpoint in `operation`.
+- **`Snapshot.triggered_by` + conditional constraints** already model "manual backfill vs scheduled run", enabling replay/backfill tooling without schema change.
+- **The fact table is provider-agnostic and append-only**, so additional metric families (ridership, punctuality) could follow the same `Snapshot` → `*CountHistory` shape.
+- **Schema evolution** (`chartography/migrations/`, 4 migrations): `0001_initial` created all core models; `0002`/`0003` reworked the uniqueness strategy toward the conditional-constraint design; `0004` introduced `SourceCustomLineLineMapping` + `mapped_lines` — i.e. multi-source reconciliation was retro-fitted, confirming it as the app's live growth axis.
+
+## 💡 Potential Feature Opportunities
+
+1. **Give chartography a first-class GraphQL read surface.** `ChartographyScalars` is an empty `@strawberry.type` that is already mixed into the root `Query` in `rosak/schema.py`, so the app contributes **zero** queries while every chart in the product is served by `operation/views.py::LineVehiclesStatusTrendCount` — a DRF `APIView` with four positional URL segments (`operation/urls.py` line 13), no pagination, no field selection, and a hand-built `[{status, count, date}]` dict list. Adding `snapshots(sourceId, dateRange)` and `statusTrends(lineId, sourceIds, startDate, endDate)` resolvers there lets the frontend fetch several lines or several sources in one round-trip and reuse the existing `Source` scalar, instead of firing one HTTP call per (line, source) pair. The union logic to copy is already written — `Q(line_id=line.id) | Q(custom_line__mapped_lines=line)` — so custom-line aliases keep resolving to canonical lines for free.
+   **Readiness:** `Ready` — no model or migration work. Add a trend-point type (e.g. `chartography/schema/types.py`, mirroring the shape of `operation/schema/types.py::LineVehicleSpottingTrend`) and attach `strawberry_django.field` resolvers to `ChartographyScalars` in `/home/kwongtn/rosak_backend/chartography/schema/schema.py`; the DRF endpoint can stay in place until the frontend migrates.
+
+2. **Honour `force` so a bad ingest run can be repaired.** `TriggerInput.force` (`chartography/schema/inputs.py`) is passed through the mutation into `aggregate_line_vehicle_status_mlptf_task(..., force=False)` and then **never read**, so today a re-trigger for a date that already has a snapshot dies with an `IntegrityError` from the conditional `UniqueConstraint`s on `Snapshot`; worse, even if the snapshot survived, `bulk_create(ignore_conflicts=True)` means corrected counts are silently discarded rather than overwriting the originals. Making `force=True` delete the conflicting `Snapshot` (cascading its `LineVehicleStatusCountHistory` rows) and re-create it inside a single `transaction.atomic()` turns a dead parameter into the app's recovery story — important when an upstream feed serves a partial payload and the day's chart is visibly wrong. The same edit is the natural place to finally populate `Snapshot.url`, which is declared but written by neither task, giving each fact row a provenance link back to the scraped endpoint.
+   **Readiness:** `Ready` — self-contained in `/home/kwongtn/rosak_backend/chartography/tasks.py`. Note the asymmetry an implementer must fix too: `aggregate_line_vehicle_status_mtrec_task(self, *args, **kwargs)` accepts neither `force` nor `triggered_by_id`, and no mutation can trigger it at all, so MTREC needs the same kwargs plus a sibling mutation in `chartography/schema/schema.py` before "force" is meaningful for both sources.
+
+3. **Make source-to-line reconciliation editable by admins, then delete the hardcoded PK map.** The doc's extension-point story says `SourceCustomLine` mappings are "admin-editable at runtime", but they are not reachable from the admin today: `SourceCustomLine.mapped_lines` uses an explicit `through="chartography.SourceCustomLineLineMapping"`, and Django's `ModelForm` machinery skips any M2M whose through model is not auto-created — while `SourceCustomLineAdmin` declares no `inlines` and `SourceCustomLineLineMapping` is never registered. Adding a `TabularInline` for the through model unlocks the intended workflow, and once mappings are curatable the MTREC task can stop resolving `Line_Short_Code` through `short_code_line_ids_map` (which hardcodes numeric `operation.Line` PKs like `KGL→[2]`, `Komuter→[13,14]`) and instead always write `custom_line_id`, letting both read paths' `custom_line__mapped_lines` join do the resolution. That removes the app's single most rot-prone constant and lets a curator onboard a new upstream code without a deploy.
+   **Readiness:** `Partially ready` — step one (the inline in `/home/kwongtn/rosak_backend/chartography/admin.py`) is roughly ten lines and unblocks everything else. Step two needs a data migration under `chartography/migrations/` seeding the ten existing short codes as `SourceCustomLine` rows with their `SourceCustomLineLineMapping` rows, a rewrite of the `line_ids` branch in `chartography/tasks.py`, replacing `assert isinstance(line_ids, list)` with a real exception (asserts vanish under `python -O`), and a decision about `LineVehicleStatusCountHistory`'s `BTreeIndex(["line", "status"])`, which stops serving rows that carry only `custom_line`.
+
+4. **Deterministic side-by-side source comparison.** Several `Source` rows can legitimately cover the same `operation.Line` — `Line.chartography_sources` in `operation/schema/scalars.py` already tells the frontend which ones do — yet nothing anywhere surfaces the fact that MLPTF and MTREC *disagree* about a line's `IN_SERVICE` count on the same date. A pure-arithmetic endpoint that pivots `LineVehicleStatusCountHistory` by `snapshot__source` for one `(line, date range)` and emits per-`(date, status)` absolute and percentage deltas, flagging rows past a fixed threshold, is plain aggregation with no model behind it. On a community platform where the counts *are* the product, showing "two independent trackers, here is where they diverge" is a credibility feature and doubles as the cheapest possible check that a scrape has not silently changed shape.
+   **Readiness:** `Partially ready` — the aggregation itself needs no schema change and belongs next to the resolvers from item 1. The real blocker is date alignment: `Snapshot.date` is a `DateField` assigned a *datetime* (`now() - timedelta(days=1)` for MLPTF at 05:00, `timestamp - timedelta(days=1)` derived from MTREC's parsed `Last_Updated` at 01:00), so two sources' rows for the "same" day can land on different `date` values at timezone boundaries. Fix the coercion in `chartography/tasks.py` (use `.date()` explicitly, in a defined timezone) before trusting any cross-source join.
+
+5. **Date-ranged backfill and replay tooling.** `Snapshot.triggered_by` plus the pair of conditional `UniqueConstraint`s already models "manual run coexisting with the scheduled run", which looks like it should make historical backfill a pure tooling exercise — an admin action or management command that loops a date range and enqueues one task per day, so a gap left by a Celery outage can be filled without touching the schema. It is worth building, because gaps in a longitudinal chart are the app's most visible failure mode and there is currently no way to fill one at all.
+   **Readiness:** `Not ready` — two distinct blockers, and the second is the hard one. First, neither task accepts a target date: both compute it internally, so a `date=None` kwarg has to be threaded through `aggregate_line_vehicle_status_mlptf_task` and `aggregate_line_vehicle_status_mtrec_task` in `chartography/tasks.py`. Second, **neither source has historical raw data to replay** — MLPTF aggregates live `operation.VehicleLine` joined to `vehicle__status`, which holds only *current* state, and the MTREC endpoint returns a single current-totals `Data[]` with one `Last_Updated` — so a naive backfill would stamp today's counts onto past dates and quietly fabricate history. A genuine implementation therefore needs an upstream archive first: either a raw-response store (e.g. persist the MTREC JSON body against `Snapshot.url`/a new payload field) so future replays are honest, or a history table behind `operation.Vehicle.status`; only then is the range-looping command safe to write.
+
+## 💡 Potential AI Feature Opportunities
+
+1. **Anomaly detection on fleet-status trends.** The app already stores a dense, regular, per-line/per-status daily series with a stable primary key. A scheduled detector could flag implausible day-over-day jumps (a line losing 30% of `IN_SERVICE` overnight, a `count` collapsing to 0 because an upstream scrape silently changed shape) and post to the existing `telegram_provider`. This doubles as **ingest-health monitoring** — currently there is nothing that notices when MTREC changes its JSON schema.
+2. **Automated cross-source reconciliation of `SourceCustomLine`.** Mapping upstream short codes to canonical `operation.Line`s is manual today (a hardcoded dict plus admin clicks). Fuzzy/embedding matching over line names, codes and aliases could propose `SourceCustomLineLineMapping` rows with confidence scores for human confirmation, and re-propose automatically whenever a new unmapped code appears — replacing the brittle hardcoded PK map.
+3. **Natural-language analytics over snapshots.** Because every fact carries `(source, date, line, status, count)` with no free text, an NL→ORM/SQL layer can answer "which line had the biggest in-service decline last quarter, and do MLPTF and MTREC agree?" safely. The presence of **multiple independent sources for the same line** additionally supports a generated **source-divergence narrative** — explaining *why* two providers disagree (differing status taxonomies, custom-line grouping, snapshot lag) rather than just charting both.
