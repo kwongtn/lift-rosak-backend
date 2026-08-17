@@ -2,12 +2,13 @@
 
 from django.db import migrations
 
-from operation.models import StationLine
 from spotting.enums import SpottingEventType
-from spotting.models import Event
 
 
 def fix_stations(apps, schema_editor):
+    StationLine = apps.get_model("operation", "StationLine")
+    Event = apps.get_model("spotting", "Event")
+
     events = Event.objects.filter(type=SpottingEventType.BETWEEN_STATIONS)
     for event in events:
         event.origin_station_id = StationLine.objects.get(
@@ -23,6 +24,7 @@ def fix_stations(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ("spotting", "0001_initial"),
+        ("operation", "0001_initial"),
     ]
 
     operations = [

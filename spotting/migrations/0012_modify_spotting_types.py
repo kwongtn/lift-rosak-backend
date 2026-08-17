@@ -3,10 +3,11 @@
 from django.db import migrations, models
 
 from spotting.enums import SpottingVehicleStatus
-from spotting.models import Event
 
 
 def fix_spotting_type(apps, schema_editor):
+    Event = apps.get_model("spotting", "Event")
+
     compares = (
         (
             [SpottingVehicleStatus.NOT_SPOTTED, SpottingVehicleStatus.UNKNOWN],

@@ -2,10 +2,11 @@
 
 from django.db import migrations
 
-from operation.models import Vehicle, VehicleLine
-
 
 def forwards_func(apps, schema_editor):
+    Vehicle = apps.get_model("operation", "Vehicle")
+    VehicleLine = apps.get_model("operation", "VehicleLine")
+
     create_list = []
     for vehicle in Vehicle.objects.all():
         create_list.append(

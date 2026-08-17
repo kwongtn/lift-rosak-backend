@@ -9,12 +9,17 @@ def add_dimensions(apps, schema_editor):
     from common import models
 
     Media: models.Media = apps.get_model("common", "Media")
-    client = ImgurClient(
-        client_id=settings.IMGUR_CONSUMER_ID,
-        client_secret=settings.IMGUR_CONSUMER_SECRET,
-        access_token=settings.IMGUR_ACCESS_TOKEN,
-        refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
-    )
+
+    try:
+        client = ImgurClient(
+            client_id=settings.IMGUR_CONSUMER_ID,
+            client_secret=settings.IMGUR_CONSUMER_SECRET,
+            access_token=settings.IMGUR_ACCESS_TOKEN,
+            refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
+        )
+    except Exception as e:
+        print(f"Imgur login error, skipping dimension backfill: {e}")
+        return
 
     for media in Media.objects.all():
         print(f"Getting data for {media.file.name}")

@@ -2,10 +2,10 @@
 
 from django.db import migrations, models
 
-from incident.models import CalendarIncident
-
 
 def fix_incident_severity(apps, schema_editor):
+    CalendarIncident = apps.get_model("incident", "CalendarIncident")
+
     CalendarIncident.objects.filter(severity="CRITICAL").update(severity="MAJOR")
     CalendarIncident.objects.filter(severity="MILESTONE").update(severity="OTHERS")
 
