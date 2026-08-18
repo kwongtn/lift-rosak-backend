@@ -5,7 +5,7 @@ import strawberry_django
 from django.contrib.gis.db.models import Q
 from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import Distance
-from strawberry_django import FilterLookup
+from strawberry_django import StrFilterLookup
 
 from operation import models
 
@@ -20,8 +20,8 @@ class VehicleFilter:
 class LineFilter:
     id: strawberry.auto
     code: Optional[str]
-    display_name: Optional[FilterLookup[str]]
-    display_color: Optional[FilterLookup[str]]
+    display_name: Optional[StrFilterLookup]
+    display_color: Optional[StrFilterLookup]
 
 
 @strawberry_django.filters.filter(models.VehicleType)
@@ -35,7 +35,7 @@ class VehicleTypeFilter:
 class AssetFilter:
     id: strawberry.auto
     asset_type: strawberry.auto
-    officialid: Optional[FilterLookup[str]]
+    officialid: Optional[StrFilterLookup]
 
     station: Optional["StationFilter"]
 
@@ -43,7 +43,7 @@ class AssetFilter:
 @strawberry_django.filters.filter(models.Station)
 class StationFilter:
     id: strawberry.auto
-    display_name: Optional[FilterLookup[str]]
+    display_name: Optional[StrFilterLookup]
 
     line: Optional["LineFilter"]
     station_line: Optional["StationLineFilter"]
@@ -65,8 +65,8 @@ class StationFilter:
 @strawberry_django.filters.filter(models.StationLine)
 class StationLineFilter:
     id: strawberry.auto
-    display_name: Optional[FilterLookup[str]]
-    internal_representation: Optional[FilterLookup[str]]
+    display_name: Optional[StrFilterLookup]
+    internal_representation: Optional[StrFilterLookup]
 
     station: Optional["StationFilter"]
     line: Optional["LineFilter"]

@@ -62,16 +62,15 @@ def get_default_start_time(type: DateGroupings) -> date:
     """
     today = date.today()
     if type == DateGroupings.YEAR:
-        today.month = 1
-        today.day = 1
+        today = today.replace(month=1, day=1)
         return today - timedelta(days=18263)
 
     elif type == DateGroupings.MONTH:
-        today.day = 1
+        today = today.replace(day=1)
         return today - timedelta(days=1500)  # 50 months
 
     elif type == DateGroupings.WEEK:
-        today.day = today.day - today.weekday()
+        today = today - timedelta(days=today.weekday())
         return today - timedelta(days=56)  # 8 weeks
 
     elif type == DateGroupings.DAY:

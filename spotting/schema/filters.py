@@ -9,7 +9,7 @@ from strawberry_django import (
     BaseFilterLookup,
     DateFilterLookup,
     DatetimeFilterLookup,
-    FilterLookup,
+    StrFilterLookup,
 )
 
 from operation.schema.filters import VehicleFilter
@@ -22,8 +22,8 @@ class EventFilter:
     type: Optional[BaseFilterLookup[str]]
     created: Optional[DatetimeFilterLookup[datetime]]
     spotted: Optional[DateFilterLookup[datetime]]
-    notes: Optional[FilterLookup[str]]
-    status: Optional[FilterLookup[str]]
+    notes: Optional[StrFilterLookup]
+    status: Optional[StrFilterLookup]
     is_anonymous: Optional[bool]
 
     vehicle: Optional["VehicleFilter"]

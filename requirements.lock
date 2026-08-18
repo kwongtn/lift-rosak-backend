@@ -60,7 +60,7 @@ cross-web==0.7.0
 cryptography==44.0.2
     # via pyjwt
 discord-webhook==1.4.1
-django==4.2.20
+django==5.2.17
     # via django-asgi-lifespan
     # via django-cachalot
     # via django-celery-beat
