@@ -4,6 +4,7 @@ import json
 import logging
 import traceback
 from ctypes import ArgumentError
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -333,16 +334,43 @@ async def spot(update: Update, context) -> None:
 
 
 async def spotting_today(update: Update, context) -> None:
+    if update.message is None:
+        return
+
     line = await Line.objects.filter(
         telegram_channel_id=update.effective_chat.id
     ).afirst()
+
+    if line is None:
+        await update.message.reply_html(text="No line assigned for this channel.")
+        return
+
+    spotting_date = date.today()
+    args = (
+        context.args
+        if context and hasattr(context, "args") and context.args is not None
+        else None
+    )
+    if args is None and update.message.text:
+        parts = update.message.text.strip().split()
+        args = parts[1:]
+
+    if args:
+        date_str = args[0].strip()
+        try:
+            spotting_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            await update.message.reply_html(
+                text="Invalid date format. Please use yyyy-mm-dd format (e.g., 2026-08-17)"
+            )
+            return
 
     @sync_to_async
     def aget_daily_updates(*args, **kwargs):
         return get_daily_updates(*args, **kwargs)
 
     await update.message.reply_html(
-        text=await aget_daily_updates(line_id=line.id),
+        text=await aget_daily_updates(line_id=line.id, spotting_date=spotting_date),
     )
 
 

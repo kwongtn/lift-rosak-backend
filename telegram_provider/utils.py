@@ -32,7 +32,7 @@ async def infinite_retry_on_error(
             await asyncio.sleep(10)
 
 
-def get_daily_updates(line_id: int, spotting_date: date | None) -> str:
+def get_daily_updates(line_id: int, spotting_date: date | None = None) -> str:
     spotted_today_vehicle_ids = (
         Event.objects.filter(spotting_date=spotting_date or date.today())
         .distinct("vehicle")
