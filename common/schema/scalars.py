@@ -165,6 +165,7 @@ class UserScalar:
             }
             if type_group
             else {},
+            date_group=date_group,
             free_range=free_range,
         )
 
