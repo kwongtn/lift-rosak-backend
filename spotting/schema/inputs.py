@@ -12,15 +12,15 @@ from spotting import models
 class EventInput:
     spotting_date: date
     vehicle: strawberry.ID
-    notes: Optional[str]
-    run_number: Optional[str]
+    notes: Optional[str] = strawberry.UNSET
+    run_number: Optional[str] = strawberry.UNSET
     status: strawberry.auto
     type: strawberry.auto
-    wheel_status: Optional[str]
-    origin_station: Optional[strawberry.ID]
-    destination_station: Optional[strawberry.ID]
-    location: Optional["WebLocationInput"]
-    is_anonymous: Optional[bool]
+    wheel_status: Optional[str] = strawberry.UNSET
+    origin_station: Optional[strawberry.ID] = strawberry.UNSET
+    destination_station: Optional[strawberry.ID] = strawberry.UNSET
+    location: Optional["WebLocationInput"] = strawberry.UNSET
+    is_anonymous: Optional[bool] = strawberry.UNSET
 
 
 @strawberry.input

@@ -5,10 +5,10 @@ import strawberry
 
 @strawberry.input
 class WebLocationInput:
-    accuracy: Optional[float]
-    altitude_accuracy: Optional[float]
-    heading: Optional[float]
-    speed: Optional[float]
-    latitude: Optional[float]
-    longitude: Optional[float]
-    altitude: Optional[float]
+    accuracy: Optional[float] = strawberry.UNSET
+    altitude_accuracy: Optional[float] = strawberry.UNSET
+    heading: Optional[float] = strawberry.UNSET
+    speed: Optional[float] = strawberry.UNSET
+    latitude: Optional[float] = strawberry.UNSET
+    longitude: Optional[float] = strawberry.UNSET
+    altitude: Optional[float] = strawberry.UNSET

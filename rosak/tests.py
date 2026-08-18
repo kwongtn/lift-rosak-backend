@@ -10,8 +10,8 @@ from rosak.context import ContextLoaders
 from rosak.schema import schema
 
 
-def execute_graphql(query: str, user=None):
-    context = DotMap(
+def get_graphql_context(user=None):
+    return DotMap(
         {
             "loaders": copy.deepcopy(ContextLoaders),
             "request": None,
@@ -19,7 +19,18 @@ def execute_graphql(query: str, user=None):
             "user": user,
         }
     )
-    return async_to_sync(schema.execute)(query, context_value=context)
+
+
+def execute_graphql(query: str, variables: dict | None = None, user=None):
+    context = get_graphql_context(user=user)
+    return async_to_sync(schema.execute)(
+        query, variable_values=variables, context_value=context
+    )
+
+
+async def execute_graphql_async(query: str, variables: dict | None = None, user=None):
+    context = get_graphql_context(user=user)
+    return await schema.execute(query, variable_values=variables, context_value=context)
 
 
 class RosakSchemaTests(SimpleTestCase):

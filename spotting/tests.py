@@ -1,12 +1,28 @@
+from datetime import date
+from unittest.mock import MagicMock, patch
+
 from django.contrib.gis.geos import Point
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
 from common.models import User
-from operation.models import Line, Station, Vehicle, VehicleType
-from spotting.enums import SpottingEventType, SpottingVehicleStatus
-from spotting.models import Event, EventRead, LocationEvent
+from operation.enums import VehicleStatus
+from operation.models import (
+    Line,
+    Station,
+    StationLine,
+    Vehicle,
+    VehicleLine,
+    VehicleType,
+)
+from rosak.tests import execute_graphql_async
+from spotting.enums import (
+    SpottingEventType,
+    SpottingVehicleStatus,
+    SpottingWheelStatus,
+)
+from spotting.models import Event, EventRead, EventSource, LocationEvent
 
 
 class SpottingModelTests(TestCase):
@@ -304,3 +320,498 @@ class AsyncOrmRegressionTests(TestCase):
         with self.assertRaises(Exception):
             await event.auser_deletion(self.other_user.id)
         self.assertTrue(await Event.objects.filter(id=event.id).aexists())
+
+
+class SpottingGraphQLTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(
+            firebase_id="spotting-gql-user-1",
+            nickname="SpotterOne",
+        )
+        self.other_user = User.objects.create(
+            firebase_id="spotting-gql-user-2",
+            nickname="SpotterTwo",
+        )
+        self.admin_user = User.objects.create(
+            firebase_id="spotting-gql-admin-user",
+            nickname="SpotterAdmin",
+        )
+
+        self.line = Line.objects.create(
+            code="KJL",
+            display_name="Kelana Jaya Line",
+            display_color="#d32f2f",
+        )
+        self.station1 = Station.objects.create(
+            display_name="KLCC",
+            location=Point(101.7118, 3.1592),
+        )
+        self.station2 = Station.objects.create(
+            display_name="Pasar Seni",
+            location=Point(101.6958, 3.1425),
+        )
+        self.station3 = Station.objects.create(
+            display_name="Subang Jaya",
+            location=Point(101.5878, 3.0801),
+        )
+
+        self.station_line1 = StationLine.objects.create(
+            station=self.station1,
+            line=self.line,
+            display_name="KLCC KJ",
+            internal_representation="KJ10",
+        )
+        self.station_line2 = StationLine.objects.create(
+            station=self.station2,
+            line=self.line,
+            display_name="Pasar Seni KJ",
+            internal_representation="KJ14",
+        )
+        self.station_line3 = StationLine.objects.create(
+            station=self.station3,
+            line=self.line,
+            display_name="Subang Jaya KJ",
+            internal_representation="KJ28",
+        )
+
+        self.v_type = VehicleType.objects.create(
+            internal_name="KJL_INNOVIA_300",
+            display_name="Innovia Metro 300",
+        )
+        self.vehicle1 = Vehicle.objects.create(
+            identification_no="Set 50",
+            nickname="The Falcon",
+            vehicle_type=self.v_type,
+            status=VehicleStatus.IN_SERVICE,
+        )
+        self.vehicle2 = Vehicle.objects.create(
+            identification_no="Set 51",
+            nickname="The Eagle",
+            vehicle_type=self.v_type,
+            status=VehicleStatus.OUT_OF_SERVICE,
+        )
+        VehicleLine.objects.create(vehicle=self.vehicle1, line=self.line)
+        VehicleLine.objects.create(vehicle=self.vehicle2, line=self.line)
+
+        EventSource.objects.get_or_create(
+            name="SITE",
+            defaults={"description": "Web app"},
+        )
+
+    async def test_add_spotting_event_mutation_between_stations_with_location(self):
+        mutation = """
+            mutation AddEventBetweenStations($input: EventInput!) {
+                addEvent(input: $input) {
+                    id
+                    spottingDate
+                    type
+                    status
+                    wheelStatus
+                    notes
+                    runNumber
+                    originStation {
+                        id
+                        displayName
+                    }
+                    destinationStation {
+                        id
+                        displayName
+                    }
+                    location {
+                        id
+                        altitude
+                        accuracy
+                        speed
+                        heading
+                    }
+                }
+            }
+        """
+        variables = {
+            "input": {
+                "spottingDate": "2024-05-10",
+                "vehicle": str(self.vehicle1.id),
+                "type": SpottingEventType.BETWEEN_STATIONS,
+                "status": SpottingVehicleStatus.IN_SERVICE,
+                "wheelStatus": SpottingWheelStatus.FRESH,
+                "notes": "Smooth ride between stations",
+                "runNumber": "RN-42",
+                "originStation": str(self.station_line1.id),
+                "destinationStation": str(self.station_line2.id),
+                "location": {
+                    "latitude": 3.1592,
+                    "longitude": 101.7118,
+                    "altitude": 45.5,
+                    "accuracy": 3.2,
+                    "speed": 15.0,
+                    "heading": 90.0,
+                },
+            }
+        }
+
+        unauth_result = await execute_graphql_async(
+            mutation, variables=variables, user=None
+        )
+        self.assertIsNotNone(unauth_result.errors)
+        self.assertIsNone(unauth_result.data)
+
+        result = await execute_graphql_async(
+            mutation, variables=variables, user=self.user
+        )
+        self.assertIsNone(result.errors)
+        self.assertIsNotNone(result.data)
+
+        event_data = result.data["addEvent"]
+        self.assertEqual(event_data["spottingDate"], "2024-05-10")
+        self.assertEqual(event_data["type"], SpottingEventType.BETWEEN_STATIONS)
+        self.assertEqual(event_data["status"], SpottingVehicleStatus.IN_SERVICE)
+        self.assertEqual(event_data["wheelStatus"], SpottingWheelStatus.FRESH)
+        self.assertEqual(event_data["notes"], "Smooth ride between stations")
+        self.assertEqual(event_data["runNumber"], "RN-42")
+        self.assertEqual(
+            event_data["originStation"]["displayName"], self.station1.display_name
+        )
+        self.assertEqual(
+            event_data["destinationStation"]["displayName"], self.station2.display_name
+        )
+        self.assertEqual(event_data["location"]["altitude"], 45.5)
+        self.assertEqual(event_data["location"]["accuracy"], 3.2)
+
+        event_id = int(event_data["id"])
+        self.assertTrue(await Event.objects.filter(id=event_id).aexists())
+        created_event = await Event.objects.aget(id=event_id)
+        self.assertEqual(created_event.reporter_id, self.user.id)
+        self.assertEqual(created_event.origin_station_id, self.station1.id)
+        self.assertEqual(created_event.destination_station_id, self.station2.id)
+
+        self.assertTrue(await LocationEvent.objects.filter(event_id=event_id).aexists())
+        created_location = await LocationEvent.objects.aget(event_id=event_id)
+        self.assertEqual(created_location.location.coords, (101.7118, 3.1592))
+        self.assertEqual(float(created_location.altitude), 45.5)
+
+    async def test_add_spotting_event_mutation_at_station(self):
+        mutation = """
+            mutation AddEventAtStation($input: EventInput!) {
+                addEvent(input: $input) {
+                    id
+                    type
+                    originStation {
+                        id
+                        displayName
+                    }
+                    destinationStation {
+                        id
+                    }
+                }
+            }
+        """
+        variables = {
+            "input": {
+                "spottingDate": "2024-05-11",
+                "vehicle": str(self.vehicle1.id),
+                "type": SpottingEventType.AT_STATION,
+                "status": SpottingVehicleStatus.IN_SERVICE,
+                "originStation": str(self.station_line1.id),
+            }
+        }
+
+        result = await execute_graphql_async(
+            mutation, variables=variables, user=self.user
+        )
+        self.assertIsNone(result.errors)
+        self.assertIsNotNone(result.data)
+
+        event_data = result.data["addEvent"]
+        self.assertEqual(event_data["type"], SpottingEventType.AT_STATION)
+        self.assertEqual(
+            event_data["originStation"]["displayName"], self.station1.display_name
+        )
+        self.assertIsNone(event_data["destinationStation"])
+
+        event_id = int(event_data["id"])
+        created_event = await Event.objects.aget(id=event_id)
+        self.assertEqual(created_event.origin_station_id, self.station1.id)
+        self.assertIsNone(created_event.destination_station_id)
+
+    async def test_vehicle_events_query_pagination_and_is_mine(self):
+        e1 = await Event.objects.acreate(
+            reporter=self.user,
+            vehicle=self.vehicle1,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date(2024, 5, 1),
+            notes="User 1 Event 1",
+        )
+        e2 = await Event.objects.acreate(
+            reporter=self.other_user,
+            vehicle=self.vehicle1,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date(2024, 5, 2),
+            notes="User 2 Event 1",
+        )
+        e3 = await Event.objects.acreate(
+            reporter=self.user,
+            vehicle=self.vehicle1,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date(2024, 5, 3),
+            notes="User 1 Event 2",
+        )
+        await Event.objects.acreate(
+            reporter=self.user,
+            vehicle=self.vehicle2,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.NOT_IN_SERVICE,
+            spotting_date=date(2024, 5, 4),
+            notes="Vehicle 2 Event",
+        )
+
+        query = """
+            query GetVehicleEvents($vehicleId: ID!, $limit: Int, $offset: Int) {
+                events(
+                    filters: { vehicle: { id: $vehicleId } }
+                    pagination: { limit: $limit, offset: $offset }
+                    order: { id: ASC }
+                ) {
+                    id
+                    notes
+                    isMine
+                    reporter {
+                        nickname
+                    }
+                }
+                eventsCount
+            }
+        """
+
+        variables_p1 = {
+            "vehicleId": str(self.vehicle1.id),
+            "limit": 2,
+            "offset": 0,
+        }
+        res_p1 = await execute_graphql_async(
+            query, variables=variables_p1, user=self.user
+        )
+        self.assertIsNone(res_p1.errors)
+        self.assertIsNotNone(res_p1.data)
+        self.assertEqual(res_p1.data["eventsCount"], 4)
+
+        events_p1 = res_p1.data["events"]
+        self.assertEqual(len(events_p1), 2)
+        self.assertEqual(events_p1[0]["id"], str(e1.id))
+        self.assertTrue(events_p1[0]["isMine"])
+        self.assertEqual(events_p1[0]["reporter"]["nickname"], "SpotterOne")
+
+        self.assertEqual(events_p1[1]["id"], str(e2.id))
+        self.assertFalse(events_p1[1]["isMine"])
+        self.assertEqual(events_p1[1]["reporter"]["nickname"], "SpotterTwo")
+
+        variables_p2 = {
+            "vehicleId": str(self.vehicle1.id),
+            "limit": 2,
+            "offset": 2,
+        }
+        res_p2 = await execute_graphql_async(
+            query, variables=variables_p2, user=self.user
+        )
+        self.assertIsNone(res_p2.errors)
+        events_p2 = res_p2.data["events"]
+        self.assertEqual(len(events_p2), 1)
+        self.assertEqual(events_p2[0]["id"], str(e3.id))
+        self.assertTrue(events_p2[0]["isMine"])
+
+        res_unauth = await execute_graphql_async(
+            query, variables=variables_p1, user=None
+        )
+        self.assertIsNone(res_unauth.errors)
+        for ev in res_unauth.data["events"]:
+            self.assertFalse(ev["isMine"])
+
+    async def test_event_filter_different_status_than_vehicle(self):
+        e_same = await Event.objects.acreate(
+            reporter=self.user,
+            vehicle=self.vehicle1,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date(2024, 5, 1),
+            notes="Same status event",
+        )
+        e_diff = await Event.objects.acreate(
+            reporter=self.user,
+            vehicle=self.vehicle1,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.TESTING,
+            spotting_date=date(2024, 5, 2),
+            notes="Different status event",
+        )
+
+        query = """
+            query GetEventsWithDifferentStatus($diffStatus: Boolean) {
+                events(filters: { differentStatusThanVehicle: $diffStatus }) {
+                    id
+                    status
+                    vehicle {
+                        id
+                        status
+                    }
+                }
+            }
+        """
+        result_true = await execute_graphql_async(
+            query, variables={"diffStatus": True}, user=self.user
+        )
+        self.assertIsNone(result_true.errors)
+        ids_true = [ev["id"] for ev in result_true.data["events"]]
+        self.assertIn(str(e_diff.id), ids_true)
+        self.assertNotIn(str(e_same.id), ids_true)
+
+        result_false = await execute_graphql_async(
+            query, variables={"diffStatus": False}, user=self.user
+        )
+        self.assertIsNone(result_false.errors)
+        ids_false = [ev["id"] for ev in result_false.data["events"]]
+        self.assertIn(str(e_same.id), ids_false)
+        self.assertNotIn(str(e_diff.id), ids_false)
+
+    async def test_event_filter_free_search(self):
+        e_notes = await Event.objects.acreate(
+            reporter=self.user,
+            vehicle=self.vehicle1,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date(2024, 5, 1),
+            notes="Spotted unique_zebra near track",
+        )
+        e_station = await Event.objects.acreate(
+            reporter=self.user,
+            vehicle=self.vehicle1,
+            type=SpottingEventType.AT_STATION,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            origin_station=self.station3,
+            spotting_date=date(2024, 5, 2),
+            notes="Standard stop",
+        )
+        e_vehicle_nick = await Event.objects.acreate(
+            reporter=self.user,
+            vehicle=self.vehicle2,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.NOT_IN_SERVICE,
+            spotting_date=date(2024, 5, 3),
+            notes="Maintenance yard",
+        )
+
+        query = """
+            query FreeSearchEvents($keyword: String!) {
+                events(filters: { freeSearch: $keyword }) {
+                    id
+                    notes
+                }
+            }
+        """
+
+        res1 = await execute_graphql_async(
+            query, variables={"keyword": "unique_zebra"}, user=self.user
+        )
+        self.assertIsNone(res1.errors)
+        ids1 = [ev["id"] for ev in res1.data["events"]]
+        self.assertEqual(ids1, [str(e_notes.id)])
+
+        res2 = await execute_graphql_async(
+            query, variables={"keyword": "Subang Jaya"}, user=self.user
+        )
+        self.assertIsNone(res2.errors)
+        ids2 = [ev["id"] for ev in res2.data["events"]]
+        self.assertIn(str(e_station.id), ids2)
+        self.assertNotIn(str(e_notes.id), ids2)
+
+        res3 = await execute_graphql_async(
+            query, variables={"keyword": "Set 51"}, user=self.user
+        )
+        self.assertIsNone(res3.errors)
+        ids3 = [ev["id"] for ev in res3.data["events"]]
+        self.assertIn(str(e_vehicle_nick.id), ids3)
+        self.assertNotIn(str(e_notes.id), ids3)
+
+        res4 = await execute_graphql_async(
+            query, variables={"keyword": "The Eagle"}, user=self.user
+        )
+        self.assertIsNone(res4.errors)
+        ids4 = [ev["id"] for ev in res4.data["events"]]
+        self.assertIn(str(e_vehicle_nick.id), ids4)
+
+    async def test_mark_as_read_mutation_admin_bulk_create(self):
+        e1 = await Event.objects.acreate(
+            reporter=self.user,
+            vehicle=self.vehicle1,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date(2024, 5, 1),
+        )
+        e2 = await Event.objects.acreate(
+            reporter=self.user,
+            vehicle=self.vehicle1,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date(2024, 5, 2),
+        )
+        await EventRead.objects.acreate(reader=self.admin_user, event=e1)
+
+        mutation = """
+            mutation MarkEventsRead($input: MarkEventAsReadInput!) {
+                markAsRead(input: $input) {
+                    ok
+                }
+            }
+        """
+        variables = {
+            "input": {
+                "eventIds": [str(e1.id), str(e2.id)],
+            }
+        }
+
+        mock_firebase_admin_user = MagicMock()
+        mock_firebase_admin_user.custom_claims = {"admin": True}
+
+        mock_firebase_non_admin_user = MagicMock()
+        mock_firebase_non_admin_user.custom_claims = {"admin": False}
+
+        with (
+            patch(
+                "rosak.permissions.IsRecaptchaChallengePassed.has_permission",
+                return_value=True,
+            ),
+            patch(
+                "firebase_admin.auth.get_user",
+                return_value=mock_firebase_non_admin_user,
+            ),
+        ):
+            res_forbidden = await execute_graphql_async(
+                mutation, variables=variables, user=self.user
+            )
+            self.assertIsNotNone(res_forbidden.errors)
+
+        with (
+            patch(
+                "rosak.permissions.IsRecaptchaChallengePassed.has_permission",
+                return_value=True,
+            ),
+            patch(
+                "firebase_admin.auth.get_user", return_value=mock_firebase_admin_user
+            ),
+        ):
+            res = await execute_graphql_async(
+                mutation, variables=variables, user=self.admin_user
+            )
+            self.assertIsNone(res.errors)
+            self.assertTrue(res.data["markAsRead"]["ok"])
+
+        self.assertTrue(
+            await EventRead.objects.filter(reader=self.admin_user, event=e1).aexists()
+        )
+        self.assertTrue(
+            await EventRead.objects.filter(reader=self.admin_user, event=e2).aexists()
+        )
+        self.assertEqual(
+            await EventRead.objects.filter(reader=self.admin_user).acount(), 2
+        )
