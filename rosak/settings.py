@@ -64,6 +64,23 @@ LOGIN_REDIRECT_URL = os.getenv("LOGIN_REDIRECT_URL", "admin/")
 
 # Application definition
 
+TIMESCALE_HOST = os.environ.get(
+    "TIMESCALE_WRITE_HOST", os.environ.get("TIMESCALE_DB_HOST")
+)
+TIMESCALE_DB = os.environ.get(
+    "TIMESCALE_WRITE_NAME", os.environ.get("TIMESCALE_DB_NAME")
+)
+TIMESCALE_USER = os.environ.get(
+    "TIMESCALE_WRITE_USER", os.environ.get("TIMESCALE_DB_USER")
+)
+TIMESCALE_PASSWORD = os.environ.get(
+    "TIMESCALE_WRITE_PASSWORD", os.environ.get("TIMESCALE_DB_PASSWORD")
+)
+
+JEJAK_ENABLED = bool(
+    all([TIMESCALE_HOST, TIMESCALE_DB, TIMESCALE_USER, TIMESCALE_PASSWORD])
+)
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -102,7 +119,12 @@ INSTALLED_APPS = [
     "spotting",
     "incident",
     "mlptf",
-    "jejak",
+]
+
+if JEJAK_ENABLED:
+    INSTALLED_APPS.append("jejak")
+
+INSTALLED_APPS += [
     "chartography",
     "telegram_provider",
     "django_celery_beat",
@@ -240,7 +262,10 @@ DATABASES = {
         "PORT": os.environ.get("DATABASE_PORT", 5432),
         "TEST": {"SERIALIZE": False},
     },
-    "timescale": {
+}
+
+if JEJAK_ENABLED:
+    DATABASES["timescale"] = {
         "ENGINE": "django.contrib.gis.db.backends.postgis",
         "HOST": os.environ.get(
             "TIMESCALE_WRITE_HOST", os.environ.get("DATABASE_HOST", "db")
@@ -252,8 +277,8 @@ DATABASES = {
         "CONN_MAX_AGE": int(os.environ.get("DJANGO_DB_CONN_MAX_AGE", "300")),
         "CONN_HEALTH_CHECKS": True,
         "TEST": {"SERIALIZE": False},
-    },
-    "timescale_read": {
+    }
+    DATABASES["timescale_read"] = {
         "ENGINE": "django.contrib.gis.db.backends.postgis",
         "HOST": os.environ.get(
             "TIMESCALE_READ_HOST", os.environ.get("DATABASE_HOST", "db")
@@ -265,12 +290,17 @@ DATABASES = {
         "CONN_MAX_AGE": int(os.environ.get("DJANGO_DB_CONN_MAX_AGE", "300")),
         "CONN_HEALTH_CHECKS": True,
         "TEST": {"SERIALIZE": False},
-    },
-}
+    }
 
-DATABASE_ROUTERS = [
-    "rosak.routers.timescale.TimescaleRouter",
-]
+DATABASE_ROUTERS = []
+
+if JEJAK_ENABLED:
+    DATABASE_ROUTERS.append("rosak.routers.timescale.TimescaleRouter")
+
+HEALTH_CHECK = {
+    "DISK_USAGE_MAX": 90,
+    "MEMORY_MIN": 100,
+}
 
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
 REDIS_USERNAME = os.environ.get("REDIS_USERNAME", None)

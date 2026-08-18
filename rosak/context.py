@@ -4,6 +4,7 @@ import math
 from typing import Any
 
 from django.conf import settings
+from django.db import DatabaseError, OperationalError
 from django.http import HttpRequest, HttpResponse
 from dotmap import DotMap
 from graphql.error.graphql_error import format_error as format_graphql_error
@@ -50,48 +51,54 @@ class CustomGraphQLView(AsyncGraphQLView):
 
         to_create_list = []
         free_credit_balance_modifier = 0
-        if data["data"].get("locationsCount"):
-            objs, modifier = await get_charge_credits_objs(
-                user=self.user,
-                category=UserJejakTransactionCategory.COUNT_ROWS,
-                amount=-1 * settings.COUNT_ROWS_MULTIPLIER,
-                details=request.body.decode("utf-8"),
-                free_credit_balance_modifier=free_credit_balance_modifier,
-            )
+        try:
+            if data.get("data") and data["data"].get("locationsCount"):
+                objs, modifier = await get_charge_credits_objs(
+                    user=self.user,
+                    category=UserJejakTransactionCategory.COUNT_ROWS,
+                    amount=-1 * settings.COUNT_ROWS_MULTIPLIER,
+                    details=request.body.decode("utf-8"),
+                    free_credit_balance_modifier=free_credit_balance_modifier,
+                )
 
-            to_create_list += objs
-            free_credit_balance_modifier += modifier
+                to_create_list += objs
+                free_credit_balance_modifier += modifier
 
-        if data["data"].get("locations"):
-            objs, modifier = await get_charge_credits_objs(
-                user=self.user,
-                category=UserJejakTransactionCategory.BUS_LOCATION_HISTORY,
-                amount=-1
-                * math.ceil(
-                    len(data["data"].get("locations"))
-                    * settings.BUS_LOCATION_HISTORY_MULTIPLIER
-                ),
-                details=request.body.decode("utf-8"),
-                free_credit_balance_modifier=free_credit_balance_modifier,
-            )
+            if data.get("data") and data["data"].get("locations"):
+                objs, modifier = await get_charge_credits_objs(
+                    user=self.user,
+                    category=UserJejakTransactionCategory.BUS_LOCATION_HISTORY,
+                    amount=-1
+                    * math.ceil(
+                        len(data["data"].get("locations"))
+                        * settings.BUS_LOCATION_HISTORY_MULTIPLIER
+                    ),
+                    details=request.body.decode("utf-8"),
+                    free_credit_balance_modifier=free_credit_balance_modifier,
+                )
 
-            to_create_list += objs
-            free_credit_balance_modifier += modifier
+                to_create_list += objs
+                free_credit_balance_modifier += modifier
 
-            objs, modifier = await get_charge_credits_objs(
-                user=self.user,
-                category=UserJejakTransactionCategory.BANDWIDTH,
-                amount=-1
-                * math.ceil(
-                    len(json.dumps(data["data"])) / 1000 * settings.BANDWIDTH_MULTIPLIER
-                ),
-                details=request.body.decode("utf-8"),
-                free_credit_balance_modifier=free_credit_balance_modifier,
-            )
+                objs, modifier = await get_charge_credits_objs(
+                    user=self.user,
+                    category=UserJejakTransactionCategory.BANDWIDTH,
+                    amount=-1
+                    * math.ceil(
+                        len(json.dumps(data["data"]))
+                        / 1000
+                        * settings.BANDWIDTH_MULTIPLIER
+                    ),
+                    details=request.body.decode("utf-8"),
+                    free_credit_balance_modifier=free_credit_balance_modifier,
+                )
 
-            to_create_list += objs
-            free_credit_balance_modifier += modifier
+                to_create_list += objs
+                free_credit_balance_modifier += modifier
 
-        await UserJejakTransaction.objects.abulk_create(to_create_list)
+            if to_create_list:
+                await UserJejakTransaction.objects.abulk_create(to_create_list)
+        except (OperationalError, DatabaseError, ImportError, Exception):
+            pass
 
         return data

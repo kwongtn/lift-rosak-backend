@@ -209,7 +209,7 @@ class JejakLocationsCountTests(TestCase):
         super().tearDownClass()
 
     def setUp(self):
-        self.scalar = JejakScalars(locations=[], buses=[])
+        self.scalar = JejakScalars()
 
     async def test_locations_count_filters_none_returns_zero(self):
         count = await self.scalar.locations_count(filters=None)
