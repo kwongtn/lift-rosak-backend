@@ -200,7 +200,10 @@ INTERNAL_IPS = [
     "localhost",
 ]
 
-DEBUG_TOOLBAR_CONFIG = {"SHOW_TOOLBAR_CALLBACK": lambda _request: DEBUG}
+DEBUG_TOOLBAR_CONFIG = {
+    "SHOW_TOOLBAR_CALLBACK": lambda _request: DEBUG,
+    "IS_RUNNING_TESTS": False,
+}
 
 ROOT_URLCONF = "rosak.urls"
 

@@ -152,6 +152,13 @@ class TelegramProviderConfig(AppConfig):
     name = "telegram_provider"
 
     def ready(self):
+        if not settings.TELEGRAM_BOT_TOKEN or not settings.TELEGRAM_TLD:
+            logger.warning(
+                "TELEGRAM_BOT_TOKEN and/or TELEGRAM_TLD not configured, "
+                "telegram bot integration is disabled."
+            )
+            return
+
         from django_asgi_lifespan.signals import asgi_shutdown, asgi_startup
 
         handler = ASGILifespanSignalHandler(app_config=self)
