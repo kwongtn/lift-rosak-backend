@@ -37,7 +37,7 @@ GeoPolygon = strawberry.scalar(
 )
 
 GeoMultiPoint = strawberry.scalar(
-    NewType("GeoLineString", Tuple[GeoPoint]),
+    NewType("GeoMultiPoint", Tuple[GeoPoint]),
     description="A geographical object that contains multiple GeoPoints.",
     parse_value=lambda v: MultiPoint(*[Point(x) for x in v]),
     serialize=lambda v: v.tuple,
