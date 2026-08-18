@@ -1,0 +1,85 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - staging
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create secrets.dev.env for testing
+        run: |
+          if [ ! -f secrets.dev.env ]; then
+            cat << 'EOF' > secrets.dev.env
+          DATABASE_HOST=db
+          DATABASE_PORT=5432
+          DATABASE_NAME=postgres
+          DATABASE_USER=postgres
+          MEMCACHED_LOCATION="memcached:11211"
+          SENTRY_DSN=""
+          SENTRY_TRACES_SAMPLING_RATE=0
+          RECAPTCHA_SECRET="6LdKj0QhAAAAAKHxeQDUtf_BzcXGqSHI3dLA9fq-"
+          CELERY_BROKER_URL="redis://redis:6379"
+          DEBUG=True
+          EOF
+          fi
+
+      - name: Build Docker images with cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: |
+            ENVIRONMENT=dev
+          load: true
+          tags: rosak_backend_app:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start Docker Compose services
+        run: |
+          docker compose up -d
+
+      - name: Step 1 - Ruff Check
+        run: |
+          docker compose exec -T app ruff check . --fix
+          docker compose exec -T app ruff check .
+
+      - name: Step 2 - Ruff Format Check
+        run: |
+          docker compose exec -T app ruff format . --check
+
+      - name: Step 3 - Django Check
+        run: |
+          docker compose exec -T app python manage.py check
+
+      - name: Step 4 - Django Makemigrations Check
+        run: |
+          docker compose exec -T app python manage.py makemigrations --check --dry-run
+
+      - name: Step 5 - Django Test Suite
+        run: |
+          docker compose exec -T app python manage.py test --parallel --keepdb
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+          if-no-files-found: ignore
+
+      - name: Cleanup Docker Compose
+        if: always()
+        run: |
+          docker compose down -v
