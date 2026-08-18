@@ -11,7 +11,8 @@ def add_spotting_event_source(apps, schema_editor):
         [
             EventSource(name=SpottingDataSource.SITE),
             EventSource(name=SpottingDataSource.TELEGRAM),
-        ]
+        ],
+        ignore_conflicts=True,
     )
 
 

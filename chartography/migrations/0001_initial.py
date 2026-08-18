@@ -15,7 +15,10 @@ def add_data_sources(apps, schema_editor):
     Source = apps.get_model("chartography", "Source")
     sources = ["PRASARANA", "MLPTF", "MTREC", "MRFC"]
 
-    Source.objects.bulk_create([Source(name=source) for source in sources])
+    Source.objects.bulk_create(
+        [Source(name=source) for source in sources],
+        ignore_conflicts=True,
+    )
 
 
 class Migration(migrations.Migration):

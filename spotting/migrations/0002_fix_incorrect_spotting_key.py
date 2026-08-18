@@ -6,6 +6,8 @@ from spotting.enums import SpottingEventType
 
 
 def fix_stations(apps, schema_editor):
+    # No longer required
+    return
     StationLine = apps.get_model("operation", "StationLine")
     Event = apps.get_model("spotting", "Event")
 

@@ -4,6 +4,8 @@ from django.db import migrations
 
 
 def forwards_func(apps, schema_editor):
+    # No longer required
+    return
     Vehicle = apps.get_model("operation", "Vehicle")
     VehicleLine = apps.get_model("operation", "VehicleLine")
 
