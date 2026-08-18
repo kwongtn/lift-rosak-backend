@@ -117,6 +117,11 @@ class User(TimeStampedModel):
         null=True,
         blank=True,
     )
+    spotting_data_public = models.BooleanField(
+        default=False,
+        db_default=False,
+        help_text="Whether user's historical spotting data is publicly visible",
+    )
 
     @property
     def credit_balance(self) -> int:

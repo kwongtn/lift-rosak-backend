@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import strawberry
 import strawberry_django
@@ -32,6 +32,19 @@ class CommonScalars:
         from common.models import User
 
         return await User.objects.aget(id=info.context.user.id)
+
+    @strawberry.field
+    async def public_user(self, info: Info, id: strawberry.ID) -> Optional[UserScalar]:
+        """
+        Fetch any user's public profile by ID.
+        Public stats are always visible; historical spottings respect privacy flag.
+        """
+        try:
+            from common.models import User
+
+            return await User.objects.aget(id=int(id))
+        except (User.DoesNotExist, ValueError):
+            return None
 
     @strawberry.field
     async def medias_group_by_period(
@@ -86,6 +99,10 @@ class CommonMutations:
     async def update_user(self, input: UserInput, info: Info) -> UserScalar:
         user: User = info.context.user
         user.nickname = input.nickname
+
+        if input.spotting_data_public is not strawberry.UNSET:
+            user.spotting_data_public = input.spotting_data_public
+
         await user.asave()
 
         return user

@@ -74,6 +74,10 @@ class UserScalar:
         return self.firebase_id[:8]
 
     @strawberry_django.field
+    def spotting_data_public(self) -> bool:
+        return self.spotting_data_public
+
+    @strawberry_django.field
     def favourite_vehicles(
         self, count: Optional[int] = 1
     ) -> List[FavouriteVehicleData]:
@@ -130,10 +134,23 @@ class UserScalar:
     @strawberry_django.field
     async def spottings(
         self, info: Info
-    ) -> List[Annotated["EventScalar", strawberry.lazy("spotting.schema.scalars")]]:
-        return await info.context.loaders["common"]["spottings_from_user_loader"].load(
-            self.id
-        )
+    ) -> Optional[
+        List[Annotated["EventScalar", strawberry.lazy("spotting.schema.scalars")]]
+    ]:
+        # Owner always sees their own spottings
+        if info.context.user and info.context.user.id == self.id:
+            return await info.context.loaders["common"][
+                "spottings_from_user_loader"
+            ].load(self.id)
+
+        # Non-owners only see spottings if data is public
+        if self.spotting_data_public:
+            return await info.context.loaders["common"][
+                "spottings_from_user_loader"
+            ].load(self.id)
+
+        # Private data - return None
+        return None
 
     @strawberry_django.field
     async def spottings_count(self, info: Info) -> int:

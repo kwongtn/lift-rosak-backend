@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils.timezone import now
 
 from common.enums import (
@@ -579,3 +579,143 @@ class CommonGraphQLTests(TestCase):
         media_ids = [str(m["id"]) for m in year_entry["medias"]]
         self.assertIn(str(m1.id), media_ids)
         self.assertIn(str(m2.id), media_ids)
+
+
+class UserPrivacyTests(TestCase):
+    """Tests for User.spotting_data_public privacy logic"""
+
+    async def test_user_spotting_data_public_defaults_to_false(self):
+        """New users should have private spotting data by default"""
+        from common.models import User
+
+        user = await User.objects.acreate(
+            firebase_id="test-new-user-uid", nickname="TestUser"
+        )
+        self.assertFalse(user.spotting_data_public)
+
+    async def test_public_user_query_returns_user_by_id(self):
+        """publicUser(id:) query should return user when ID exists"""
+        from common.models import User
+        from rosak.tests import execute_graphql_async
+
+        owner = await User.objects.acreate(
+            firebase_id="owner-uid", nickname="OwnerUser"
+        )
+        other_user = await User.objects.acreate(
+            firebase_id="other-uid", nickname="OtherUser"
+        )
+
+        query = """
+            query GetPublicUser($id: ID!) {
+                publicUser(id: $id) {
+                    nickname
+                    spottingsCount
+                }
+            }
+        """
+        result = await execute_graphql_async(
+            query, variables={"id": str(owner.id)}, user=other_user
+        )
+        self.assertIsNone(result.errors, f"Query failed: {result.errors}")
+        self.assertEqual(result.data["publicUser"]["nickname"], "OwnerUser")
+
+    async def test_spottings_field_null_when_private(self):
+        """Owner's spottings should be null for non-owners when private"""
+        from common.models import User
+        from rosak.tests import execute_graphql_async
+
+        owner = await User.objects.acreate(
+            firebase_id="owner-private-uid",
+            nickname="PrivateOwner",
+            spotting_data_public=False,
+        )
+        other_user = await User.objects.acreate(
+            firebase_id="viewer-uid", nickname="Viewer"
+        )
+
+        query = """
+            query GetPublicUser($id: ID!) {
+                publicUser(id: $id) {
+                    nickname
+                    spottings { id }
+                }
+            }
+        """
+        result = await execute_graphql_async(
+            query, variables={"id": str(owner.id)}, user=other_user
+        )
+        self.assertIsNone(result.errors)
+        self.assertIsNone(
+            result.data["publicUser"]["spottings"],
+            "Spottings should be null when private",
+        )
+
+    async def test_spottings_field_visible_when_public(self):
+        """Owner's spottings should be visible when spotting_data_public=True"""
+        from common.models import User
+        from rosak.tests import execute_graphql_async
+
+        owner = await User.objects.acreate(
+            firebase_id="owner-public-uid",
+            nickname="PublicOwner",
+            spotting_data_public=True,
+        )
+        other_user = await User.objects.acreate(
+            firebase_id="viewer2-uid", nickname="Viewer2"
+        )
+
+        query = """
+            query GetPublicUser($id: ID!) {
+                publicUser(id: $id) {
+                    spottings { id }
+                }
+            }
+        """
+        result = await execute_graphql_async(
+            query, variables={"id": str(owner.id)}, user=other_user
+        )
+        self.assertIsNone(result.errors)
+        self.assertIsNotNone(
+            result.data["publicUser"]["spottings"],
+            "Spottings should be visible when public",
+        )
+
+    async def test_owner_always_sees_own_spottings(self):
+        """Owner should always see their own spottings regardless of flag"""
+        from common.models import User
+        from rosak.tests import execute_graphql_async
+
+        owner = await User.objects.acreate(
+            firebase_id="owner-self-uid",
+            nickname="SelfViewer",
+            spotting_data_public=False,  # Private
+        )
+
+        query = """
+            query GetPublicUser($id: ID!) {
+                publicUser(id: $id) {
+                    spottings { id }
+                }
+            }
+        """
+        result = await execute_graphql_async(
+            query, variables={"id": str(owner.id)}, user=owner
+        )
+        self.assertIsNone(result.errors)
+        self.assertIsNotNone(
+            result.data["publicUser"]["spottings"],
+            "Owner always sees own spottings",
+        )
+
+
+class SpottingDataPublicMigrationTests(TransactionTestCase):
+    """Test migration sets correct defaults for spotting_data_public"""
+
+    def test_new_users_have_private_data_by_default(self):
+        """After migration, new users should have spotting_data_public=False"""
+        from common.models import User
+
+        user = User.objects.create(
+            firebase_id="post-migration-uid", nickname="PostMigrationUser"
+        )
+        self.assertFalse(user.spotting_data_public)

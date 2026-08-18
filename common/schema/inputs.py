@@ -1,3 +1,6 @@
+from typing import Optional
+
+import strawberry
 import strawberry_django
 
 from common import models
@@ -13,3 +16,4 @@ from common import models
 @strawberry_django.input(models.User)
 class UserInput:
     nickname: str
+    spotting_data_public: Optional[bool] = strawberry.UNSET
