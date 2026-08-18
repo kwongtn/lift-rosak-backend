@@ -102,6 +102,7 @@ INSTALLED_APPS = [
     "spotting",
     "incident",
     "mlptf",
+    "jejak",
     "chartography",
     "telegram_provider",
     "django_celery_beat",
@@ -232,14 +233,44 @@ WSGI_APPLICATION = "rosak.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.contrib.gis.db.backends.postgis",
-        "HOST": os.environ.get("DATABASE_HOST", "localhost"),
+        "HOST": os.environ.get("DATABASE_HOST", "db"),
         "NAME": os.environ.get("DATABASE_NAME", "postgres"),
         "USER": os.environ.get("DATABASE_USER", "postgres"),
         "PASSWORD": os.environ.get("DATABASE_PASSWORD", None),
         "PORT": os.environ.get("DATABASE_PORT", 5432),
         "TEST": {"SERIALIZE": False},
-    }
+    },
+    "timescale": {
+        "ENGINE": "django.contrib.gis.db.backends.postgis",
+        "HOST": os.environ.get(
+            "TIMESCALE_WRITE_HOST", os.environ.get("DATABASE_HOST", "db")
+        ),
+        "NAME": os.environ.get("TIMESCALE_WRITE_NAME", "postgres"),
+        "USER": os.environ.get("TIMESCALE_WRITE_USER", "postgres"),
+        "PASSWORD": os.environ.get("TIMESCALE_WRITE_PASSWORD", None),
+        "PORT": os.environ.get("TIMESCALE_WRITE_PORT", 5432),
+        "CONN_MAX_AGE": int(os.environ.get("DJANGO_DB_CONN_MAX_AGE", "300")),
+        "CONN_HEALTH_CHECKS": True,
+        "TEST": {"SERIALIZE": False},
+    },
+    "timescale_read": {
+        "ENGINE": "django.contrib.gis.db.backends.postgis",
+        "HOST": os.environ.get(
+            "TIMESCALE_READ_HOST", os.environ.get("DATABASE_HOST", "db")
+        ),
+        "NAME": os.environ.get("TIMESCALE_READ_NAME", "postgres"),
+        "USER": os.environ.get("TIMESCALE_READ_USER", "postgres"),
+        "PASSWORD": os.environ.get("TIMESCALE_READ_PASSWORD", None),
+        "PORT": os.environ.get("TIMESCALE_READ_PORT", 5432),
+        "CONN_MAX_AGE": int(os.environ.get("DJANGO_DB_CONN_MAX_AGE", "300")),
+        "CONN_HEALTH_CHECKS": True,
+        "TEST": {"SERIALIZE": False},
+    },
 }
+
+DATABASE_ROUTERS = [
+    "rosak.routers.timescale.TimescaleRouter",
+]
 
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
 REDIS_USERNAME = os.environ.get("REDIS_USERNAME", None)
@@ -352,6 +383,17 @@ DEBUG_TOOLBAR_PANELS = [
 # Recaptcha Configuration
 RECAPTCHA_KEY = os.environ.get("RECAPTCHA_SECRET")
 RECAPTCHA_MIN_SCORE = 0.85
+
+################################
+#    Jejak Credit Multiplier   #
+################################
+COUNT_ROWS_MULTIPLIER = 1
+
+# 1 credit per 1000 rows
+BUS_LOCATION_HISTORY_MULTIPLIER = 0.01
+
+# 1 credit per 200kb
+BANDWIDTH_MULTIPLIER = 0.005
 
 # Django Imgur
 IMGUR_CONSUMER_ID = os.environ.get("IMGUR_CONSUMER_ID", "")

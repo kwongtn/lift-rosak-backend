@@ -5,6 +5,7 @@ cd /code
 python manage.py collectstatic --no-input
 python manage.py createcachetable
 python manage.py migrate
+python manage.py migrate --database=timescale
 
 export GIT_COMMIT_HASH=$(cat .git/refs/heads/main | head -c 8)
 export GIT_COMMIT_TIME=$(date -r .git/refs/heads/main -R)

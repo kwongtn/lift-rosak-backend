@@ -65,6 +65,9 @@ class UserScalar:
 
     firebase_id: str = strawberry_django.field(permission_classes=[IsAdmin])
     nickname: str
+    credit_balance: int
+    free_credit_balance: int
+    non_free_credit_balance: int
 
     @strawberry_django.field
     def short_id(self) -> str:

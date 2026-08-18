@@ -1,0 +1,151 @@
+from django.contrib.postgres.indexes import GistIndex
+from django.db import models
+
+from jejak.models.abstracts import (
+    ForeignKeyCompositeIdentifierDetailAbstractModel,
+    IdentifierDetailAbstractModel,
+    RangeAbstractModel,
+)
+
+
+class BusType(models.Model):
+    title = models.TextField(default="", blank=True)
+    description = models.TextField(default="", blank=True)
+
+
+class Bus(IdentifierDetailAbstractModel):
+    type = models.ForeignKey(
+        "jejak.BusType", on_delete=models.CASCADE, null=True, blank=True
+    )
+
+    def __str__(self) -> str:
+        return self.identifier
+
+    class Meta:
+        verbose_name_plural = "Buses"
+
+
+class Accessibility(IdentifierDetailAbstractModel):
+    pass
+
+
+class AccessibilityBusRange(RangeAbstractModel):
+    accessibility = models.ForeignKey(
+        "jejak.Accessibility",
+        on_delete=models.PROTECT,
+    )
+    bus = models.ForeignKey(
+        "jejak.Bus",
+        on_delete=models.PROTECT,
+    )
+
+    class Meta:
+        indexes = [
+            GistIndex(
+                fields=["bus", "dt_range"],
+                name="idx_accessbusrange_bus_range",
+            )
+        ]
+
+
+class EngineStatus(IdentifierDetailAbstractModel):
+    pass
+
+
+class EngineStatusBusRange(RangeAbstractModel):
+    engine_status = models.ForeignKey(
+        "jejak.EngineStatus",
+        on_delete=models.PROTECT,
+    )
+    bus = models.ForeignKey(
+        "jejak.Bus",
+        on_delete=models.PROTECT,
+    )
+
+    class Meta:
+        indexes = [
+            GistIndex(
+                fields=["bus", "dt_range"],
+                name="idx_engstatbusrange_bus_range",
+            )
+        ]
+
+
+class TripRev(IdentifierDetailAbstractModel):
+    pass
+
+
+class TripRevBusRange(RangeAbstractModel):
+    trip_rev = models.ForeignKey(
+        "jejak.TripRev",
+        on_delete=models.PROTECT,
+    )
+    bus = models.ForeignKey(
+        "jejak.Bus",
+        on_delete=models.PROTECT,
+    )
+
+    class Meta:
+        indexes = [
+            GistIndex(
+                fields=["bus", "dt_range"],
+                name="idx_triprevbusrange_bus_range",
+            )
+        ]
+
+
+class Route(ForeignKeyCompositeIdentifierDetailAbstractModel):
+    provider = models.ForeignKey(
+        to="jejak.Provider",
+        on_delete=models.PROTECT,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["identifier", "provider"],
+                name="%(app_label)s_%(class)s_unique_identifier_per_provider",
+            ),
+        ]
+
+
+class BusRouteRange(RangeAbstractModel):
+    route = models.ForeignKey(
+        "jejak.Route",
+        on_delete=models.PROTECT,
+    )
+    bus = models.ForeignKey(
+        "jejak.Bus",
+        on_delete=models.PROTECT,
+    )
+
+    class Meta:
+        indexes = [
+            GistIndex(
+                fields=["bus", "dt_range"],
+                name="idx_busrouterange_bus_range",
+            )
+        ]
+
+
+class BusStop(IdentifierDetailAbstractModel):
+    pass
+
+
+class BusStopBusRange(RangeAbstractModel):
+    bus_stop = models.ForeignKey(
+        "jejak.BusStop",
+        on_delete=models.PROTECT,
+    )
+    bus = models.ForeignKey(
+        "jejak.Bus",
+        on_delete=models.PROTECT,
+    )
+
+    class Meta:
+        indexes = [
+            GistIndex(
+                fields=["bus", "dt_range"],
+                name="idx_busstopbusrange_bus_range",
+            )
+        ]

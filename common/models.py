@@ -1,16 +1,20 @@
 import uuid
 from random import randint
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import Q
 from model_utils.models import TimeStampedModel, UUIDModel
 
 from common.enums import (
     ClearanceType,
+    CreditType,
     FeatureFlagType,
     TemporaryMediaStatus,
     TemporaryMediaType,
+    UserJejakTransactionCategory,
 )
 from common.imgur_field import ImgurField
 from common.imgur_storage import ImgurStorage
@@ -114,12 +118,76 @@ class User(TimeStampedModel):
         blank=True,
     )
 
+    @property
+    def credit_balance(self) -> int:
+        balance = self.userjejaktransaction_set.aggregate(
+            sum=models.Sum("credit_change")
+        )["sum"]
+
+        if balance is None:
+            return 0
+        else:
+            return balance
+
+    @property
+    def free_credit_balance(self) -> int:
+        balance = self.userjejaktransaction_set.filter(
+            credit_type=CreditType.FREE
+        ).aggregate(sum=models.Sum("credit_change"))["sum"]
+
+        if balance is None:
+            return 0
+        else:
+            return balance
+
+    @property
+    @sync_to_async
+    def afree_credit_balance(self) -> int:
+        return self.free_credit_balance
+
+    @property
+    def non_free_credit_balance(self) -> int:
+        balance = self.userjejaktransaction_set.filter(
+            ~Q(credit_type=CreditType.FREE)
+        ).aggregate(sum=models.Sum("credit_change"))["sum"]
+
+        if balance is None:
+            return 0
+        else:
+            return balance
+
+    @property
+    @sync_to_async
+    def anon_free_credit_balance(self) -> int:
+        return self.non_free_credit_balance
+
     def __str__(self) -> str:
         return self.firebase_id[:8]
 
     @property
     def display_name(self) -> str:
         return self.nickname or self.firebase_id[:8]
+
+
+class UserJejakTransaction(TimeStampedModel):
+    user = models.ForeignKey(
+        to="common.User",
+        on_delete=models.PROTECT,
+    )
+    category = models.CharField(
+        choices=UserJejakTransactionCategory.choices,
+        max_length=32,
+    )
+    credit_type = models.CharField(
+        choices=CreditType.choices,
+        max_length=16,
+    )
+    credit_change = models.IntegerField()
+    details = models.TextField(
+        null=True,
+        default=None,
+        blank=True,
+    )
 
 
 def get_verification_code():
