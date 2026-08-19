@@ -14,13 +14,16 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from django.apps import apps
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path, re_path
 from django.views.decorators.csrf import csrf_exempt
 
-from common import views as common_views
+if apps.is_installed("common"):
+    from common import views as common_views
+
 from rosak.context import CustomGraphQLView
 
 from . import custom_view
@@ -41,18 +44,32 @@ urlpatterns = (
                 )
             ),
         ),
-        path("upload/", common_views.GenericUpload.as_view()),
         path("sentry/", csrf_exempt(custom_view.sentry)),
         path("version/", csrf_exempt(custom_view.git_version)),
         path("mdeditor/", include("mdeditor.urls")),
-        path("operation/", include("operation.urls")),
-        path("telegram_provider/", include("telegram_provider.urls")),
         # path("oauth2/v1/", include("oauth2.urls", namespace="oauth2_v1")),
     ]
     # These are served in debug mode only
     + static("media/", document_root=settings.MEDIA_ROOT)
     + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 )
+
+if apps.is_installed("common"):
+    from common import views as common_views
+
+    urlpatterns += [
+        path("upload/", common_views.GenericUpload.as_view()),
+    ]
+
+if apps.is_installed("operation"):
+    urlpatterns += [
+        path("operation/", include("operation.urls")),
+    ]
+
+if apps.is_installed("telegram_provider"):
+    urlpatterns += [
+        path("telegram_provider/", include("telegram_provider.urls")),
+    ]
 
 # if settings.USE_SILK:
 #     urlpatterns += [path("silk/", include("silk.urls", namespace="silk"))]

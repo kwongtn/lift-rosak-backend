@@ -3,6 +3,7 @@ import os
 
 from celery import Celery
 from celery.schedules import crontab
+from django.conf import settings
 
 # Set the default Django settings module for the 'celery' program.
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rosak.settings")
@@ -19,7 +20,7 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 
 # Beat schedule
-app.conf.beat_schedule = {
+beat_schedule = {
     "cleanup_expired_verification_codes": {
         "task": "common.tasks.cleanup_expired_verification_codes",
         "schedule": datetime.timedelta(minutes=10),
@@ -28,23 +29,31 @@ app.conf.beat_schedule = {
         "task": "common.tasks.cleanup_temporary_media_task",
         "schedule": datetime.timedelta(minutes=1),
     },
-    "cleanup_telegram_logs": {
+}
+
+if "telegram_provider" in settings.INSTALLED_APPS:
+    beat_schedule["cleanup_telegram_logs"] = {
         "task": "telegram_provider.tasks.cleanup_telegram_logs",
         "schedule": crontab(hour="3", minute="0"),
-    },
-    "aggregate_line_vehicle_status_mlptf": {
+    }
+
+if "chartography" in settings.INSTALLED_APPS:
+    beat_schedule["aggregate_line_vehicle_status_mlptf"] = {
         "task": "chartography.tasks.aggregate_line_vehicle_status_mlptf_task",
         "schedule": crontab(hour="5", minute="0"),
-    },
-    "aggregate_line_vehicle_status_mtrec": {
+    }
+    beat_schedule["aggregate_line_vehicle_status_mtrec"] = {
         "task": "chartography.tasks.aggregate_line_vehicle_status_mtrec_task",
         "schedule": crontab(hour="1", minute="0"),
-    },
-    "report_spotting_today": {
+    }
+
+if "spotting" in settings.INSTALLED_APPS:
+    beat_schedule["report_spotting_today"] = {
         "task": "spotting.tasks.report_spotting_today",
         "schedule": crontab(hour="0", minute="0"),
-    },
-}
+    }
+
+app.conf.beat_schedule = beat_schedule
 
 
 @app.task(bind=True)

@@ -8,7 +8,6 @@ from dotmap import DotMap
 
 from operation.models import Line
 from rosak.context import ContextLoaders
-from rosak.schema import schema
 
 
 def get_graphql_context(user=None):
@@ -23,6 +22,8 @@ def get_graphql_context(user=None):
 
 
 def execute_graphql(query: str, variables: dict | None = None, user=None):
+    from rosak.schema import schema
+
     context = get_graphql_context(user=user)
     return async_to_sync(schema.execute)(
         query, variable_values=variables, context_value=context
@@ -40,6 +41,23 @@ class GracefulDegradationSettingsTests(SimpleTestCase):
         registered_classes = [cls for cls, _opts in plugin_dir._registry]
         for cls in registered_classes:
             self.assertNotIn("timescale", cls.__name__.lower())
+
+    def test_schema_imports_successfully_without_jejak(self):
+        with override_settings(JEJAK_ENABLED=False):
+            try:
+                import importlib
+
+                import rosak.schema
+
+                importlib.reload(rosak.schema)
+                schema = rosak.schema.schema  # noqa: F841
+                query_type = rosak.schema.Query
+
+                base_names = [base.__name__ for base in query_type.__bases__]
+                self.assertNotIn("JejakScalars", base_names)
+                self.assertIn("OperationScalars", base_names)
+            except ImportError as e:
+                self.fail(f"Schema import failed without jejak: {e}")
 
 
 class GracefulDegradationGraphQLTests(TestCase):
