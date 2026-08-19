@@ -74,18 +74,22 @@ class Line:
     @strawberry_django.field
     def vehicle_spotting_trends(
         self,
-        start: Optional[date] = strawberry.UNSET,
-        end: Optional[date] = strawberry.UNSET,
+        start: strawberry.Maybe[date] = None,
+        end: strawberry.Maybe[date] = None,
         date_group: Optional[DateGroupings] = DateGroupings.DAY,
         type_group: Optional[bool] = False,
         free_range: Optional[bool] = False,
         add_zero: Optional[bool] = True,
     ) -> List["LineVehicleSpottingTrend"]:
-        if start is strawberry.UNSET:
+        if start is None:
             start = get_default_start_time(type=date_group)
+        else:
+            start = start.value
 
-        if end is strawberry.UNSET:
+        if end is None:
             end = date.today()
+        else:
+            end = end.value
 
         vehicles = operation_models.Vehicle.objects.filter(lines=self.id).in_bulk()
 
@@ -300,19 +304,23 @@ class Vehicle:
     @strawberry_django.field
     def spotting_trends(
         self,
-        start: Optional[date] = strawberry.UNSET,
-        end: Optional[date] = strawberry.UNSET,
+        start: strawberry.Maybe[date] = None,
+        end: strawberry.Maybe[date] = None,
         date_group: Optional[DateGroupings] = DateGroupings.DAY,
         type_group: Optional[bool] = False,
         free_range: Optional[bool] = False,
         add_zero: Optional[bool] = True,
     ) -> List["VehicleSpottingTrend"]:
-        if start is strawberry.UNSET:
+        if start is None:
             start = get_default_start_time(type=date_group)
+        else:
+            start = start.value
 
-        if end is strawberry.UNSET:
+        if end is None:
             end = date.today()
             end.isocalendar()
+        else:
+            end = end.value
 
         results = get_trends(
             start=start,

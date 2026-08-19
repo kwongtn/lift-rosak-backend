@@ -661,3 +661,58 @@ class OperationGraphQLTests(TestCase):
         self.assertEqual(counts_by_ident.get("Set 42"), 1)
         self.assertEqual(counts_by_ident.get("Set 10"), 0)
         self.assertEqual(counts_by_ident.get("Set 11"), 0)
+
+
+class TestTrendsResolvers(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.line_kjl = Line.objects.create(
+            display_name="Kelana Jaya Line",
+            code="KJL",
+            display_color="#e0115f",
+        )
+        cls.vt_innovia = VehicleType.objects.create(
+            display_name="Innovia Metro 300",
+            internal_name="INNOVIA_300",
+            description="Four-car Innovia Metro 300 trainsets",
+        )
+        cls.veh_kjl_1 = Vehicle.objects.create(
+            identification_no="Set 40",
+            vehicle_type=cls.vt_innovia,
+            status=VehicleStatus.IN_SERVICE,
+            wheel_status=WheelStatus.FRESH,
+        )
+        VehicleLine.objects.create(vehicle=cls.veh_kjl_1, line=cls.line_kjl)
+
+        cls.user = User.objects.create(firebase_id="firebase-uid-trends-tests")
+
+        cls.evt_kjl_1 = Event.objects.create(
+            spotting_date=date(2024, 1, 15),
+            reporter=cls.user,
+            vehicle=cls.veh_kjl_1,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            type=SpottingEventType.JUST_SPOTTING,
+        )
+
+    def test_line_spotting_trends_defaults(self):
+        from operation.schema.scalars import Line as LineScalar
+
+        trends = LineScalar.vehicle_spotting_trends.base_resolver(
+            self.line_kjl, start=None, end=None
+        )
+        self.assertIsInstance(trends, list)
+
+    def test_vehicle_spotting_trends_custom_range(self):
+        from strawberry.types.maybe import Some
+
+        from generic.schema.enums import DateGroupings
+        from operation.schema.scalars import Vehicle as VehicleScalar
+
+        trends = VehicleScalar.spotting_trends.base_resolver(
+            self.veh_kjl_1,
+            start=Some(date(2024, 1, 14)),
+            end=Some(date(2024, 1, 16)),
+            date_group=DateGroupings.DAY,
+            add_zero=True,
+        )
+        self.assertEqual(len(trends), 3)

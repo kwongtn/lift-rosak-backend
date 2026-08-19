@@ -23,6 +23,7 @@ from common.models import (
     UserVerificationCode,
 )
 from common.schema.inputs import UserInput
+from common.schema.scalars import UserScalar
 from common.tasks import (
     cleanup_expired_verification_codes,
     cleanup_temporary_media_task,
@@ -769,3 +770,151 @@ class TestUserInput(TestCase):
                 ({"nickname": "test", "spottingDataPublic": True}, Some(True)),
             ],
         )
+
+
+class TestUpdateUserMutation(TestCase):
+    def setUp(self):
+        self.mutation = """
+            mutation UpdateUser($input: UserInput!) {
+                updateUser(input: $input) {
+                    nickname
+                    spottingDataPublic
+                }
+            }
+        """
+
+    async def test_omitted_spotting_data_preserves_db_value(self):
+        user = await User.objects.acreate(
+            firebase_id="test-user-preserve-uid",
+            nickname="OriginalNick",
+            spotting_data_public=True,
+        )
+
+        variables = {
+            "input": {
+                "nickname": "UpdatedNick",
+            }
+        }
+        result = await execute_graphql_async(
+            self.mutation, variables=variables, user=user
+        )
+        self.assertIsNone(result.errors)
+        self.assertEqual(result.data["updateUser"]["nickname"], "UpdatedNick")
+        self.assertEqual(result.data["updateUser"]["spottingDataPublic"], True)
+
+        await user.arefresh_from_db()
+        self.assertEqual(user.nickname, "UpdatedNick")
+        self.assertTrue(user.spotting_data_public)
+
+    async def test_explicit_true_updates_value(self):
+        user = await User.objects.acreate(
+            firebase_id="test-user-true-uid",
+            nickname="OriginalNick",
+            spotting_data_public=False,
+        )
+
+        variables = {
+            "input": {
+                "nickname": "UpdatedNick",
+                "spottingDataPublic": True,
+            }
+        }
+        result = await execute_graphql_async(
+            self.mutation, variables=variables, user=user
+        )
+        self.assertIsNone(result.errors)
+        self.assertEqual(result.data["updateUser"]["nickname"], "UpdatedNick")
+        self.assertEqual(result.data["updateUser"]["spottingDataPublic"], True)
+
+        await user.arefresh_from_db()
+        self.assertEqual(user.nickname, "UpdatedNick")
+        self.assertTrue(user.spotting_data_public)
+
+    async def test_explicit_false_updates_value(self):
+        user = await User.objects.acreate(
+            firebase_id="test-user-false-uid",
+            nickname="OriginalNick",
+            spotting_data_public=True,
+        )
+
+        variables = {
+            "input": {
+                "nickname": "UpdatedNick",
+                "spottingDataPublic": False,
+            }
+        }
+        result = await execute_graphql_async(
+            self.mutation, variables=variables, user=user
+        )
+        self.assertIsNone(result.errors)
+        self.assertEqual(result.data["updateUser"]["nickname"], "UpdatedNick")
+        self.assertEqual(result.data["updateUser"]["spottingDataPublic"], False)
+
+        await user.arefresh_from_db()
+        self.assertEqual(user.nickname, "UpdatedNick")
+        self.assertFalse(user.spotting_data_public)
+
+
+class TestUserScalarTrends(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(
+            firebase_id="test-user-trends-uid",
+            nickname="TrendsUser",
+            spotting_data_public=True,
+        )
+        self.line = Line.objects.create(
+            display_name="Kelana Jaya Line",
+            code="KJL",
+            display_color="#ff0000",
+        )
+        self.vehicle_type = VehicleType.objects.create(
+            display_name="Innovia Metro 300",
+            internal_name="INNOVIA_300",
+        )
+        self.vehicle = Vehicle.objects.create(
+            identification_no="Set 40",
+            vehicle_type=self.vehicle_type,
+            status=SpottingVehicleStatus.IN_SERVICE,
+        )
+        today = date.today()
+        Event.objects.create(
+            reporter=self.user,
+            vehicle=self.vehicle,
+            spotting_date=today - timedelta(days=2),
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+        )
+        Event.objects.create(
+            reporter=self.user,
+            vehicle=self.vehicle,
+            spotting_date=today - timedelta(days=10),
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+        )
+
+    def test_spotting_trends_defaults_to_last_7_days(self):
+        trends = UserScalar.spotting_trends.base_resolver(
+            self.user, start=None, end=None
+        )
+        self.assertIsNotNone(trends)
+        self.assertGreater(len(trends), 0)
+        self.assertEqual(len(trends), 366)
+
+    def test_spotting_trends_with_explicit_range(self):
+        today = date.today()
+        start = today - timedelta(days=5)
+        end = today
+        trends = UserScalar.spotting_trends.base_resolver(
+            self.user, start=Some(start), end=Some(end)
+        )
+        self.assertIsNotNone(trends)
+        self.assertEqual(len(trends), 6)
+
+    def test_spotting_trends_with_partial_start_only(self):
+        today = date.today()
+        start = today - timedelta(days=15)
+        trends = UserScalar.spotting_trends.base_resolver(
+            self.user, start=Some(start), end=None
+        )
+        self.assertIsNotNone(trends)
+        self.assertEqual(len(trends), 16)

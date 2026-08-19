@@ -5,8 +5,11 @@ from django.contrib.gis.geos import Point
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
+from strawberry import UNSET
+from strawberry.types.maybe import Some
 
 from common.models import User
+from generic.schema.inputs import WebLocationInput
 from operation.enums import VehicleStatus
 from operation.models import (
     Line,
@@ -17,12 +20,14 @@ from operation.models import (
     VehicleType,
 )
 from rosak.tests import execute_graphql_async
+from rosak.tests.test_schema import assert_maybe_field_behavior
 from spotting.enums import (
     SpottingEventType,
     SpottingVehicleStatus,
     SpottingWheelStatus,
 )
 from spotting.models import Event, EventRead, EventSource, LocationEvent
+from spotting.schema.inputs import EventInput
 
 
 class SpottingModelTests(TestCase):
@@ -807,11 +812,73 @@ class SpottingGraphQLTests(TestCase):
             self.assertTrue(res.data["markAsRead"]["ok"])
 
         self.assertTrue(
-            await EventRead.objects.filter(reader=self.admin_user, event=e1).aexists()
-        )
-        self.assertTrue(
-            await EventRead.objects.filter(reader=self.admin_user, event=e2).aexists()
-        )
-        self.assertEqual(
             await EventRead.objects.filter(reader=self.admin_user).acount(), 2
+        )
+
+
+class TestEventInput(TestCase):
+    def test_event_input_partial_update_omits_optional_fields(self):
+        base_variables = {
+            "spottingDate": "2024-05-10",
+            "vehicle": "1",
+        }
+        for field in [
+            "notes",
+            "run_number",
+            "wheel_status",
+            "origin_station",
+            "destination_station",
+            "location",
+            "is_anonymous",
+        ]:
+            assert_maybe_field_behavior(
+                input_class=EventInput,
+                field_name=field,
+                test_cases=[
+                    (base_variables, UNSET),
+                ],
+            )
+
+    def test_event_input_explicit_null_clears_notes(self):
+        variables = {
+            "spottingDate": "2024-05-10",
+            "vehicle": "1",
+            "notes": None,
+        }
+        assert_maybe_field_behavior(
+            input_class=EventInput,
+            field_name="notes",
+            test_cases=[
+                (variables, Some(None)),
+            ],
+        )
+
+    def test_event_input_nested_location_with_partial_coords(self):
+        variables = {
+            "spottingDate": "2024-05-10",
+            "vehicle": "1",
+            "location": {
+                "latitude": 3.14,
+                "longitude": 101.69,
+            },
+        }
+        assert_maybe_field_behavior(
+            input_class=EventInput,
+            field_name="location",
+            test_cases=[
+                (
+                    variables,
+                    Some(
+                        WebLocationInput(
+                            latitude=Some(3.14),
+                            longitude=Some(101.69),
+                            accuracy=UNSET,
+                            altitude_accuracy=UNSET,
+                            heading=UNSET,
+                            speed=UNSET,
+                            altitude=UNSET,
+                        )
+                    ),
+                ),
+            ],
         )

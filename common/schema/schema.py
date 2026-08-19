@@ -100,8 +100,11 @@ class CommonMutations:
         user: User = info.context.user
         user.nickname = input.nickname
 
-        if input.spotting_data_public is not strawberry.UNSET:
-            user.spotting_data_public = input.spotting_data_public
+        if (
+            input.spotting_data_public is not None
+            and input.spotting_data_public is not strawberry.UNSET
+        ):
+            user.spotting_data_public = input.spotting_data_public.value
 
         await user.asave()
 

@@ -1,8 +1,9 @@
 from datetime import date
-from typing import List, Optional
+from typing import List
 
 import strawberry
 import strawberry_django
+from strawberry.types.maybe import Maybe
 
 from generic.schema.inputs import WebLocationInput
 from spotting import models
@@ -12,15 +13,15 @@ from spotting import models
 class EventInput:
     spotting_date: date
     vehicle: strawberry.ID
-    notes: Optional[str] = strawberry.UNSET
-    run_number: Optional[str] = strawberry.UNSET
+    notes: Maybe[str | None] = strawberry.UNSET
+    run_number: Maybe[str | None] = strawberry.UNSET
     status: strawberry.auto
     type: strawberry.auto
-    wheel_status: Optional[str] = strawberry.UNSET
-    origin_station: Optional[strawberry.ID] = strawberry.UNSET
-    destination_station: Optional[strawberry.ID] = strawberry.UNSET
-    location: Optional["WebLocationInput"] = strawberry.UNSET
-    is_anonymous: Optional[bool] = strawberry.UNSET
+    wheel_status: Maybe[str | None] = strawberry.UNSET
+    origin_station: Maybe[strawberry.ID | None] = strawberry.UNSET
+    destination_station: Maybe[strawberry.ID | None] = strawberry.UNSET
+    location: Maybe[WebLocationInput | None] = strawberry.UNSET
+    is_anonymous: Maybe[bool | None] = strawberry.UNSET
 
 
 @strawberry.input

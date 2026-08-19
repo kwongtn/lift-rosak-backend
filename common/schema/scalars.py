@@ -163,22 +163,28 @@ class UserScalar:
     @strawberry_django.field
     def spotting_trends(
         self,
-        start: Optional[date] = strawberry.UNSET,
-        end: Optional[date] = strawberry.UNSET,
+        start: strawberry.Maybe[date] = None,
+        end: strawberry.Maybe[date] = None,
         date_group: Optional[DateGroupings] = DateGroupings.DAY,
         type_group: Optional[bool] = False,
         free_range: Optional[bool] = False,
     ) -> List["UserSpottingTrend"]:
-        if start is strawberry.UNSET:
+        if start is None:
             start = get_default_start_time(type=date_group)
+        else:
+            start = start.value
 
-        if end is strawberry.UNSET:
+        if end is None:
             end = date.today()
+        else:
+            end = end.value
 
         results = get_trends(
             groupby_field="spotting_date",
             count_model=spotting_models.Event,
             filters=Q(reporter_id=self.id),
+            start=start,
+            end=end,
             add_zero=True,
             additional_groupby={
                 "type": [event_type.value for event_type in SpottingEventType],
