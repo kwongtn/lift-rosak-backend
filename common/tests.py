@@ -918,3 +918,108 @@ class TestUserScalarTrends(TestCase):
         )
         self.assertIsNotNone(trends)
         self.assertEqual(len(trends), 16)
+
+
+class TestDjangoListConnection(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(
+            firebase_id="test-django-list-connection-uid",
+            nickname="ConnectionUser",
+        )
+
+    async def test_connection_total_count_field(self):
+        for i in range(7):
+            await Media.objects.acreate(
+                uploader=self.user,
+                width=1920,
+                height=1080,
+                file_id=f"test_conn_file_{i}",
+                file_name=f"test_conn_photo_{i}.jpg",
+            )
+
+        query = """
+            query {
+                medias(first: 3) {
+                    totalCount
+                    edges {
+                        node {
+                            id
+                        }
+                    }
+                }
+            }
+        """
+        from strawberry_django.relay import DjangoListConnection
+
+        import common.schema.schema as common_schema_module
+        from common.schema.scalars import MediaType
+        from common.schema.schema import CommonScalars
+
+        self.assertTrue(
+            hasattr(common_schema_module, "DjangoListConnection"),
+            "common.schema.schema should import DjangoListConnection",
+        )
+        self.assertFalse(
+            hasattr(common_schema_module, "ListConnectionWithTotalCount"),
+            "common.schema.schema should not import deprecated ListConnectionWithTotalCount",
+        )
+
+        medias_type = CommonScalars.__annotations__.get("medias")
+        self.assertEqual(
+            medias_type,
+            DjangoListConnection[MediaType],
+            "CommonScalars.medias must use DjangoListConnection type annotation",
+        )
+
+        result = await execute_graphql_async(query)
+        self.assertIsNone(result.errors)
+        self.assertEqual(result.data["medias"]["totalCount"], 7)
+        self.assertEqual(len(result.data["medias"]["edges"]), 3)
+
+    async def test_connection_pagination_info(self):
+        import common.schema.schema as common_schema_module
+
+        self.assertTrue(
+            hasattr(common_schema_module, "DjangoListConnection"),
+            "common.schema.schema should import DjangoListConnection",
+        )
+        self.assertFalse(
+            hasattr(common_schema_module, "ListConnectionWithTotalCount"),
+            "common.schema.schema should not import deprecated ListConnectionWithTotalCount",
+        )
+
+        for i in range(5):
+            await Media.objects.acreate(
+                uploader=self.user,
+                width=1920,
+                height=1080,
+                file_id=f"test_page_file_{i}",
+                file_name=f"test_page_photo_{i}.jpg",
+            )
+
+        query = """
+            query {
+                medias(first: 2) {
+                    totalCount
+                    pageInfo {
+                        hasNextPage
+                        hasPreviousPage
+                        startCursor
+                        endCursor
+                    }
+                    edges {
+                        cursor
+                        node {
+                            id
+                        }
+                    }
+                }
+            }
+        """
+        result = await execute_graphql_async(query)
+        self.assertIsNone(result.errors)
+        page_info = result.data["medias"]["pageInfo"]
+        self.assertTrue(page_info["hasNextPage"])
+        self.assertFalse(page_info["hasPreviousPage"])
+        self.assertIsNotNone(page_info["startCursor"])
+        self.assertIsNotNone(page_info["endCursor"])

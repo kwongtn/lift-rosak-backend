@@ -10,13 +10,13 @@ from strawberry_django import StrFilterLookup
 from operation import models
 
 
-@strawberry_django.filters.filter(models.Vehicle)
+@strawberry_django.filter(models.Vehicle)
 class VehicleFilter:
     id: strawberry.auto
     status: strawberry.auto
 
 
-@strawberry_django.filters.filter(models.Line)
+@strawberry_django.filter(models.Line)
 class LineFilter:
     id: strawberry.auto
     code: Optional[str]
@@ -24,14 +24,14 @@ class LineFilter:
     display_color: Optional[StrFilterLookup]
 
 
-@strawberry_django.filters.filter(models.VehicleType)
+@strawberry_django.filter(models.VehicleType)
 class VehicleTypeFilter:
     @strawberry_django.filter_field
     def line_id(self, value: strawberry.ID, prefix) -> Q:
         return Q(vehicles__vehicle_lines__id=value)
 
 
-@strawberry_django.filters.filter(models.Asset)
+@strawberry_django.filter(models.Asset)
 class AssetFilter:
     id: strawberry.auto
     asset_type: strawberry.auto
@@ -40,7 +40,7 @@ class AssetFilter:
     station: Optional["StationFilter"]
 
 
-@strawberry_django.filters.filter(models.Station)
+@strawberry_django.filter(models.Station)
 class StationFilter:
     id: strawberry.auto
     display_name: Optional[StrFilterLookup]
@@ -62,7 +62,7 @@ class StationFilter:
         )
 
 
-@strawberry_django.filters.filter(models.StationLine)
+@strawberry_django.filter(models.StationLine)
 class StationLineFilter:
     id: strawberry.auto
     display_name: Optional[StrFilterLookup]

@@ -403,3 +403,22 @@ class TestLocationResolvers(TestCase):
         )
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].identifier, "BUS-102")
+
+
+class TestFilterDecorators(TestCase):
+    """Test that filter decorators are correctly applied."""
+
+    def test_location_filter(self):
+        """Verify LocationFilter has correct strawberry_django decorator."""
+        self.assertTrue(
+            hasattr(LocationFilter, "__strawberry_django_definition__"),
+            "LocationFilter missing strawberry_django decorator",
+        )
+
+    def test_bus_filter(self):
+        """Verify LocationFilter has bus_id field (smoke test)."""
+        filter_instance = LocationFilter()
+        self.assertTrue(
+            hasattr(filter_instance, "bus_id"),
+            "LocationFilter missing bus_id field",
+        )

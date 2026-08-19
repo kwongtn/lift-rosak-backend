@@ -7,7 +7,7 @@ import strawberry_django
 from jejak import models
 
 
-@strawberry_django.filters.filter(models.Location)
+@strawberry_django.filter(models.Location)
 class LocationFilter:
     id: strawberry.Maybe[strawberry.ID] = None
     bus_id: strawberry.Maybe[strawberry.ID] = None

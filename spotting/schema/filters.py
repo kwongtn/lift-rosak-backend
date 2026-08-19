@@ -16,7 +16,7 @@ from operation.schema.filters import VehicleFilter
 from spotting import models
 
 
-@strawberry_django.filters.filter(models.Event)
+@strawberry_django.filter(models.Event)
 class EventFilter:
     id: strawberry.auto
     type: Optional[BaseFilterLookup[str]]

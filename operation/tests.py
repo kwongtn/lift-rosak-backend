@@ -663,6 +663,28 @@ class OperationGraphQLTests(TestCase):
         self.assertEqual(counts_by_ident.get("Set 11"), 0)
 
 
+class TestFilterDecorators(TestCase):
+    """Test that filter decorators are correctly applied."""
+
+    def test_line_filter(self):
+        """Verify LineFilter has correct strawberry_django decorator."""
+        from operation.schema.filters import LineFilter
+
+        self.assertTrue(
+            hasattr(LineFilter, "__strawberry_django_definition__"),
+            "LineFilter missing strawberry_django decorator",
+        )
+
+    def test_station_filter(self):
+        """Verify StationFilter has correct strawberry_django decorator."""
+        from operation.schema.filters import StationFilter
+
+        self.assertTrue(
+            hasattr(StationFilter, "__strawberry_django_definition__"),
+            "StationFilter missing strawberry_django decorator",
+        )
+
+
 class TestTrendsResolvers(TestCase):
     @classmethod
     def setUpTestData(cls):

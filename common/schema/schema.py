@@ -5,7 +5,7 @@ import strawberry_django
 from django.contrib.postgres.aggregates import ArrayAgg
 from django.db.models import Count, F, Q
 from strawberry.types import Info
-from strawberry_django.relay import ListConnectionWithTotalCount
+from strawberry_django.relay import DjangoListConnection
 
 from common.models import Media, User, UserVerificationCode
 from common.schema.inputs import UserInput
@@ -22,7 +22,7 @@ from rosak.permissions import IsLoggedIn
 
 @strawberry.type
 class CommonScalars:
-    medias: ListConnectionWithTotalCount[MediaType] = strawberry_django.connection()
+    medias: DjangoListConnection[MediaType] = strawberry_django.connection()
 
     @strawberry.field(permission_classes=[IsLoggedIn])
     async def user(self, info: Info) -> UserScalar:

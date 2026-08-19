@@ -612,3 +612,25 @@ class TestCalendarIncidentFilter(TestCase):
         with self.assertRaises(GraphQLError) as ctx:
             self._apply_date_filter(date_input)
         self.assertIn("date range requires both start and end", str(ctx.exception))
+
+
+class TestFilterDecorators(TestCase):
+    """Test that filter decorators are correctly applied."""
+
+    def test_calendar_filter(self):
+        """Verify CalendarIncidentFilter has correct strawberry_django decorator."""
+        from incident.schema.filters import CalendarIncidentFilter
+
+        self.assertTrue(
+            hasattr(CalendarIncidentFilter, "__strawberry_django_definition__"),
+            "CalendarIncidentFilter missing strawberry_django decorator",
+        )
+
+    def test_vehicle_filter(self):
+        """Verify VehicleIncidentFilter has correct strawberry_django decorator."""
+        from incident.schema.filters import VehicleIncidentFilter
+
+        self.assertTrue(
+            hasattr(VehicleIncidentFilter, "__strawberry_django_definition__"),
+            "VehicleIncidentFilter missing strawberry_django decorator",
+        )

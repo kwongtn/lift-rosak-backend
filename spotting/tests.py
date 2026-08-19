@@ -1136,3 +1136,26 @@ class TestAddEventMutation(TestCase):
         self.assertEqual(float(location_event.altitude_accuracy), 1.5)
         self.assertEqual(float(location_event.heading), 270.0)
         self.assertEqual(float(location_event.speed), 22.5)
+
+
+class TestFilterDecorators(TestCase):
+    """Test that filter decorators are correctly applied."""
+
+    def test_event_filter(self):
+        """Verify EventFilter has correct strawberry_django decorator."""
+        from spotting.schema.filters import EventFilter
+
+        self.assertTrue(
+            hasattr(EventFilter, "__strawberry_django_definition__"),
+            "EventFilter missing strawberry_django decorator",
+        )
+
+    def test_event_type_filter(self):
+        """Verify EventFilter type field exists (smoke test)."""
+        from spotting.schema.filters import EventFilter
+
+        filter_instance = EventFilter()
+        self.assertTrue(
+            hasattr(filter_instance, "type"),
+            "EventFilter missing type field",
+        )

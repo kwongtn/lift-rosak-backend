@@ -17,12 +17,12 @@ class IncidentAbstractFilter:
     is_last: Optional[bool]
 
 
-@strawberry_django.filters.filter(models.VehicleIncident)
+@strawberry_django.filter(models.VehicleIncident)
 class VehicleIncidentFilter(IncidentAbstractFilter):
     vehicle: Optional["VehicleFilter"]
 
 
-@strawberry_django.filters.filter(models.StationIncident)
+@strawberry_django.filter(models.StationIncident)
 class StationIncidentFilter(IncidentAbstractFilter):
     station: Optional["StationFilter"]
 
@@ -46,7 +46,7 @@ class CalendarIncidentDateFilter:
     year: strawberry.Maybe[IntExactInput] = None
 
 
-@strawberry_django.filters.filter(models.CalendarIncident)
+@strawberry_django.filter(models.CalendarIncident)
 class CalendarIncidentFilter:
     id: Optional[strawberry.ID]
     severity: Optional[str]
