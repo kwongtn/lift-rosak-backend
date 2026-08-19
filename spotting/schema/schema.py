@@ -122,7 +122,7 @@ class SpottingMutations:
             data_source_id=event_source.id,
         )
 
-        if input.location != strawberry.UNSET:
+        if input.location not in (strawberry.UNSET, None):
             location_input = input.location
             accuracy = (
                 location_input.accuracy
