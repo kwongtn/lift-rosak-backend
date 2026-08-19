@@ -1,13 +1,90 @@
 import copy
+from typing import Any
 
+import strawberry
 from asgiref.sync import async_to_sync
 from django.test import SimpleTestCase, TestCase
 from dotmap import DotMap
-from strawberry import Schema
+from strawberry import UNSET, Schema
+from strawberry.types.maybe import Maybe, Some
 
 from operation.models import Line
 from rosak.context import ContextLoaders
 from rosak.schema import schema
+
+
+def assert_maybe_field_behavior(
+    input_class: type,
+    field_name: str,
+    test_cases: list[tuple[dict[str, Any], Any]],
+) -> None:
+    captured: dict[str, Any] = {}
+
+    @strawberry.type
+    class _Query:
+        @strawberry.field
+        def test_field(self, input_data: input_class) -> str:  # type: ignore[valid-type]
+            captured["data"] = input_data
+            return "ok"
+
+    test_schema = Schema(query=_Query)
+
+    for variable_values, expected_value in test_cases:
+        captured.clear()
+        query = f"""
+            query TestMaybeField($inputData: {input_class.__name__}!) {{
+                testField(inputData: $inputData)
+            }}
+        """
+        result = test_schema.execute_sync(
+            query,
+            variable_values={"inputData": variable_values},
+        )
+        if result.errors:
+            raise AssertionError(f"GraphQL execution failed: {result.errors}")
+
+        parsed_input = captured.get("data")
+        actual_val = getattr(parsed_input, field_name)
+        if actual_val != expected_value:
+            raise AssertionError(
+                f"Field '{field_name}' assertion failed: expected {expected_value!r}, got {actual_val!r}"
+            )
+
+
+class TestMaybeSemantics(TestCase):
+    @strawberry.input
+    class SampleMaybeInput:
+        name: Maybe[str] = UNSET
+        description: Maybe[str | None] = UNSET
+
+    def test_maybe_field_omitted_evaluates_to_none(self):
+        assert_maybe_field_behavior(
+            input_class=self.SampleMaybeInput,
+            field_name="name",
+            test_cases=[
+                ({}, UNSET),
+            ],
+        )
+
+    def test_maybe_field_with_value_wraps_in_some(self):
+        assert_maybe_field_behavior(
+            input_class=self.SampleMaybeInput,
+            field_name="name",
+            test_cases=[
+                ({"name": "Strawberry Test"}, Some("Strawberry Test")),
+            ],
+        )
+
+    def test_maybe_nullable_accepts_explicit_null(self):
+        assert_maybe_field_behavior(
+            input_class=self.SampleMaybeInput,
+            field_name="description",
+            test_cases=[
+                ({"description": None}, Some(None)),
+                ({"description": "Some details"}, Some("Some details")),
+                ({}, UNSET),
+            ],
+        )
 
 
 def get_graphql_context(user=None):
