@@ -44,24 +44,26 @@ docker compose exec app celery -A rosak.celery_app worker -l INFO -c 2
 docker compose exec app celery -A rosak.celery_app beat -l INFO
 ```
 
-**Honest state of testing:** `tests.py` is 0 bytes in `common`, `generic`, `mlptf`,
-`operation` and `reporting`; there is no pytest, tox or coverage in the lockfiles. The
-test command above works but currently asserts nothing. **`ruff check` +
-`manage.py check` + `makemigrations --check` are the real verification gate today.**
-If you touch a module, add the first real test for it in the same change.
+**Testing state (as of August 2026):** Full test suite passes with **180 tests** after
+the Strawberry GraphQL migration. `tests.py` was previously 0 bytes in `common`,
+`generic`, `mlptf`, `operation` and `reporting`; migration added 50+ new unit tests
+across all phases. No pytest/tox/coverage yet. **`ruff check` + `manage.py check` +
+`makemigrations --check` + full test suite are the verification gate.** If you touch a
+module, add tests for new behavior in the same change.
 
 ---
 
 ## 🏛️ Architecture & Component Pointer
 
 Django 4.2 on PostGIS (GeoDjango), exposing a **single async GraphQL endpoint** built
-with Strawberry — the root `Query`/`Mutation` are assembled by *multiple inheritance* in
-[rosak/schema.py](rosak/schema.py), so there is no routing layer. Auth is Firebase
-bearer-token → lazily `get_or_create`'d `common.User` in [rosak/context.py](rosak/context.py),
-with per-request DataLoaders and three Strawberry permission classes
-(`IsLoggedIn` / `IsAdmin` / `IsRecaptcha`). Async work is Celery + Redis with **all six
-periodic jobs declared centrally** in [rosak/celery.py](rosak/celery.py); served by
-Granian ASGI behind nginx.
+with **Strawberry GraphQL 0.323.2** (strawberry-graphql-django 0.82.1, migrated from
+`UNSET` to `strawberry.Maybe[T]` pattern in August 2026) — the root `Query`/`Mutation`
+are assembled by _multiple inheritance_ in [rosak/schema.py](rosak/schema.py), so there
+is no routing layer. Auth is Firebase bearer-token → lazily `get_or_create`'d
+`common.User` in [rosak/context.py](rosak/context.py), with per-request DataLoaders and
+three Strawberry permission classes (`IsLoggedIn` / `IsAdmin` / `IsRecaptcha`). Async
+work is Celery + Redis with **all six periodic jobs declared centrally** in
+[rosak/celery.py](rosak/celery.py); served by Granian ASGI behind nginx.
 
 **Do not guess at component interfaces.** Read the docs first:
 
@@ -83,6 +85,7 @@ table-less shared kernel that contributes zero migrations.
 ## 📏 Non-Negotiable Code Conventions
 
 **Module boundaries**
+
 - [tach.yml](tach.yml) declares the allowed cross-app import graph. Consult it before
   adding any import between apps; `tach` is not installed by default (`uvx tach check`).
 - The graph is already heavily cyclic. Break new cycles with **lazy string model
@@ -91,6 +94,11 @@ table-less shared kernel that contributes zero migrations.
 - `django_cleanup` must stay **last** in `INSTALLED_APPS`.
 
 **GraphQL / Strawberry**
+
+- **Migration status (August 2026):** Migrated to Strawberry GraphQL 0.323.2 with
+  `strawberry.Maybe[T]` pattern (replaces deprecated `UNSET`). See
+  [docs/STRAWBERRY_MIGRATION.md](docs/STRAWBERRY_MIGRATION.md) for tri-state semantics
+  and behavioral parity verification.
 - New root fields go on the per-app `*Scalars` / `*Mutations` mixin, not on `rosak/schema.py`.
 - New DataLoaders: add one key to the app's `*ContextLoaders` dict and register it in
   `rosak/context.py`. Resolvers that fan out to related rows **must** use a loader —
@@ -98,20 +106,26 @@ table-less shared kernel that contributes zero migrations.
 - Enum fields must use `TextChoicesField` (django-choices-field). A plain
   `TextField(choices=...)` renders as `String` in the schema, not an enum.
 - Resolvers are `async`; never call the sync ORM from one without `sync_to_async`.
+- Optional input fields: use `strawberry.Maybe[T | None] = None` for tri-state
+  (UNSET/Some(value)/Some(None)). Check with `if input.field:` then access
+  `input.field.value`.
 
 **Database & migrations**
+
 - PostGIS is required — geometry fields use `django.contrib.gis`.
 - Never edit an applied migration. Add a new one.
 - Data migrations must be reversible or explicitly declare `migrations.RunPython.noop`.
 - Run `./dev_permissioner.sh` after any container-generated migration.
 
 **Celery**
+
 - New periodic work goes in `rosak/celery.py`'s `beat_schedule` — **never** a local
   schedule. `autodiscover_tasks()` means a new `tasks.py` needs no registration.
 - Retries must be bounded. Unbounded retry-with-sleep loops pin a worker (see
   `infinite_retry_on_error` in the traps table).
 
 **Error handling & typing**
+
 - **Never use bare `assert` for validation or request guarding.** It is stripped under
   `python -O` and surfaces as a 500, not a validation error. Raise an explicit
   exception or a Strawberry error. Existing `assert`s in `incident` and `chartography`
@@ -133,7 +147,7 @@ disables GraphQL introspection guarding. Cache-related bugs will not reproduce l
 1. **Explore** — read [docs/APPS.md](docs/APPS.md) and the relevant
    `docs/components/*.md` before opening source. Check the traps table.
 2. **Plan** — state the file list, the migration impact, and any `tach.yml` boundary
-   the change crosses. Get agreement *before* editing. Do not start multi-file edits
+   the change crosses. Get agreement _before_ editing. Do not start multi-file edits
    from an implicit plan.
 3. **Code** — smallest change that satisfies the request. Prefer the documented
    extension point over new plumbing.
