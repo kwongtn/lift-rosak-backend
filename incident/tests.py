@@ -461,3 +461,50 @@ class IncidentSchemaExecutionTests(TestCase):
             datetime.fromisoformat(result.data["calendarIncidents"][0]["lastUpdated"]),
             chronology.modified,
         )
+
+
+class TestCalendarIncidentResolvers(TestCase):
+    def test_severity_count_requires_both_dates(self):
+        query = """
+            query {
+                calendarIncidentsBySeverityCount(groupBy: DAY) {
+                    date
+                    severity
+                    count
+                }
+            }
+        """
+        result = execute_graphql(query)
+        self.assertIsNotNone(result.errors)
+        self.assertTrue(
+            any(
+                "start_date and end_date required" in (error.message or "")
+                for error in result.errors
+            )
+        )
+
+    def test_severity_count_with_valid_date_range(self):
+        CalendarIncident.objects.create(
+            title="Test Incident",
+            brief="Brief",
+            severity=CalendarIncidentSeverity.MAJOR,
+            start_datetime=datetime(2024, 1, 5, 10, 0),
+            end_datetime=datetime(2024, 1, 6, 10, 0),
+        )
+        query = """
+            query {
+                calendarIncidentsBySeverityCount(
+                    startDate: "2024-01-01"
+                    endDate: "2024-01-31"
+                    groupBy: DAY
+                ) {
+                    date
+                    severity
+                    count
+                }
+            }
+        """
+        result = execute_graphql(query)
+        self.assertIsNone(result.errors)
+        self.assertIsNotNone(result.data["calendarIncidentsBySeverityCount"])
+        self.assertGreater(len(result.data["calendarIncidentsBySeverityCount"]), 0)

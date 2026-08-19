@@ -4,6 +4,8 @@ from unittest.mock import patch
 from django.conf import settings
 from django.test import TestCase, TransactionTestCase
 from django.utils.timezone import now
+from strawberry import UNSET
+from strawberry.types.maybe import Some
 
 from common.enums import (
     ClearanceType,
@@ -20,6 +22,7 @@ from common.models import (
     UserClearance,
     UserVerificationCode,
 )
+from common.schema.inputs import UserInput
 from common.tasks import (
     cleanup_expired_verification_codes,
     cleanup_temporary_media_task,
@@ -92,6 +95,18 @@ class CommonModelTests(TestCase):
         ]:
             start_time = get_default_start_time(grouping)
             self.assertIsNotNone(start_time)
+
+
+class TestDateUtilities(TestCase):
+    def test_get_default_start_time_with_daily_grouping(self):
+        today = date.today()
+        expected = today - timedelta(days=365)
+        self.assertEqual(get_default_start_time(DateGroupings.DAY), expected)
+
+    def test_get_default_start_time_with_weekly_grouping(self):
+        today = date.today()
+        expected = (today - timedelta(days=today.weekday())) - timedelta(days=56)
+        self.assertEqual(get_default_start_time(DateGroupings.WEEK), expected)
 
 
 class CleanupExpiredVerificationCodesTaskTests(TestCase):
@@ -719,3 +734,38 @@ class SpottingDataPublicMigrationTests(TransactionTestCase):
             firebase_id="post-migration-uid", nickname="PostMigrationUser"
         )
         self.assertFalse(user.spotting_data_public)
+
+
+class TestUserInput(TestCase):
+    def test_user_input_omitted_spotting_data_preserves_db_value(self):
+        from rosak.tests.test_schema import assert_maybe_field_behavior
+
+        assert_maybe_field_behavior(
+            input_class=UserInput,
+            field_name="spotting_data_public",
+            test_cases=[
+                ({"nickname": "test"}, UNSET),
+            ],
+        )
+
+    def test_user_input_explicit_null_clears_field(self):
+        from rosak.tests.test_schema import assert_maybe_field_behavior
+
+        assert_maybe_field_behavior(
+            input_class=UserInput,
+            field_name="spotting_data_public",
+            test_cases=[
+                ({"nickname": "test", "spottingDataPublic": None}, Some(None)),
+            ],
+        )
+
+    def test_user_input_explicit_true_updates_field(self):
+        from rosak.tests.test_schema import assert_maybe_field_behavior
+
+        assert_maybe_field_behavior(
+            input_class=UserInput,
+            field_name="spotting_data_public",
+            test_cases=[
+                ({"nickname": "test", "spottingDataPublic": True}, Some(True)),
+            ],
+        )

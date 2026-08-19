@@ -1,14 +1,13 @@
-from typing import Optional
-
 import strawberry
+from strawberry.types.maybe import Maybe
 
 
 @strawberry.input
 class WebLocationInput:
-    accuracy: Optional[float] = strawberry.UNSET
-    altitude_accuracy: Optional[float] = strawberry.UNSET
-    heading: Optional[float] = strawberry.UNSET
-    speed: Optional[float] = strawberry.UNSET
-    latitude: Optional[float] = strawberry.UNSET
-    longitude: Optional[float] = strawberry.UNSET
-    altitude: Optional[float] = strawberry.UNSET
+    accuracy: Maybe[float | None] = strawberry.UNSET
+    altitude_accuracy: Maybe[float | None] = strawberry.UNSET
+    heading: Maybe[float | None] = strawberry.UNSET
+    speed: Maybe[float | None] = strawberry.UNSET
+    latitude: Maybe[float | None] = strawberry.UNSET
+    longitude: Maybe[float | None] = strawberry.UNSET
+    altitude: Maybe[float | None] = strawberry.UNSET

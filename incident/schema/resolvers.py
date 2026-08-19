@@ -5,6 +5,7 @@ from typing import List
 import pendulum
 import strawberry
 from django.db.models import Count, Min, Q
+from strawberry.exceptions import GraphQLError
 
 from incident.enums import CalendarIncidentSeverity
 from incident.models import CalendarIncident
@@ -19,24 +20,27 @@ class GroupByEnum(Enum):
 
 async def get_calendar_incidents_by_severity_count(
     root,
-    start_date: date,
-    end_date: date,
-    group_by: GroupByEnum,
+    start_date: strawberry.Maybe[date] = None,
+    end_date: strawberry.Maybe[date] = None,
+    group_by: GroupByEnum = GroupByEnum.DAY,
 ) -> List[CalendarIncidentGroupByDateSeverityScalar]:
-    assert start_date != strawberry.UNSET and end_date != strawberry.UNSET
+    if (
+        start_date is None
+        or end_date is None
+        or start_date == strawberry.UNSET
+        or end_date == strawberry.UNSET
+    ):
+        raise GraphQLError("start_date and end_date required")
+
+    start = start_date.value
+    end = end_date.value
 
     return_list = []
     qs = CalendarIncident.objects.filter(
-        Q(
-            Q(start_datetime__date__lte=end_date)
-            & Q(start_datetime__date__gte=start_date)
-        )
+        Q(Q(start_datetime__date__lte=end) & Q(start_datetime__date__gte=start))
         & Q(
             Q(end_datetime__isnull=True)
-            | Q(
-                Q(end_datetime__date__gte=start_date)
-                & Q(end_datetime__date__lte=end_date)
-            )
+            | Q(Q(end_datetime__date__gte=start) & Q(end_datetime__date__lte=end))
         )
     )
     min = (await qs.aaggregate(min=Min("start_datetime__date")))["min"]
@@ -46,8 +50,8 @@ async def get_calendar_incidents_by_severity_count(
         return []
 
     interval = pendulum.interval(
-        min if start_date > min else start_date,
-        today if today < end_date else end_date,
+        min if start > min else start,
+        today if today < end else end,
     )
 
     aggregations = {}
