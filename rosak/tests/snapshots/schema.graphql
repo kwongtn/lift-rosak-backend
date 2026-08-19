@@ -50,6 +50,13 @@ type CalendarIncidentChronologyScalar {
   sourceUrl: String
 }
 
+input CalendarIncidentDateFilter {
+  range: DateRangeInput
+  exact: Date
+  month: IntExactInput
+  year: IntExactInput
+}
+
 input CalendarIncidentFilter {
   id: ID
   severity: String
@@ -57,7 +64,7 @@ input CalendarIncidentFilter {
   OR: CalendarIncidentFilter
   NOT: CalendarIncidentFilter
   DISTINCT: Boolean
-  date: DateDateFilterLookup
+  date: CalendarIncidentDateFilter
 }
 
 type CalendarIncidentGroupByDateSeverityScalar {
@@ -99,42 +106,6 @@ type CalendarIncidentScalar {
 """Date (isoformat)"""
 scalar Date
 
-input DateDateFilterLookup {
-  """Exact match. Filter will be skipped on `null` value"""
-  exact: Date
-
-  """Assignment test. Filter will be skipped on `null` value"""
-  isNull: Boolean
-
-  """
-  Exact match of items in a given list. Filter will be skipped on `null` value
-  """
-  inList: [Date!]
-
-  """Greater than. Filter will be skipped on `null` value"""
-  gt: Date
-
-  """Greater than or equal to. Filter will be skipped on `null` value"""
-  gte: Date
-
-  """Less than. Filter will be skipped on `null` value"""
-  lt: Date
-
-  """Less than or equal to. Filter will be skipped on `null` value"""
-  lte: Date
-
-  """Inclusive range test (between)"""
-  range: DateRangeLookup
-  year: IntComparisonFilterLookup
-  month: IntComparisonFilterLookup
-  day: IntComparisonFilterLookup
-  weekDay: IntComparisonFilterLookup
-  isoWeekDay: IntComparisonFilterLookup
-  week: IntComparisonFilterLookup
-  isoYear: IntComparisonFilterLookup
-  quarter: IntComparisonFilterLookup
-}
-
 enum DateGroupings {
   YEAR
   MONTH
@@ -142,9 +113,9 @@ enum DateGroupings {
   DAY
 }
 
-input DateRangeLookup {
-  start: Date = null
-  end: Date = null
+input DateRangeInput {
+  start: Date
+  end: Date
 }
 
 """Date with time (isoformat)"""
@@ -357,6 +328,10 @@ input IntComparisonFilterLookup {
   range: IntRangeLookup
 }
 
+input IntExactInput {
+  exact: Int
+}
+
 input IntRangeLookup {
   start: Int = null
   end: Int = null
@@ -439,10 +414,10 @@ type LocationEvent {
 }
 
 input LocationFilter {
-  id: ID!
-  busId: ID!
-  dtReceivedRange: [DateTime!]!
-  dtGpsRange: [DateTime!]!
+  id: ID
+  busId: ID
+  dtReceivedRange: [DateTime!]
+  dtGpsRange: [DateTime!]
   AND: LocationFilter
   OR: LocationFilter
   NOT: LocationFilter
@@ -596,10 +571,10 @@ type Query {
   vehicleIncidents(filters: VehicleIncidentFilter): [VehicleIncident!]!
   stationIncidents(filters: StationIncidentFilter): [StationIncident!]!
   calendarIncidents(filters: CalendarIncidentFilter, order: CalendarIncidentOrder): [CalendarIncidentScalar!]!
-  calendarIncidentsBySeverityCount(startDate: Date!, endDate: Date!, groupBy: GroupByEnum!): [CalendarIncidentGroupByDateSeverityScalar!]!
+  calendarIncidentsBySeverityCount(startDate: Date, endDate: Date, groupBy: GroupByEnum! = DAY): [CalendarIncidentGroupByDateSeverityScalar!]!
   locations(filters: LocationFilter, order: LocationOrder, pagination: OffsetPaginationInput): [Location!]!
   buses(order: BusOrder, pagination: OffsetPaginationInput): [Bus!]!
-  locationsCount(filters: LocationFilter = null): Int!
+  locationsCount(filters: LocationFilter): Int!
 }
 
 type Source {

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 
 import strawberry
 import strawberry_django
@@ -23,21 +23,24 @@ class JejakScalars:
     async def locations(
         self,
         info: strawberry.types.Info,
-        filters: Optional[LocationFilter] = strawberry.UNSET,
-        order: Optional[LocationOrder] = strawberry.UNSET,
-        pagination: Optional[OffsetPaginationInput] = strawberry.UNSET,
+        filters: strawberry.Maybe[LocationFilter] = None,
+        order: strawberry.Maybe[LocationOrder] = None,
+        pagination: strawberry.Maybe[OffsetPaginationInput] = None,
     ) -> List[Location]:
         if not getattr(settings, "JEJAK_ENABLED", False):
             raise Exception("Jejak service unavailable")
 
         try:
             qs = LocationModel.objects.all()
-            if filters is not None and filters != strawberry.UNSET:
-                qs = strawberry_django.filters.apply(filters, qs, info)
-            if order is not None and order != strawberry.UNSET:
-                qs = strawberry_django.ordering.apply(order, qs)
-            if pagination is not None and pagination != strawberry.UNSET:
-                qs = strawberry_django.pagination.apply(pagination, qs)
+            if filters is not None:
+                filters_val = filters.value
+                qs = strawberry_django.filters.apply(filters_val, qs, info)
+            if order is not None:
+                order_val = order.value
+                qs = strawberry_django.ordering.apply(order_val, qs)
+            if pagination is not None:
+                pagination_val = pagination.value
+                qs = strawberry_django.pagination.apply(pagination_val, qs)
             return [loc async for loc in qs]
         except (OperationalError, DatabaseError) as e:
             raise Exception(f"Jejak database unavailable: {str(e)}")
@@ -49,53 +52,58 @@ class JejakScalars:
     async def buses(
         self,
         info: strawberry.types.Info,
-        order: Optional[BusOrder] = strawberry.UNSET,
-        pagination: Optional[OffsetPaginationInput] = strawberry.UNSET,
+        order: strawberry.Maybe[BusOrder] = None,
+        pagination: strawberry.Maybe[OffsetPaginationInput] = None,
     ) -> List[Bus]:
         if not getattr(settings, "JEJAK_ENABLED", False):
             raise Exception("Jejak service unavailable")
 
         try:
             qs = BusModel.objects.all()
-            if order is not None and order != strawberry.UNSET:
-                qs = strawberry_django.ordering.apply(order, qs)
-            if pagination is not None and pagination != strawberry.UNSET:
-                qs = strawberry_django.pagination.apply(pagination, qs)
+            if order is not None:
+                order_val = order.value
+                qs = strawberry_django.ordering.apply(order_val, qs)
+            if pagination is not None:
+                pagination_val = pagination.value
+                qs = strawberry_django.pagination.apply(pagination_val, qs)
             return [bus async for bus in qs]
         except (OperationalError, DatabaseError) as e:
             raise Exception(f"Jejak database unavailable: {str(e)}")
 
     @strawberry.field
-    async def locations_count(self, filters: Optional[LocationFilter] = None) -> int:
+    async def locations_count(
+        self, filters: strawberry.Maybe[LocationFilter] = None
+    ) -> int:
         if not getattr(settings, "JEJAK_ENABLED", False):
             raise Exception("Jejak service unavailable")
 
         if filters is None:
             return 0
 
+        filters_val = filters.value
         query_dict = {}
 
-        if filters.bus_id is not None and filters.bus_id != strawberry.UNSET:
-            query_dict["bus_id"] = filters.bus_id
+        if filters_val.bus_id is not None:
+            query_dict["bus_id"] = filters_val.bus_id.value
 
         if (
-            filters.dt_received_range is not None
-            and filters.dt_received_range != strawberry.UNSET
-            and len(filters.dt_received_range) > 0
+            filters_val.dt_received_range is not None
+            and len(filters_val.dt_received_range.value) > 0
         ):
+            dt_received_range = filters_val.dt_received_range.value
             query_dict["dt_received__range"] = (
-                min(filters.dt_received_range),
-                max(filters.dt_received_range),
+                min(dt_received_range),
+                max(dt_received_range),
             )
 
         if (
-            filters.dt_gps_range is not None
-            and filters.dt_gps_range != strawberry.UNSET
-            and len(filters.dt_gps_range) > 0
+            filters_val.dt_gps_range is not None
+            and len(filters_val.dt_gps_range.value) > 0
         ):
+            dt_gps_range = filters_val.dt_gps_range.value
             query_dict["dt_gps__range"] = (
-                min(filters.dt_gps_range),
-                max(filters.dt_gps_range),
+                min(dt_gps_range),
+                max(dt_gps_range),
             )
 
         if not query_dict:

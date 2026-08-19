@@ -882,3 +882,257 @@ class TestEventInput(TestCase):
                 ),
             ],
         )
+
+
+class TestAddEventMutation(TestCase):
+    """Maybe[T] migration tests for the add_event mutation.
+
+    Maybe semantics: omitted -> UNSET, explicit null -> Some(None),
+    provided value -> Some(value). The mutation must unwrap Some via
+    `.value` and must not pass Some/UNSET objects to the ORM.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create(
+            firebase_id="add-event-user-1",
+            nickname="AddEventSpotter",
+        )
+        self.line = Line.objects.create(
+            code="PJL",
+            display_name="Putrajaya Line",
+            display_color="#f0ad4e",
+        )
+        self.station1 = Station.objects.create(
+            display_name="Tun Razak Exchange",
+            location=Point(101.7100, 3.1420),
+        )
+        self.station2 = Station.objects.create(
+            display_name="Chan Sow Lin",
+            location=Point(101.7166, 3.1276),
+        )
+        self.station_line1 = StationLine.objects.create(
+            station=self.station1,
+            line=self.line,
+            display_name="TRX PY",
+            internal_representation="PY20",
+        )
+        self.station_line2 = StationLine.objects.create(
+            station=self.station2,
+            line=self.line,
+            display_name="Chan Sow Lin PY",
+            internal_representation="PY24",
+        )
+        self.v_type = VehicleType.objects.create(
+            internal_name="PYL_HYUNDAI",
+            display_name="Hyundai Rotem",
+        )
+        self.vehicle = Vehicle.objects.create(
+            identification_no="Set 60",
+            vehicle_type=self.v_type,
+            status=VehicleStatus.IN_SERVICE,
+        )
+        EventSource.objects.get_or_create(
+            name="SITE",
+            defaults={"description": "Web app"},
+        )
+
+        self.mutation = """
+            mutation AddEvent($input: EventInput!) {
+                addEvent(input: $input) {
+                    id
+                    spottingDate
+                    type
+                    status
+                    notes
+                    runNumber
+                    wheelStatus
+                    originStation {
+                        id
+                        displayName
+                    }
+                    destinationStation {
+                        id
+                        displayName
+                    }
+                    location {
+                        accuracy
+                        altitude
+                        altitudeAccuracy
+                        heading
+                        speed
+                    }
+                }
+            }
+        """
+
+    async def test_add_event_minimal_required_fields_only(self):
+        variables = {
+            "input": {
+                "spottingDate": "2024-06-01",
+                "vehicle": str(self.vehicle.id),
+                "type": SpottingEventType.JUST_SPOTTING,
+                "status": SpottingVehicleStatus.IN_SERVICE,
+            }
+        }
+
+        result = await execute_graphql_async(
+            self.mutation, variables=variables, user=self.user
+        )
+        self.assertIsNone(result.errors)
+        self.assertIsNotNone(result.data)
+
+        event_data = result.data["addEvent"]
+        self.assertEqual(event_data["notes"], "")
+        self.assertIsNone(event_data["runNumber"])
+        self.assertIsNone(event_data["wheelStatus"])
+        self.assertIsNone(event_data["originStation"])
+        self.assertIsNone(event_data["destinationStation"])
+        self.assertIsNone(event_data["location"])
+
+        event = await Event.objects.aget(id=int(event_data["id"]))
+        self.assertEqual(event.notes, "")
+        self.assertFalse(event.is_anonymous)
+        self.assertIsNone(event.wheel_status)
+        self.assertIsNone(event.run_number)
+        self.assertIsNone(event.origin_station_id)
+        self.assertIsNone(event.destination_station_id)
+        self.assertFalse(await LocationEvent.objects.filter(event=event).aexists())
+
+    async def test_add_event_with_partial_location_coordinates(self):
+        variables = {
+            "input": {
+                "spottingDate": "2024-06-02",
+                "vehicle": str(self.vehicle.id),
+                "type": SpottingEventType.LOCATION,
+                "status": SpottingVehicleStatus.IN_SERVICE,
+                "location": {
+                    "latitude": 3.1420,
+                    "longitude": 101.7100,
+                },
+            }
+        }
+
+        result = await execute_graphql_async(
+            self.mutation, variables=variables, user=self.user
+        )
+        self.assertIsNone(result.errors)
+        self.assertIsNotNone(result.data)
+
+        event_data = result.data["addEvent"]
+        self.assertIsNotNone(event_data["location"])
+        self.assertIsNone(event_data["location"]["accuracy"])
+        self.assertIsNone(event_data["location"]["altitude"])
+        self.assertIsNone(event_data["location"]["altitudeAccuracy"])
+        self.assertIsNone(event_data["location"]["heading"])
+        self.assertIsNone(event_data["location"]["speed"])
+
+        location_event = await LocationEvent.objects.aget(
+            event_id=int(event_data["id"])
+        )
+        self.assertEqual(location_event.location.coords, (101.7100, 3.1420))
+        self.assertIsNone(location_event.accuracy)
+        self.assertIsNone(location_event.altitude)
+        self.assertIsNone(location_event.altitude_accuracy)
+        self.assertIsNone(location_event.heading)
+        self.assertIsNone(location_event.speed)
+
+    async def test_add_event_omitted_notes_defaults_to_empty(self):
+        variables = {
+            "input": {
+                "spottingDate": "2024-06-03",
+                "vehicle": str(self.vehicle.id),
+                "type": SpottingEventType.JUST_SPOTTING,
+                "status": SpottingVehicleStatus.IN_SERVICE,
+            }
+        }
+
+        result = await execute_graphql_async(
+            self.mutation, variables=variables, user=self.user
+        )
+        self.assertIsNone(result.errors)
+        self.assertIsNotNone(result.data)
+
+        event_data = result.data["addEvent"]
+        self.assertEqual(event_data["notes"], "")
+
+        event = await Event.objects.aget(id=int(event_data["id"]))
+        self.assertEqual(event.notes, "")
+
+    async def test_add_event_explicit_null_location_skips_gps(self):
+        variables = {
+            "input": {
+                "spottingDate": "2024-06-04",
+                "vehicle": str(self.vehicle.id),
+                "type": SpottingEventType.JUST_SPOTTING,
+                "status": SpottingVehicleStatus.IN_SERVICE,
+                "location": None,
+            }
+        }
+
+        result = await execute_graphql_async(
+            self.mutation, variables=variables, user=self.user
+        )
+        self.assertIsNone(result.errors)
+        self.assertIsNotNone(result.data)
+
+        event_data = result.data["addEvent"]
+        self.assertIsNone(event_data["location"])
+        self.assertFalse(
+            await LocationEvent.objects.filter(event_id=int(event_data["id"])).aexists()
+        )
+
+    async def test_add_event_with_all_optional_fields(self):
+        variables = {
+            "input": {
+                "spottingDate": "2024-06-05",
+                "vehicle": str(self.vehicle.id),
+                "type": SpottingEventType.BETWEEN_STATIONS,
+                "status": SpottingVehicleStatus.IN_SERVICE,
+                "notes": "Full optional coverage",
+                "runNumber": "RN-99",
+                "wheelStatus": SpottingWheelStatus.WORN_OUT,
+                "isAnonymous": True,
+                "originStation": str(self.station_line1.id),
+                "destinationStation": str(self.station_line2.id),
+                "location": {
+                    "latitude": 3.1420,
+                    "longitude": 101.7100,
+                    "accuracy": 4.5,
+                    "altitude": 33.2,
+                    "altitudeAccuracy": 1.5,
+                    "heading": 270.0,
+                    "speed": 22.5,
+                },
+            }
+        }
+
+        result = await execute_graphql_async(
+            self.mutation, variables=variables, user=self.user
+        )
+        self.assertIsNone(result.errors)
+        self.assertIsNotNone(result.data)
+
+        event_data = result.data["addEvent"]
+        self.assertEqual(event_data["notes"], "Full optional coverage")
+        self.assertEqual(event_data["runNumber"], "RN-99")
+        self.assertEqual(event_data["wheelStatus"], SpottingWheelStatus.WORN_OUT)
+        self.assertEqual(event_data["originStation"]["id"], str(self.station1.id))
+        self.assertEqual(event_data["destinationStation"]["id"], str(self.station2.id))
+        self.assertEqual(event_data["location"]["accuracy"], 4.5)
+        self.assertEqual(event_data["location"]["altitude"], 33.2)
+        self.assertEqual(event_data["location"]["altitudeAccuracy"], 1.5)
+        self.assertEqual(event_data["location"]["heading"], 270.0)
+        self.assertEqual(event_data["location"]["speed"], 22.5)
+
+        event = await Event.objects.aget(id=int(event_data["id"]))
+        self.assertTrue(event.is_anonymous)
+        self.assertEqual(event.origin_station_id, self.station1.id)
+        self.assertEqual(event.destination_station_id, self.station2.id)
+
+        location_event = await LocationEvent.objects.aget(event_id=event.id)
+        self.assertEqual(location_event.location.coords, (101.7100, 3.1420))
+        self.assertEqual(float(location_event.accuracy), 4.5)
+        self.assertEqual(float(location_event.altitude), 33.2)
+        self.assertEqual(float(location_event.altitude_accuracy), 1.5)
+        self.assertEqual(float(location_event.heading), 270.0)
+        self.assertEqual(float(location_event.speed), 22.5)

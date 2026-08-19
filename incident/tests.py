@@ -7,6 +7,8 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 from dotmap import DotMap
+from graphql import GraphQLError
+from strawberry.types.maybe import Some
 
 from common.models import Media, User
 from incident.enums import (
@@ -508,3 +510,105 @@ class TestCalendarIncidentResolvers(TestCase):
         self.assertIsNone(result.errors)
         self.assertIsNotNone(result.data["calendarIncidentsBySeverityCount"])
         self.assertGreater(len(result.data["calendarIncidentsBySeverityCount"]), 0)
+
+
+class TestCalendarIncidentFilter(TestCase):
+    def setUp(self):
+        self.incident_jan = CalendarIncident.objects.create(
+            title="January overlap",
+            brief="Runs Jan 10-12",
+            severity=CalendarIncidentSeverity.MINOR,
+            start_datetime=datetime(2024, 1, 10, 8, 0),
+            end_datetime=datetime(2024, 1, 12, 8, 0),
+        )
+        self.incident_ongoing_jan = CalendarIncident.objects.create(
+            title="Ongoing from January",
+            brief="Started Jan 20, no end date",
+            severity=CalendarIncidentSeverity.MAJOR,
+            start_datetime=datetime(2024, 1, 20, 8, 0),
+            end_datetime=None,
+        )
+        self.incident_jun = CalendarIncident.objects.create(
+            title="June incident",
+            brief="Runs Jun 1-2",
+            severity=CalendarIncidentSeverity.MINOR,
+            start_datetime=datetime(2024, 6, 1, 8, 0),
+            end_datetime=datetime(2024, 6, 2, 8, 0),
+        )
+
+    def _apply_date_filter(self, date_input):
+        from incident.schema.filters import CalendarIncidentFilter
+
+        filter_method = vars(CalendarIncidentFilter)["date"]
+        q = filter_method(CalendarIncidentFilter(), value=date_input, prefix="")
+        return CalendarIncident.objects.filter(q)
+
+    def test_filter_date_range_both_start_end(self):
+        from incident.schema.filters import CalendarIncidentDateFilter, DateRangeInput
+
+        date_input = CalendarIncidentDateFilter(
+            range=Some(
+                DateRangeInput(
+                    start=Some(date(2024, 1, 1)),
+                    end=Some(date(2024, 1, 31)),
+                )
+            )
+        )
+        results = self._apply_date_filter(date_input)
+        self.assertIn(self.incident_jan, results)
+        self.assertIn(self.incident_ongoing_jan, results)
+        self.assertNotIn(self.incident_jun, results)
+
+    def test_filter_date_exact(self):
+        from incident.schema.filters import CalendarIncidentDateFilter
+
+        date_input = CalendarIncidentDateFilter(exact=Some(date(2024, 1, 25)))
+        results = self._apply_date_filter(date_input)
+        self.assertNotIn(self.incident_jan, results)
+        self.assertIn(self.incident_ongoing_jan, results)
+        self.assertNotIn(self.incident_jun, results)
+
+    def test_filter_month_exact(self):
+        from incident.schema.filters import CalendarIncidentDateFilter, IntExactInput
+
+        date_input = CalendarIncidentDateFilter(
+            month=Some(IntExactInput(exact=Some(6)))
+        )
+        results = self._apply_date_filter(date_input)
+        self.assertNotIn(self.incident_jan, results)
+        self.assertIn(self.incident_ongoing_jan, results)
+        self.assertNotIn(self.incident_jun, results)
+
+    def test_filter_year_exact(self):
+        from incident.schema.filters import CalendarIncidentDateFilter, IntExactInput
+
+        incident_2025 = CalendarIncident.objects.create(
+            title="Future 2025 incident",
+            brief="Runs in 2025",
+            severity=CalendarIncidentSeverity.MINOR,
+            start_datetime=datetime(2025, 1, 1, 8, 0),
+            end_datetime=datetime(2025, 1, 2, 8, 0),
+        )
+        date_input = CalendarIncidentDateFilter(
+            year=Some(IntExactInput(exact=Some(2024)))
+        )
+        results = self._apply_date_filter(date_input)
+        self.assertIn(self.incident_jan, results)
+        self.assertIn(self.incident_ongoing_jan, results)
+        self.assertIn(self.incident_jun, results)
+        self.assertNotIn(incident_2025, results)
+
+    def test_filter_invalid_range_missing_start_raises_error(self):
+        from incident.schema.filters import CalendarIncidentDateFilter, DateRangeInput
+
+        date_input = CalendarIncidentDateFilter(
+            range=Some(
+                DateRangeInput(
+                    start=None,
+                    end=Some(date(2024, 1, 31)),
+                )
+            )
+        )
+        with self.assertRaises(GraphQLError) as ctx:
+            self._apply_date_filter(date_input)
+        self.assertIn("date range requires both start and end", str(ctx.exception))

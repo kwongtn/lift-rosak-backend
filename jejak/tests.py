@@ -1,11 +1,14 @@
+import inspect
 from datetime import datetime, timezone
 
-import strawberry
 from django.contrib.gis.geos import Point
 from django.contrib.postgres.indexes import GistIndex
 from django.db import connection, models
 from django.test import TestCase, override_settings
 from psycopg2.extras import DateTimeTZRange
+from strawberry import Some
+from strawberry_django.ordering import Ordering
+from strawberry_django.pagination import OffsetPaginationInput
 
 from jejak.models import (
     Accessibility,
@@ -21,6 +24,7 @@ from jejak.models import (
     TripRevBusRange,
 )
 from jejak.schema.filters import LocationFilter
+from jejak.schema.orderings import BusOrder
 from jejak.schema.schema import JejakScalars
 from rosak.tests import execute_graphql_async
 
@@ -216,74 +220,61 @@ class JejakLocationsCountTests(TestCase):
         self.assertEqual(count, 0)
 
     async def test_locations_count_empty_filter_returns_zero(self):
-        f = LocationFilter(
-            id=strawberry.UNSET,
-            bus_id=strawberry.UNSET,
-            dt_received_range=strawberry.UNSET,
-            dt_gps_range=strawberry.UNSET,
-        )
-        count = await self.scalar.locations_count(filters=f)
+        count = await self.scalar.locations_count(filters=Some(LocationFilter()))
         self.assertEqual(count, 0)
 
     async def test_locations_count_with_bus_id_only(self):
-        f = LocationFilter(
-            id=strawberry.UNSET,
-            bus_id=str(self.bus1.id),
-            dt_received_range=strawberry.UNSET,
-            dt_gps_range=strawberry.UNSET,
-        )
-        count = await self.scalar.locations_count(filters=f)
+        f = LocationFilter(bus_id=Some(str(self.bus1.id)))
+        count = await self.scalar.locations_count(filters=Some(f))
         self.assertEqual(count, 2)
 
-        f2 = LocationFilter(
-            id=strawberry.UNSET,
-            bus_id=str(self.bus2.id),
-            dt_received_range=strawberry.UNSET,
-            dt_gps_range=strawberry.UNSET,
-        )
-        count2 = await self.scalar.locations_count(filters=f2)
+        f2 = LocationFilter(bus_id=Some(str(self.bus2.id)))
+        count2 = await self.scalar.locations_count(filters=Some(f2))
         self.assertEqual(count2, 1)
 
     async def test_locations_count_with_bus_id_and_dt_gps_range(self):
         f = LocationFilter(
-            id=strawberry.UNSET,
-            bus_id=str(self.bus1.id),
-            dt_received_range=strawberry.UNSET,
-            dt_gps_range=[
-                datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc),
-                datetime(2024, 1, 1, 10, 30, 0, tzinfo=timezone.utc),
-            ],
+            bus_id=Some(str(self.bus1.id)),
+            dt_gps_range=Some(
+                [
+                    datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc),
+                    datetime(2024, 1, 1, 10, 30, 0, tzinfo=timezone.utc),
+                ]
+            ),
         )
-        count = await self.scalar.locations_count(filters=f)
+        count = await self.scalar.locations_count(filters=Some(f))
         self.assertEqual(count, 1)
 
     async def test_locations_count_with_bus_id_and_dt_received_range(self):
         f = LocationFilter(
-            id=strawberry.UNSET,
-            bus_id=str(self.bus1.id),
-            dt_received_range=[
-                datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc),
-                datetime(2024, 1, 1, 13, 0, 0, tzinfo=timezone.utc),
-            ],
-            dt_gps_range=strawberry.UNSET,
+            bus_id=Some(str(self.bus1.id)),
+            dt_received_range=Some(
+                [
+                    datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc),
+                    datetime(2024, 1, 1, 13, 0, 0, tzinfo=timezone.utc),
+                ]
+            ),
         )
-        count = await self.scalar.locations_count(filters=f)
+        count = await self.scalar.locations_count(filters=Some(f))
         self.assertEqual(count, 1)
 
     async def test_locations_count_with_all_fields(self):
         f = LocationFilter(
-            id=strawberry.UNSET,
-            bus_id=str(self.bus1.id),
-            dt_received_range=[
-                datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc),
-                datetime(2024, 1, 1, 13, 0, 0, tzinfo=timezone.utc),
-            ],
-            dt_gps_range=[
-                datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc),
-                datetime(2024, 1, 1, 10, 30, 0, tzinfo=timezone.utc),
-            ],
+            bus_id=Some(str(self.bus1.id)),
+            dt_received_range=Some(
+                [
+                    datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc),
+                    datetime(2024, 1, 1, 13, 0, 0, tzinfo=timezone.utc),
+                ]
+            ),
+            dt_gps_range=Some(
+                [
+                    datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc),
+                    datetime(2024, 1, 1, 10, 30, 0, tzinfo=timezone.utc),
+                ]
+            ),
         )
-        count = await self.scalar.locations_count(filters=f)
+        count = await self.scalar.locations_count(filters=Some(f))
         self.assertEqual(count, 1)
 
     async def test_locations_count_graphql_query_without_filters(self):
@@ -319,3 +310,96 @@ class JejakLocationsCountTests(TestCase):
         result = await execute_graphql_async(query, variables=variables)
         self.assertIsNone(result.errors)
         self.assertEqual(result.data["locationsCount"], 2)
+
+
+@override_settings(DATABASE_ROUTERS=[])
+class TestLocationResolvers(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        with connection.schema_editor() as editor:
+            editor.create_model(BusType)
+            editor.create_model(Bus)
+            editor.create_model(Location)
+
+        cls.bus1 = Bus.objects.create(identifier="BUS-101")
+        cls.bus2 = Bus.objects.create(identifier="BUS-102")
+
+        cls.loc1 = Location.objects.create(
+            bus=cls.bus1,
+            dt_received=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            dt_gps=datetime(2024, 1, 1, 9, 59, 0, tzinfo=timezone.utc),
+            location=Point(101.69, 3.14),
+            speed=30,
+        )
+        cls.loc2 = Location.objects.create(
+            bus=cls.bus1,
+            dt_received=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            dt_gps=datetime(2024, 1, 1, 11, 59, 0, tzinfo=timezone.utc),
+            location=Point(101.70, 3.15),
+            speed=40,
+        )
+        cls.loc3 = Location.objects.create(
+            bus=cls.bus2,
+            dt_received=datetime(2024, 1, 1, 14, 0, 0, tzinfo=timezone.utc),
+            dt_gps=datetime(2024, 1, 1, 13, 59, 0, tzinfo=timezone.utc),
+            location=Point(101.71, 3.16),
+            speed=50,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            with connection.schema_editor() as editor:
+                editor.delete_model(Location)
+                editor.delete_model(Bus)
+        except Exception:
+            pass
+        super().tearDownClass()
+
+    def setUp(self):
+        self.scalar = JejakScalars()
+
+    async def test_locations_query_omitted_filters_returns_all(self):
+        # Maybe semantics: omitted arguments must default to None, not UNSET
+        sig = inspect.signature(self.scalar.locations)
+        self.assertIsNone(sig.parameters["filters"].default)
+        self.assertIsNone(sig.parameters["order"].default)
+        self.assertIsNone(sig.parameters["pagination"].default)
+
+        results = await self.scalar.locations(info=None)
+        self.assertEqual(len(results), 3)
+
+    async def test_locations_query_with_bus_id_filter(self):
+        filters = LocationFilter(bus_id=Some(str(self.bus1.id)))
+        results = await self.scalar.locations(info=None, filters=Some(filters))
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(r.bus_id == self.bus1.id for r in results))
+
+    async def test_locations_count_with_date_range_filters(self):
+        filters = LocationFilter(
+            dt_received_range=Some(
+                [
+                    datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc),
+                    datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc),
+                ]
+            ),
+            dt_gps_range=Some(
+                [
+                    datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc),
+                    datetime(2024, 1, 1, 10, 30, 0, tzinfo=timezone.utc),
+                ]
+            ),
+        )
+        count = await self.scalar.locations_count(filters=Some(filters))
+        self.assertEqual(count, 1)
+
+    async def test_buses_query_with_order_and_pagination(self):
+        order = BusOrder(identifier=Ordering.DESC)
+        pagination = OffsetPaginationInput(offset=0, limit=1)
+        results = await self.scalar.buses(
+            info=None,
+            order=Some(order),
+            pagination=Some(pagination),
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].identifier, "BUS-102")

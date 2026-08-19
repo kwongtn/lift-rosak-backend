@@ -1,5 +1,6 @@
 import typing
 from datetime import timedelta
+from typing import Any, Optional
 
 import strawberry
 import strawberry_django
@@ -18,6 +19,18 @@ from spotting.schema.inputs import DeleteEventInput, EventInput, MarkEventAsRead
 from spotting.schema.orderings import EventOrder
 from spotting.schema.resolvers import get_events_count
 from spotting.schema.scalars import EventScalar
+
+
+def _maybe_value(maybe_field: Any, default: Optional[Any] = None) -> Any:
+    """Unwrap a Strawberry Maybe field.
+
+    Returns `default` when the field was omitted (UNSET) or is a plain
+    None; otherwise returns the wrapped payload (`Some(value)` -> `value`,
+    `Some(None)` -> `None`).
+    """
+    if maybe_field is None or maybe_field is strawberry.UNSET:
+        return default
+    return maybe_field.value
 
 
 @strawberry.type
@@ -68,11 +81,12 @@ class SpottingMutations:
     def add_event(self, input: EventInput, info: Info) -> EventScalar:
         user_id = info.context.user.id
 
-        notes = input.notes if input.notes != strawberry.UNSET else ""
-        is_anonymous = (
-            input.is_anonymous if input.is_anonymous != strawberry.UNSET else False
-        )
-        wheel_status = input.wheel_status if input.notes != strawberry.UNSET else None
+        notes = _maybe_value(input.notes, "")
+        is_anonymous = _maybe_value(input.is_anonymous, False)
+        wheel_status = _maybe_value(input.wheel_status, None)
+        run_number = _maybe_value(input.run_number, None)
+        origin_station_input = _maybe_value(input.origin_station, None)
+        destination_station_input = _maybe_value(input.destination_station, None)
 
         origin_station_id = None
         destination_station_id = None
@@ -80,28 +94,30 @@ class SpottingMutations:
             station_line_dict = {
                 str(station_line.id): station_line.station_id
                 for station_line in StationLine.objects.filter(
-                    id__in=[input.origin_station, input.destination_station]
+                    id__in=[
+                        station_line_id
+                        for station_line_id in (
+                            origin_station_input,
+                            destination_station_input,
+                        )
+                        if station_line_id is not None
+                    ]
                 )
             }
 
-            origin_station_id = (
-                station_line_dict[str(input.origin_station)]
-                if input.origin_station != strawberry.UNSET
-                else None
-            )
+            if origin_station_input is not None:
+                origin_station_id = station_line_dict[str(origin_station_input)]
 
-            destination_station_id = (
-                station_line_dict[str(input.destination_station)]
-                if input.destination_station != strawberry.UNSET
-                else None
-            )
+            if destination_station_input is not None:
+                destination_station_id = station_line_dict[
+                    str(destination_station_input)
+                ]
 
         if input.type == SpottingEventType.AT_STATION:
-            origin_station_id = (
-                StationLine.objects.get(id=input.origin_station).station_id
-                if input.origin_station != strawberry.UNSET
-                else None
-            )
+            if origin_station_input is not None:
+                origin_station_id = StationLine.objects.get(
+                    id=origin_station_input
+                ).station_id
 
         event_source = models.EventSource.objects.filter(
             name=SpottingDataSource.SITE
@@ -117,39 +133,22 @@ class SpottingMutations:
             origin_station_id=origin_station_id,
             destination_station_id=destination_station_id,
             is_anonymous=is_anonymous,
-            run_number=input.run_number,
+            run_number=run_number,
             wheel_status=wheel_status,
             data_source_id=event_source.id,
         )
 
-        if input.location not in (strawberry.UNSET, None):
-            location_input = input.location
-            accuracy = (
-                location_input.accuracy
-                if location_input.accuracy != strawberry.UNSET
-                else None
-            )
-            altitude_accuracy = (
-                location_input.altitude_accuracy
-                if location_input.altitude_accuracy != strawberry.UNSET
-                else None
-            )
-            heading = (
-                location_input.heading
-                if location_input.heading != strawberry.UNSET
-                else None
-            )
-            speed = (
-                location_input.speed
-                if location_input.speed != strawberry.UNSET
-                else None
-            )
+        location_input = _maybe_value(input.location, None)
+        if location_input is not None:
+            accuracy = _maybe_value(location_input.accuracy, None)
+            altitude_accuracy = _maybe_value(location_input.altitude_accuracy, None)
+            heading = _maybe_value(location_input.heading, None)
+            speed = _maybe_value(location_input.speed, None)
+            altitude = _maybe_value(location_input.altitude, None)
 
-            location = Point(x=location_input.longitude, y=location_input.latitude)
-            altitude = (
-                location_input.altitude
-                if location_input.altitude != strawberry.UNSET
-                else None
+            location = Point(
+                x=location_input.longitude.value,
+                y=location_input.latitude.value,
             )
 
             models.LocationEvent.objects.create(
