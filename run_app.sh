@@ -7,8 +7,17 @@ python manage.py createcachetable
 python manage.py migrate
 python manage.py migrate --database=timescale
 
-export GIT_COMMIT_HASH=$(cat .git/refs/heads/main | head -c 8)
-export GIT_COMMIT_TIME=$(date -r .git/refs/heads/main -R)
+if [ -z "$GIT_COMMIT_HASH" ]; then
+    if [ -d .git ] && command -v git >/dev/null 2>&1; then
+        export GIT_COMMIT_HASH=$(git rev-parse --short=8 HEAD 2>/dev/null)
+    fi
+fi
+
+if [ -z "$GIT_COMMIT_TIME" ]; then
+    if [ -d .git ] && command -v git >/dev/null 2>&1; then
+        export GIT_COMMIT_TIME=$(git log -1 --format=%cd --date=rfc 2>/dev/null)
+    fi
+fi
 export PYTHONPATH=$(which python)
 
 if [ "$DEBUG" == 'True' ]; then

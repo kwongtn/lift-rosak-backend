@@ -1,9 +1,13 @@
 FROM python:3.12-slim-bookworm
 
 ARG ENVIRONMENT
+ARG GIT_COMMIT_HASH
+ARG GIT_COMMIT_TIME
 ENV PYTHONUNBUFFERED 1
 ENV UV_HTTP_TIMEOUT 300
 ENV GOOGLE_APPLICATION_CREDENTIALS /google-application-credential.json
+ENV GIT_COMMIT_HASH=$GIT_COMMIT_HASH
+ENV GIT_COMMIT_TIME=$GIT_COMMIT_TIME
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \

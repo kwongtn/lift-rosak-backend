@@ -46,6 +46,12 @@ jobs:
           tags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=short
 
+      - name: Extract git metadata
+        id: git_info
+        run: |
+          echo "commit_hash=$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "commit_time=$(git log -1 --format=%cd --date=rfc)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -53,6 +59,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           provenance: false
           push: true
+          build-args: |
+            GIT_COMMIT_HASH=${{ steps.git_info.outputs.commit_hash }}
+            GIT_COMMIT_TIME=${{ steps.git_info.outputs.commit_time }}
           tags: ${{ steps.meta.outputs.tags }}${{ !startsWith(steps.image_prefix.outputs.prefix, 'main') && format('-{0}', steps.image_prefix.outputs.prefix) || '' }}-${{ github.run_number }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

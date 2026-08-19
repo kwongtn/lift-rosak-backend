@@ -42,10 +42,11 @@ def git_version(request: HttpRequest):
     return HttpResponse(
         json.dumps(
             {
-                "hash": os.environ.get("GIT_COMMIT_HASH", "<<No hash data>>"),
-                "datetime": os.environ.get("GIT_COMMIT_TIME"),
+                "hash": os.environ.get("GIT_COMMIT_HASH") or "<<No hash data>>",
+                "datetime": os.environ.get("GIT_COMMIT_TIME") or "",
             }
-        )
+        ),
+        content_type="application/json",
     )
 
 
