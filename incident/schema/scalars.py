@@ -86,6 +86,7 @@ class CalendarIncidentScalar:
         from common.schema.scalars import MediaScalar
 
     id: strawberry.auto
+    created: datetime
     start_datetime: datetime
     end_datetime: Optional[datetime]
 
