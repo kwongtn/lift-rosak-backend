@@ -223,3 +223,6 @@ class UserVerificationCodeScalar:
 @strawberry.type
 class GenericMutationReturn:
     ok: bool
+    # Populated only by mutations that create a row and need to hand back its
+    # id (e.g. createCalendarIncident → submitCalendarIncident chaining).
+    id: int | None = None
