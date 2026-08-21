@@ -16,13 +16,22 @@ class ImgurClient(_ImgurClient):
         return headers
 
 
-client = ImgurClient(
-    client_id=settings.IMGUR_CONSUMER_ID,
-    client_secret=settings.IMGUR_CONSUMER_SECRET,
-    access_token=settings.IMGUR_ACCESS_TOKEN,
-    refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
-    api_url=settings.IMGUR_PROXY_API_URL,
-)
+client = None
+try:
+    if settings.IMGUR_CONSUMER_ID and settings.IMGUR_CONSUMER_SECRET:
+        client = ImgurClient(
+            client_id=settings.IMGUR_CONSUMER_ID,
+            client_secret=settings.IMGUR_CONSUMER_SECRET,
+            access_token=settings.IMGUR_ACCESS_TOKEN,
+            refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
+            api_url=settings.IMGUR_PROXY_API_URL or None,
+        )
+except Exception as e:
+    import logging
+
+    logging.getLogger(__name__).warning(
+        f"ImgurClient initialization skipped/failed: {e}"
+    )
 
 
 class ImgurImageFieldFile(ImageFieldFile):
@@ -37,7 +46,7 @@ class ImgurImageFieldFile(ImageFieldFile):
         dimensions = cache.get(cache_key)
         dimensions = None
 
-        if not dimensions:
+        if not dimensions and client:
             res = client.get_image(f"{id}.json")
             dimensions = (res.width, res.height)
             cache.set(cache_key, dimensions)

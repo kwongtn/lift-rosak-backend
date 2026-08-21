@@ -14,13 +14,21 @@ from common.models import TemporaryMedia
 from common.utils import FirebaseUser
 from spotting.models import Event
 
-s3 = boto3.resource(
-    "s3",
-    region_name=settings.AWS_S3_REGION_NAME,
-    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-    endpoint_url=settings.AWS_S3_ENDPOINT_URL,
-)
+
+def get_s3_resource():
+    kwargs = {}
+    if settings.AWS_S3_REGION_NAME:
+        kwargs["region_name"] = settings.AWS_S3_REGION_NAME
+    if settings.AWS_SECRET_ACCESS_KEY:
+        kwargs["aws_secret_access_key"] = settings.AWS_SECRET_ACCESS_KEY
+    if settings.AWS_ACCESS_KEY_ID:
+        kwargs["aws_access_key_id"] = settings.AWS_ACCESS_KEY_ID
+    if settings.AWS_S3_ENDPOINT_URL and not settings.AWS_S3_ENDPOINT_URL.startswith(
+        "https://.compat.objectstorage"
+    ):
+        kwargs["endpoint_url"] = settings.AWS_S3_ENDPOINT_URL
+
+    return boto3.resource("s3", **kwargs)
 
 
 class GenericUpload(APIView):

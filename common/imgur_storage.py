@@ -31,12 +31,16 @@ class ImgurStorage(Storage):
 
     def __init__(self, location="/"):
         try:
+            if not (settings.IMGUR_CONSUMER_ID and settings.IMGUR_CONSUMER_SECRET):
+                self.client = None
+                return
+
             self.client = ImgurClient(
                 client_id=settings.IMGUR_CONSUMER_ID,
                 client_secret=settings.IMGUR_CONSUMER_SECRET,
                 access_token=settings.IMGUR_ACCESS_TOKEN,
                 refresh_token=settings.IMGUR_ACCESS_TOKEN_REFRESH,
-                api_url=settings.IMGUR_PROXY_API_URL,
+                api_url=settings.IMGUR_PROXY_API_URL or None,
             )
             logger.info("Logged in Imgur storage")
 
@@ -53,7 +57,7 @@ class ImgurStorage(Storage):
 
         except Exception as e:
             logger.error(e)
-            print("Imgur login error, functionality disabled.")
+            self.client = None
 
     def _get_abs_path(self, name):
         return os.path.join(self.location, name)
