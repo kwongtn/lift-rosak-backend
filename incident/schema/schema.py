@@ -16,6 +16,7 @@ from incident.schema.filters import (
 from incident.schema.inputs import (
     CalendarIncidentChronologyInput,
     CalendarIncidentInput,
+    SocialMediaLinkInput,
 )
 from incident.schema.orderings import CalendarIncidentOrder
 from incident.schema.resolvers import get_calendar_incidents_by_severity_count
@@ -286,5 +287,36 @@ class IncidentMutations:
     ) -> GenericMutationReturn:
         await services.remove_incident_vote(
             info.context.user, incident_id=int(calendar_incident_id)
+        )
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def submit_social_media_link(
+        self, info: Info, input: SocialMediaLinkInput
+    ) -> GenericMutationReturn:
+        try:
+            await services.submit_social_media_link(
+                info.context.user,
+                write=services.SocialMediaLinkWrite(
+                    url=input.url,
+                    title=_maybe_value(input.title, ""),
+                    incident_id=(
+                        int(incident_id)
+                        if (incident_id := _maybe_value(input.incident_id)) is not None
+                        else None
+                    ),
+                    category_ids=tuple(_maybe_value(input.category_ids) or ()),
+                ),
+            )
+        except services.IncidentServiceError as exc:
+            _raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsAdmin])
+    async def mark_social_media_link_completed(
+        self, info: Info, social_media_link_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        await services.mark_social_media_link_completed(
+            info.context.user, link_id=int(social_media_link_id)
         )
         return GenericMutationReturn(ok=True)

@@ -12,11 +12,16 @@ from decimal import Decimal
 from asgiref.sync import sync_to_async
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
+from django.utils import timezone
 from safedelete.models import HARD_DELETE
 
 from common.models import User, Vote
 from incident.enums import CalendarIncidentStatus
-from incident.models import CalendarIncident, CalendarIncidentChronology
+from incident.models import (
+    CalendarIncident,
+    CalendarIncidentChronology,
+    SocialMediaLink,
+)
 
 
 class IncidentServiceError(Exception):
@@ -68,6 +73,15 @@ def _is_author(actor: User, incident: CalendarIncident) -> bool:
 
 def _may_edit(actor: User, *, is_admin: bool, incident: CalendarIncident) -> bool:
     return is_admin or _is_author(actor, incident)
+
+
+async def _get_incident(incident_id: int) -> CalendarIncident:
+    try:
+        return await CalendarIncident.objects.aget(pk=incident_id)
+    except CalendarIncident.DoesNotExist as exc:
+        raise IncidentServiceError(
+            f"CalendarIncident {incident_id} does not exist."
+        ) from exc
 
 
 async def _apply_m2m(incident: CalendarIncident, data: IncidentWrite) -> None:
@@ -141,7 +155,7 @@ async def update_incident(
     data: IncidentWrite,
     chronologies: tuple[ChronologyWrite, ...] = (),
 ) -> UpdateResult:
-    incident = await CalendarIncident.objects.aget(pk=incident_id)
+    incident = await _get_incident(incident_id)
 
     if expected_version is not None and expected_version != incident.version:
         raise ConcurrencyConflictError(
@@ -214,7 +228,7 @@ async def _create_revision(
 
 
 async def approve_incident(admin: User, *, incident_id: int) -> CalendarIncident:
-    target = await CalendarIncident.objects.aget(pk=incident_id)
+    target = await _get_incident(incident_id)
 
     if target.parent_incident_id is not None:
         return await _merge_revision_into_parent(target)
@@ -280,7 +294,7 @@ async def _merge_revision_into_parent(
 async def reject_incident(
     admin: User, *, incident_id: int, reason: str
 ) -> CalendarIncident:
-    incident = await CalendarIncident.objects.aget(pk=incident_id)
+    incident = await _get_incident(incident_id)
 
     if incident.status not in (
         CalendarIncidentStatus.DRAFT,
@@ -300,7 +314,7 @@ async def reject_incident(
 
 
 async def delete_incident(actor: User, *, is_admin: bool, incident_id: int) -> None:
-    incident = await CalendarIncident.objects.aget(pk=incident_id)
+    incident = await _get_incident(incident_id)
 
     if not is_admin and (
         incident.status != CalendarIncidentStatus.DRAFT
@@ -317,7 +331,7 @@ async def _chronology_with_parent(
     chronology_id: int,
 ) -> tuple[CalendarIncidentChronology, CalendarIncident]:
     chronology = await CalendarIncidentChronology.objects.aget(pk=chronology_id)
-    incident = await CalendarIncident.objects.aget(pk=chronology.calendar_incident_id)
+    incident = await _get_incident(chronology.calendar_incident_id)
     return chronology, incident
 
 
@@ -328,7 +342,7 @@ async def create_chronology(
     calendar_incident_id: int,
     write: ChronologyWrite,
 ) -> CalendarIncidentChronology:
-    incident = await CalendarIncident.objects.aget(pk=calendar_incident_id)
+    incident = await _get_incident(calendar_incident_id)
 
     if not _may_edit(actor, is_admin=is_admin, incident=incident):
         raise IncidentNotEditableError(
@@ -379,7 +393,7 @@ async def approve_chronology(
     admin: User, *, chronology_id: int
 ) -> CalendarIncidentChronology:
     chronology = await CalendarIncidentChronology.objects.aget(pk=chronology_id)
-    incident = await CalendarIncident.objects.aget(pk=chronology.calendar_incident_id)
+    incident = await _get_incident(chronology.calendar_incident_id)
 
     if incident.status != CalendarIncidentStatus.LIVE:
         raise IncidentNotEditableError(
@@ -438,7 +452,7 @@ async def delete_chronology(actor: User, *, is_admin: bool, chronology_id: int) 
 
 
 async def set_incident_vote(user: User, *, incident_id: int, value: int) -> None:
-    await CalendarIncident.objects.aget(pk=incident_id)
+    await _get_incident(incident_id)
 
     content_type = await sync_to_async(ContentType.objects.get_for_model)(
         CalendarIncident
@@ -461,3 +475,53 @@ async def remove_incident_vote(user: User, *, incident_id: int) -> bool:
         object_id=incident_id,
     ).adelete()
     return deleted_count > 0
+
+
+@dataclass(frozen=True, slots=True)
+class SocialMediaLinkWrite:
+    url: str
+    title: str = ""
+    incident_id: int | None = None
+    category_ids: tuple[int, ...] = ()
+
+
+async def submit_social_media_link(
+    user: User, *, write: SocialMediaLinkWrite
+) -> SocialMediaLink:
+    content_type = None
+    object_id = None
+    if write.incident_id is not None:
+        await _get_incident(write.incident_id)
+        content_type = await sync_to_async(ContentType.objects.get_for_model)(
+            CalendarIncident
+        )
+        object_id = write.incident_id
+
+    link = await sync_to_async(SocialMediaLink.objects.create)(
+        url=write.url,
+        title=write.title,
+        user=user,
+        content_type=content_type,
+        object_id=object_id,
+    )
+    if write.category_ids:
+        await sync_to_async(link.categories.set)(write.category_ids)
+    return link
+
+
+async def mark_social_media_link_completed(
+    admin: User, *, link_id: int
+) -> SocialMediaLink:
+    link = await SocialMediaLink.objects.aget(pk=link_id)
+
+    def _sync() -> None:
+        if link.completed:
+            return
+        link.completed = True
+        link.completed_at = timezone.now()
+        link.completed_by = admin
+        link.save()
+
+    await sync_to_async(_sync)()
+    await sync_to_async(link.refresh_from_db)()
+    return link
