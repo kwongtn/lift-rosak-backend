@@ -4,10 +4,22 @@ from typing import TYPE_CHECKING, Annotated, List, Optional
 import strawberry
 import strawberry_django
 from asgiref.sync import sync_to_async
+from django.contrib.contenttypes.models import ContentType
 from strawberry.types import Info
 
 from incident import models
 from operation.schema.scalars import Line, Station, Vehicle
+
+
+@strawberry.type
+class VoteBreakdown:
+    upvotes: int
+    downvotes: int
+
+
+async def _content_type_id(model) -> int:
+    content_type = await sync_to_async(ContentType.objects.get_for_model)(model)
+    return content_type.id
 
 
 @strawberry.type
@@ -86,6 +98,31 @@ class CalendarIncidentScalar:
             "medias_from_calendar_incident_loader"
         ].load(self.id)
 
+    @strawberry_django.field
+    async def vote_score(self, info: Info) -> int:
+        ct_id = await _content_type_id(models.CalendarIncident)
+        return await info.context.loaders["incident"]["vote_scores"].load(
+            (ct_id, self.id)
+        )
+
+    @strawberry_django.field
+    async def vote_breakdown(self, info: Info) -> VoteBreakdown:
+        ct_id = await _content_type_id(models.CalendarIncident)
+        raw = await info.context.loaders["incident"]["vote_breakdown"].load(
+            (ct_id, self.id)
+        )
+        return VoteBreakdown(upvotes=raw["upvotes"], downvotes=raw["downvotes"])
+
+    @strawberry_django.field
+    async def user_vote(self, info: Info) -> int:
+        user = info.context.user
+        if not user:
+            return 0
+        ct_id = await _content_type_id(models.CalendarIncident)
+        return await info.context.loaders["incident"]["user_vote_value"].load(
+            (user.id, ct_id, self.id)
+        )
+
     @strawberry.field
     @sync_to_async
     def has_details(self) -> bool:
@@ -112,3 +149,28 @@ class CalendarIncidentChronologyScalar:
     datetime: datetime
     content: str
     source_url: Optional[str]
+
+    @strawberry_django.field
+    async def vote_score(self, info: Info) -> int:
+        ct_id = await _content_type_id(models.CalendarIncidentChronology)
+        return await info.context.loaders["incident"]["vote_scores"].load(
+            (ct_id, self.id)
+        )
+
+    @strawberry_django.field
+    async def vote_breakdown(self, info: Info) -> VoteBreakdown:
+        ct_id = await _content_type_id(models.CalendarIncidentChronology)
+        raw = await info.context.loaders["incident"]["vote_breakdown"].load(
+            (ct_id, self.id)
+        )
+        return VoteBreakdown(upvotes=raw["upvotes"], downvotes=raw["downvotes"])
+
+    @strawberry_django.field
+    async def user_vote(self, info: Info) -> int:
+        user = info.context.user
+        if not user:
+            return 0
+        ct_id = await _content_type_id(models.CalendarIncidentChronology)
+        return await info.context.loaders["incident"]["user_vote_value"].load(
+            (user.id, ct_id, self.id)
+        )
