@@ -7,8 +7,8 @@ import strawberry
 from django.db.models import Count, Min, Q
 from strawberry.exceptions import GraphQLError
 
-from incident.enums import CalendarIncidentSeverity
-from incident.models import CalendarIncident
+from incident.enums import CalendarIncidentSeverity, CalendarIncidentStatus
+from incident.models import CalendarIncident, CalendarIncidentCategory, SocialMediaLink
 from incident.schema.scalars import CalendarIncidentGroupByDateSeverityScalar
 
 
@@ -140,3 +140,52 @@ async def get_calendar_incidents_by_severity_count(
         )
 
     return return_list
+
+
+async def get_pending_calendar_incidents(
+    root,
+    search: strawberry.Maybe[str] = None,
+) -> List[CalendarIncident]:
+    """Console approval queue: PENDING_APPROVAL incidents, oldest first."""
+
+    queryset = CalendarIncident.objects.filter(
+        status=CalendarIncidentStatus.PENDING_APPROVAL
+    ).order_by("created", "id")
+
+    if search is not None and (term := search.value.strip()):
+        queryset = queryset.filter(
+            Q(title__icontains=term)
+            | Q(brief__icontains=term)
+            | Q(details__icontains=term)
+            | Q(chronologies__source_url__icontains=term)
+        ).distinct()
+
+    return [incident async for incident in queryset]
+
+
+async def get_social_media_links(
+    root,
+    search: strawberry.Maybe[str] = None,
+    category_id: strawberry.Maybe[strawberry.ID] = None,
+    completed: strawberry.Maybe[bool] = None,
+) -> List[SocialMediaLink]:
+    """Console social-media-link queue, newest submissions first."""
+
+    queryset = SocialMediaLink.objects.all().order_by("-created")
+
+    if search is not None and (term := search.value.strip()):
+        queryset = queryset.filter(Q(url__icontains=term) | Q(title__icontains=term))
+
+    if category_id is not None:
+        queryset = queryset.filter(categories__id=int(category_id.value))
+
+    if completed is not None:
+        queryset = queryset.filter(completed=completed.value)
+
+    return [link async for link in queryset.distinct()]
+
+
+async def get_calendar_incident_categories(root) -> List[CalendarIncidentCategory]:
+    return [
+        category async for category in CalendarIncidentCategory.objects.order_by("name")
+    ]

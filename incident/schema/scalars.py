@@ -7,6 +7,7 @@ from asgiref.sync import sync_to_async
 from django.contrib.contenttypes.models import ContentType
 from strawberry.types import Info
 
+from common.schema.scalars import UserScalar
 from incident import models
 from operation.schema.scalars import Line, Station, Vehicle
 
@@ -63,6 +64,19 @@ class ExtractedIncidentDataScalar:
 @strawberry_django.type(models.CalendarIncidentCategory)
 class CalendarIncidentCategoryScalar:
     name: str
+
+
+@strawberry_django.type(models.SocialMediaLink)
+class SocialMediaLinkScalar:
+    id: strawberry.auto
+    url: str
+    title: str
+    created: datetime
+    completed: bool
+    completed_at: Optional[datetime]
+
+    user: UserScalar
+    categories: List[CalendarIncidentCategoryScalar]
 
 
 @strawberry_django.type(models.CalendarIncident)

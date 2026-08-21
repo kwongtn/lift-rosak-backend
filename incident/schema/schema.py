@@ -16,13 +16,21 @@ from incident.schema.mutations.interactions import (
     VoteMutations,
 )
 from incident.schema.orderings import CalendarIncidentOrder
-from incident.schema.resolvers import get_calendar_incidents_by_severity_count
+from incident.schema.resolvers import (
+    get_calendar_incident_categories,
+    get_calendar_incidents_by_severity_count,
+    get_pending_calendar_incidents,
+    get_social_media_links,
+)
 from incident.schema.scalars import (
+    CalendarIncidentCategoryScalar,
     CalendarIncidentGroupByDateSeverityScalar,
     CalendarIncidentScalar,
+    SocialMediaLinkScalar,
     StationIncident,
     VehicleIncident,
 )
+from rosak.permissions import IsAdmin
 
 
 @strawberry.type
@@ -42,6 +50,23 @@ class IncidentScalars:
     calendar_incidents_by_severity_count: List[
         CalendarIncidentGroupByDateSeverityScalar
     ] = strawberry.field(resolver=get_calendar_incidents_by_severity_count)
+
+    pending_calendar_incidents: List[CalendarIncidentScalar] = strawberry_django.field(
+        resolver=get_pending_calendar_incidents,
+        permission_classes=[IsAdmin],
+    )
+
+    social_media_links: List[SocialMediaLinkScalar] = strawberry_django.field(
+        resolver=get_social_media_links,
+        permission_classes=[IsAdmin],
+    )
+
+    calendar_incident_categories: List[CalendarIncidentCategoryScalar] = (
+        strawberry_django.field(
+            resolver=get_calendar_incident_categories,
+            permission_classes=[IsAdmin],
+        )
+    )
 
 
 @strawberry.type
