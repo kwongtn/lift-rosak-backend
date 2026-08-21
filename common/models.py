@@ -3,6 +3,8 @@ from random import randint
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
@@ -228,3 +230,24 @@ class FeatureFlag(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.name}-{'Enabled' if self.enabled else 'Disabled'}"
+
+
+class Vote(TimeStampedModel):
+    """Universal voting model using ContentType framework for upvote/downvote on any object."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    content_type = models.ForeignKey(ContentType, on_delete=models.PROTECT)
+    object_id = models.PositiveBigIntegerField()
+    content_object = GenericForeignKey("content_type", "object_id")
+    value = models.SmallIntegerField(choices=[(1, "upvote"), (-1, "downvote")])
+
+    class Meta:
+        unique_together = ("user", "content_type", "object_id")
+        indexes = [
+            models.Index(fields=["content_type", "object_id"]),
+            models.Index(fields=["user"]),
+        ]
+
+    def __str__(self) -> str:
+        vote_type = "upvote" if self.value == 1 else "downvote"
+        return f"{self.user} {vote_type} on {self.content_type} {self.object_id}"

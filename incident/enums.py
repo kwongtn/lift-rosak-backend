@@ -22,3 +22,10 @@ class CalendarIncidentChronologyIndicator(models.TextChoices):
     RED = "RED"
     BLUE = "BLUE"
     GRAY = "GRAY"
+
+
+class CalendarIncidentStatus(models.TextChoices):
+    DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
+    LIVE = "live"
+    REJECTED = "rejected"

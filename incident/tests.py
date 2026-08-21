@@ -634,3 +634,66 @@ class TestFilterDecorators(TestCase):
             hasattr(VehicleIncidentFilter, "__strawberry_django_definition__"),
             "VehicleIncidentFilter missing strawberry_django decorator",
         )
+
+
+class SocialMediaLinkTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(firebase_id="test-user-sml")
+        self.admin_user = User.objects.create(firebase_id="test-admin-sml")
+
+    def test_social_media_link_category_relationship(self):
+        from django.contrib.contenttypes.models import ContentType
+
+        from incident.models import SocialMediaLink
+
+        category = CalendarIncidentCategory.objects.get_or_create(
+            name="Just Reporting"
+        )[0]
+        line = Line.objects.create(
+            code="TEST_LINE", display_name="Test Line", display_color="#123456"
+        )
+        station = Station.objects.create(display_name="Test Station")
+        v_type = VehicleType.objects.create(
+            internal_name="TEST_TYPE", display_name="Test Type"
+        )
+        vehicle = Vehicle.objects.create(
+            identification_no="Set 99", vehicle_type=v_type
+        )
+
+        incident = CalendarIncident.objects.create(
+            title="Tagged Incident",
+            brief="Tagged incident brief",
+            severity="MINOR",
+            start_datetime=timezone.now(),
+        )
+
+        content_type = ContentType.objects.get_for_model(CalendarIncident)
+        sml = SocialMediaLink.objects.create(
+            url="https://twitter.com/user/status/1234567890",
+            title="Twitter post about LRT delay",
+            user=self.user,
+            content_type=content_type,
+            object_id=incident.id,
+            completed=True,
+            completed_at=timezone.now(),
+            completed_by=self.admin_user,
+        )
+
+        sml.categories.add(category)
+        sml.lines.add(line)
+        sml.stations.add(station)
+        sml.vehicles.add(vehicle)
+
+        self.assertEqual(sml.content_object, incident)
+        self.assertIn(category, sml.categories.all())
+        self.assertIn(line, sml.lines.all())
+        self.assertIn(station, sml.stations.all())
+        self.assertIn(vehicle, sml.vehicles.all())
+        self.assertTrue(sml.completed)
+        self.assertEqual(sml.completed_by, self.admin_user)
+        self.assertIn(sml, self.admin_user.completed_social_media_links.all())
+
+    def test_just_reporting_category_exists(self):
+        self.assertTrue(
+            CalendarIncidentCategory.objects.filter(name="Just Reporting").exists()
+        )
