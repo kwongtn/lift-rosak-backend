@@ -53,6 +53,16 @@ if "spotting" in settings.INSTALLED_APPS:
         "schedule": crontab(hour="0", minute="0"),
     }
 
+if "incident" in settings.INSTALLED_APPS:
+    beat_schedule["purge_soft_deleted_incidents"] = {
+        "task": "incident.tasks.purge_soft_deleted_incidents",
+        "schedule": crontab(hour="3", minute="0"),
+    }
+    beat_schedule["purge_rejected_incidents"] = {
+        "task": "incident.tasks.purge_rejected_incidents",
+        "schedule": crontab(hour="3", minute="30"),
+    }
+
 app.conf.beat_schedule = beat_schedule
 
 
