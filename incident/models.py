@@ -1,12 +1,11 @@
 from typing import TYPE_CHECKING
 
-from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.gis.db import models
 from django.contrib.gis.db.models import Q
-from django.utils.safestring import mark_safe
 from django.core.exceptions import ValidationError
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
@@ -294,7 +293,9 @@ class CalendarIncidentMedia(TimeStampedModel):
 class SocialMediaLink(TimeStampedModel):
     url = models.URLField()
     title = models.CharField(max_length=256, blank=True, default="")
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    # common.User (platform identity from Firebase tokens), not django auth.User —
+    # same rationale as common.Vote.user.
+    user = models.ForeignKey("common.User", on_delete=models.CASCADE)
 
     content_type = models.ForeignKey(
         ContentType, on_delete=models.CASCADE, null=True, blank=True
@@ -310,7 +311,7 @@ class SocialMediaLink(TimeStampedModel):
     completed = models.BooleanField(default=False)
     completed_at = models.DateTimeField(null=True, blank=True)
     completed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        "common.User",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

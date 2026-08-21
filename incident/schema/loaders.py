@@ -1,12 +1,10 @@
 from collections import defaultdict
 
 from asgiref.sync import sync_to_async
+from django.db.models import Count, Sum
 from strawberry.dataloader import DataLoader
 
 from common.models import Vote
-from django.contrib.contenttypes.models import ContentType
-from django.db.models import Sum, Count
-
 from incident.models import CalendarIncidentMedia
 
 
@@ -88,13 +86,11 @@ async def batch_load_user_vote_value(keys):
             user_id__in=user_ids,
             content_type_id__in=content_type_ids,
             object_id__in=object_ids,
-        )
-        .values("user_id", "content_type_id", "object_id", "value")
+        ).values("user_id", "content_type_id", "object_id", "value")
     )
 
     vote_map = {
-        (v["user_id"], v["content_type_id"], v["object_id"]): v["value"]
-        for v in votes
+        (v["user_id"], v["content_type_id"], v["object_id"]): v["value"] for v in votes
     }
     return [vote_map.get(k, 0) for k in keys]
 

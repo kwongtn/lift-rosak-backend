@@ -21,9 +21,7 @@ class CalendarIncidentExtensionsTests(TestCase):
         self.assertEqual(
             CalendarIncident.deleted_objects.filter(id=incident_id).count(), 1
         )
-        self.assertEqual(
-            CalendarIncident.all_objects.filter(id=incident_id).count(), 1
-        )
+        self.assertEqual(CalendarIncident.all_objects.filter(id=incident_id).count(), 1)
 
         deleted_incident = CalendarIncident.all_objects.get(id=incident_id)
         self.assertIsNotNone(deleted_incident.deleted)

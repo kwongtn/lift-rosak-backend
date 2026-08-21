@@ -90,6 +90,7 @@ This document describes the migration from `UNSET` to `strawberry.Maybe[T]` patt
 class EventInput:
     notes: str = UNSET
 
+
 @strawberry.mutation
 def add_event(input: EventInput) -> Event:
     if input.notes is not UNSET:
@@ -102,6 +103,7 @@ def add_event(input: EventInput) -> Event:
 @strawberry.input
 class EventInput:
     notes: strawberry.Maybe[str | None] = None
+
 
 @strawberry.mutation
 def add_event(input: EventInput) -> Event:
@@ -158,21 +160,24 @@ medias: DjangoListConnection[MediaType]
 ```python
 from strawberry.types.maybe import Some
 
+
 def test_maybe_field_omitted():
     result = execute_graphql("""{ user { field } }""")
     # Field omitted → UNSET, uses default
 
+
 def test_maybe_field_with_value():
     result = execute_graphql(
         """mutation($input: Input!) { update(input: $input) }""",
-        variables={"input": {"field": "value"}}
+        variables={"input": {"field": "value"}},
     )
     # Field provided → Some("value")
+
 
 def test_maybe_nullable_null():
     result = execute_graphql(
         """mutation($input: Input!) { update(input: $input) }""",
-        variables={"input": {"field": None}}
+        variables={"input": {"field": None}},
     )
     # Explicit null → Some(None)
 ```

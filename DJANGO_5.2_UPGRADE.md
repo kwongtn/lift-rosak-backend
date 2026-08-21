@@ -66,6 +66,7 @@ docker compose exec app python manage.py migrate
 ```python
 from strawberry_django import FilterLookup
 
+
 class LineFilter:
     display_name: Optional[FilterLookup[str]]
 ```
@@ -74,6 +75,7 @@ class LineFilter:
 
 ```python
 from strawberry_django import StrFilterLookup
+
 
 class LineFilter:
     display_name: Optional[StrFilterLookup]

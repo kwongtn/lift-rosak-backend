@@ -1,16 +1,16 @@
-from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
 from django.utils import timezone
 
+from common.models import User
 from incident.models import CalendarIncident, CalendarIncidentCategory, SocialMediaLink
 from operation.models import Line, Station, Vehicle, VehicleType
 
 
 class SocialMediaLinkTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create(username="test-user-sml")
-        self.admin_user = User.objects.create(username="test-admin-sml")
+        self.user = User.objects.create(firebase_id="test-user-sml")
+        self.admin_user = User.objects.create(firebase_id="test-admin-sml")
 
     def test_social_media_link_category_relationship(self):
         category = CalendarIncidentCategory.objects.get_or_create(

@@ -235,7 +235,11 @@ class FeatureFlag(TimeStampedModel):
 class Vote(TimeStampedModel):
     """Universal voting model using ContentType framework for upvote/downvote on any object."""
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    # common.User is the platform identity resolved from Firebase tokens in the GraphQL
+    # context (rosak/context.py); django.contrib.auth users only exist for the admin site.
+    user = models.ForeignKey(
+        "common.User", on_delete=models.CASCADE, related_name="votes"
+    )
     content_type = models.ForeignKey(ContentType, on_delete=models.PROTECT)
     object_id = models.PositiveBigIntegerField()
     content_object = GenericForeignKey("content_type", "object_id")
