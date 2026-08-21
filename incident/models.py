@@ -9,7 +9,8 @@ from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
-from ordered_model.models import OrderedModel
+from ordered_model.models import OrderedModel, OrderedModelManager, OrderedModelQuerySet
+from safedelete.managers import SafeDeleteManager, SafeDeleteQueryset
 from safedelete.models import SOFT_DELETE, SafeDeleteModel
 from simple_history.models import HistoricalRecords
 
@@ -22,6 +23,20 @@ from incident.enums import (
 
 if TYPE_CHECKING:
     from common.models import Media
+
+
+class SoftDeleteOrderedQueryset(SafeDeleteQueryset, OrderedModelQuerySet):
+    """Safedelete visibility composed with ordered_model queryset helpers."""
+
+
+class SoftDeleteOrderedManager(SafeDeleteManager, OrderedModelManager):
+    """Default manager keeping soft-deleted rows out of `objects`.
+
+    Without this re-declaration OrderedModel's generated manager would win
+    the MRO and soft-deleted rows would stay publicly visible.
+    """
+
+    _queryset_class = SoftDeleteOrderedQueryset
 
 
 class IncidentAbstractModel(TimeStampedModel, OrderedModel):
@@ -114,6 +129,8 @@ class CalendarIncidentCategory(models.Model):
 class CalendarIncidentChronology(TimeStampedModel, OrderedModel, SafeDeleteModel):
     _safedelete_policy = SOFT_DELETE
 
+    objects = SoftDeleteOrderedManager()
+
     calendar_incident = models.ForeignKey(
         to="incident.CalendarIncident",
         on_delete=models.CASCADE,
@@ -167,6 +184,8 @@ class CalendarIncidentChronology(TimeStampedModel, OrderedModel, SafeDeleteModel
 
 class CalendarIncident(TimeStampedModel, OrderedModel, SafeDeleteModel):
     _safedelete_policy = SOFT_DELETE
+
+    objects = SoftDeleteOrderedManager()
 
     start_datetime = models.DateTimeField()
     end_datetime = models.DateTimeField(
@@ -236,6 +255,23 @@ class CalendarIncident(TimeStampedModel, OrderedModel, SafeDeleteModel):
     status = TextChoicesField(
         choices_enum=CalendarIncidentStatus,
         default=CalendarIncidentStatus.DRAFT,
+    )
+
+    # Set when an admin rejects the incident; shown in the console queue.
+    rejection_reason = models.TextField(
+        blank=True,
+        default="",
+        help_text="Reason entered by the admin who rejected this incident.",
+    )
+
+    # Platform identity (common.User) of the submitter; null for legacy rows.
+    # Governs author-scoped permissions: edit/delete own drafts, revise LIVE.
+    created_by = models.ForeignKey(
+        "common.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="calendar_incidents",
     )
 
     # NEW: Draft/revision pattern

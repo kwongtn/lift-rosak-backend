@@ -1,6 +1,7 @@
 import typing
 
 import requests
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.http import request as Request
 from firebase_admin import auth
@@ -44,9 +45,14 @@ class IsAdmin(BasePermission):
     message = "You don't have the appropriate permissions to perform this action."
 
     async def has_permission(self, source: typing.Any, info: Info, **kwargs) -> bool:
-        if info.context.user:
-            user = auth.get_user(info.context.user.firebase_id)
-            if user.custom_claims:
-                return user.custom_claims.get("admin", False)
+        return await has_admin_claim(info.context.user)
 
+
+async def has_admin_claim(user) -> bool:
+    """Admin check shared by IsAdmin and resolvers with conditional admin logic."""
+    if not user:
         return False
+
+    firebase_user = await sync_to_async(auth.get_user)(user.firebase_id)
+    claims = firebase_user.custom_claims or {}
+    return bool(claims.get("admin", False))
