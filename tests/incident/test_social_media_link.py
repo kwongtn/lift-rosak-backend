@@ -1,16 +1,16 @@
+from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
 from django.utils import timezone
 
-from common.models import User
 from incident.models import CalendarIncident, CalendarIncidentCategory, SocialMediaLink
 from operation.models import Line, Station, Vehicle, VehicleType
 
 
 class SocialMediaLinkTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create(firebase_id="test-user-sml")
-        self.admin_user = User.objects.create(firebase_id="test-admin-sml")
+        self.user = User.objects.create(username="test-user-sml")
+        self.admin_user = User.objects.create(username="test-admin-sml")
 
     def test_social_media_link_category_relationship(self):
         category = CalendarIncidentCategory.objects.get_or_create(
@@ -59,6 +59,36 @@ class SocialMediaLinkTests(TestCase):
         self.assertTrue(sml.completed)
         self.assertEqual(sml.completed_by, self.admin_user)
         self.assertIn(sml, self.admin_user.completed_social_media_links.all())
+
+    def test_social_media_link_generic_fk_to_incident(self):
+        """SocialMediaLink can link to CalendarIncident via GenericForeignKey"""
+        incident = CalendarIncident.objects.create(
+            title="Test Incident",
+            brief="Test incident brief",
+            severity="MINOR",
+            start_datetime=timezone.now(),
+        )
+
+        link = SocialMediaLink.objects.create(
+            url="https://example.com/news",
+            user=self.user,
+            content_object=incident,
+        )
+
+        assert link.content_object == incident
+        assert link.content_type == ContentType.objects.get_for_model(CalendarIncident)
+        assert link.object_id == incident.id
+
+    def test_social_media_link_without_content_object(self):
+        """SocialMediaLink can exist without being tagged to any object (just dumping)"""
+        link = SocialMediaLink.objects.create(
+            url="https://example.com/random",
+            user=self.user,
+        )
+
+        assert link.content_object is None
+        assert link.content_type is None
+        assert link.object_id is None
 
     def test_just_reporting_category_exists(self):
         self.assertTrue(
