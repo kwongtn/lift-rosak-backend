@@ -1,0 +1,12 @@
+# Coverage measures application code; test modules themselves are omitted
+# (incident/tests.py is legacy Django-runner code that pytest never imports).
+[run]
+omit =
+    */tests.py
+    tests/*
+    */migrations/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
