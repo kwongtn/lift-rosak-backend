@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.gis.db import models
 from django.contrib.gis.db.models import Q
@@ -170,6 +170,12 @@ class CalendarIncidentChronology(TimeStampedModel, OrderedModel, SafeDeleteModel
     # NEW: Audit history
     history = HistoricalRecords(cascade_delete_history=False)
 
+    # Hard-deleting a chronology cascades to its generic votes; soft delete does not.
+    votes = GenericRelation(
+        "common.Vote",
+        related_query_name="calendar_incident_chronology",
+    )
+
     def clean(self):
         super().clean()
         if self.status == CalendarIncidentStatus.LIVE:
@@ -288,6 +294,12 @@ class CalendarIncident(TimeStampedModel, OrderedModel, SafeDeleteModel):
 
     # NEW: Audit history (cascade_delete_history=False preserves tombstones)
     history = HistoricalRecords(cascade_delete_history=False)
+
+    # Hard-deleting an incident cascades to its generic votes; soft delete does not.
+    votes = GenericRelation(
+        "common.Vote",
+        related_query_name="calendar_incident",
+    )
 
     def __str__(self):
         return f"{self.id} - {self.title[:48]}"
