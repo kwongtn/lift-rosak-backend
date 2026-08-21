@@ -27,6 +27,7 @@ dependencies = [
     "django-mdeditor>=0.1.20",
     "django-model-utils>=5.0.0",
     "django-ordered-model>=3.7.4",
+    "django-safedelete==1.5.0",
     "django-simple-history>=3.12.0,<3.13.0",
     "django-storages>=1.14.6",
     "django==5.2.*",

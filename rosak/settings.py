@@ -110,6 +110,7 @@ INSTALLED_APPS = [
     # "health_check.contrib.s3boto3_storage",  # requires boto3 and S3BotoStorage backend
     # "health_check.contrib.rabbitmq",  # requires RabbitMQ broker
     "health_check.contrib.redis",  # requires Redis broker
+    "safedelete",
     "simple_history",
     "cachalot",
     "operation",

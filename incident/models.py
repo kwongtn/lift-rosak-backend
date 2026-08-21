@@ -6,13 +6,18 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.gis.db import models
 from django.contrib.gis.db.models import Q
 from django.utils.safestring import mark_safe
+from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
+from django_choices_field import TextChoicesField
 from model_utils.models import TimeStampedModel
 from ordered_model.models import OrderedModel
+from safedelete.models import SOFT_DELETE, SafeDeleteModel
+from simple_history.models import HistoricalRecords
 
 from incident.enums import (
     CalendarIncidentChronologyIndicator,
     CalendarIncidentSeverity,
+    CalendarIncidentStatus,
     IncidentSeverity,
 )
 
@@ -107,17 +112,17 @@ class CalendarIncidentCategory(models.Model):
         return self.name
 
 
-class CalendarIncidentChronology(TimeStampedModel, OrderedModel):
+class CalendarIncidentChronology(TimeStampedModel, OrderedModel, SafeDeleteModel):
+    _safedelete_policy = SOFT_DELETE
+
     calendar_incident = models.ForeignKey(
         to="incident.CalendarIncident",
         on_delete=models.CASCADE,
         related_name="chronologies",
     )
 
-    indicator = models.CharField(
-        max_length=16,
-        choices=CalendarIncidentChronologyIndicator.choices,
-        help_text="Set the color of circles. Green means completed or success status, Red means warning or error, and Blue means ongoing or other default status, Gray for unfinished or disabled status, Loading for in progress status.",
+    indicator = TextChoicesField(
+        choices_enum=CalendarIncidentChronologyIndicator,
     )
     datetime = models.DateTimeField(
         blank=True,
@@ -137,11 +142,33 @@ class CalendarIncidentChronology(TimeStampedModel, OrderedModel):
 
     order_with_respect_to = "calendar_incident"
 
+    # NEW: Independent status field (NOT inherited from parent)
+    status = TextChoicesField(
+        choices_enum=CalendarIncidentStatus,
+        default=CalendarIncidentStatus.DRAFT,
+    )
+
+    # NEW: Optimistic concurrency control
+    version = models.PositiveIntegerField(default=1)
+
+    # NEW: Audit history
+    history = HistoricalRecords(cascade_delete_history=False)
+
+    def clean(self):
+        super().clean()
+        if self.status == CalendarIncidentStatus.LIVE:
+            if self.calendar_incident.status != CalendarIncidentStatus.LIVE:
+                raise ValidationError(
+                    "Chronology cannot be LIVE if parent incident is not LIVE"
+                )
+
     class Meta(OrderedModel.Meta):
         verbose_name_plural = "CalendarIncidentChronologies"
 
 
-class CalendarIncident(TimeStampedModel, OrderedModel):
+class CalendarIncident(TimeStampedModel, OrderedModel, SafeDeleteModel):
+    _safedelete_policy = SOFT_DELETE
+
     start_datetime = models.DateTimeField()
     end_datetime = models.DateTimeField(
         blank=True,
@@ -157,9 +184,8 @@ class CalendarIncident(TimeStampedModel, OrderedModel):
         help_text="Displays the 'inaccurate' indicator.",
     )
 
-    severity = models.CharField(
-        max_length=16,
-        choices=CalendarIncidentSeverity.choices,
+    severity = TextChoicesField(
+        choices_enum=CalendarIncidentSeverity,
     )
     impact_factor = models.DecimalField(
         default=0,
@@ -206,6 +232,27 @@ class CalendarIncident(TimeStampedModel, OrderedModel):
         blank=True,
         through="incident.CalendarIncidentMedia",
     )
+
+    # NEW: Status field using TextChoicesField
+    status = TextChoicesField(
+        choices_enum=CalendarIncidentStatus,
+        default=CalendarIncidentStatus.DRAFT,
+    )
+
+    # NEW: Draft/revision pattern
+    parent_incident = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="draft_revisions",
+    )
+
+    # NEW: Optimistic concurrency control
+    version = models.PositiveIntegerField(default=1)
+
+    # NEW: Audit history (cascade_delete_history=False preserves tombstones)
+    history = HistoricalRecords(cascade_delete_history=False)
 
     def __str__(self):
         return f"{self.id} - {self.title[:48]}"

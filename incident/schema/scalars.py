@@ -56,7 +56,7 @@ class CalendarIncidentScalar:
     start_datetime: datetime
     end_datetime: Optional[datetime]
 
-    severity: str
+    severity: strawberry.auto
     title: str
     brief: str
     details: str
