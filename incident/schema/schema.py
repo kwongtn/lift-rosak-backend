@@ -261,3 +261,30 @@ class IncidentMutations:
         except services.IncidentServiceError as exc:
             _raise_service_error(exc)
         return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def upvote(
+        self, info: Info, calendar_incident_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        await services.set_incident_vote(
+            info.context.user, incident_id=int(calendar_incident_id), value=1
+        )
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def downvote(
+        self, info: Info, calendar_incident_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        await services.set_incident_vote(
+            info.context.user, incident_id=int(calendar_incident_id), value=-1
+        )
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def remove_vote(
+        self, info: Info, calendar_incident_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        await services.remove_incident_vote(
+            info.context.user, incident_id=int(calendar_incident_id)
+        )
+        return GenericMutationReturn(ok=True)
