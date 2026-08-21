@@ -190,6 +190,31 @@ async def _create_revision(
     return revision
 
 
+async def submit_incident(
+    actor: User, *, is_admin: bool, incident_id: int
+) -> CalendarIncident:
+    """Move an author's DRAFT into PENDING_APPROVAL for admin review."""
+
+    incident = await get_incident(incident_id)
+
+    if incident.status != CalendarIncidentStatus.DRAFT:
+        raise IncidentNotEditableError(
+            "Only DRAFT incidents can be submitted for approval."
+        )
+
+    if not may_edit(actor, is_admin=is_admin, incident=incident):
+        raise IncidentNotEditableError(
+            "Only the author or an admin may submit this incident."
+        )
+
+    def _sync() -> None:
+        incident.status = CalendarIncidentStatus.PENDING_APPROVAL
+        incident.save()
+
+    await sync_to_async(_sync)()
+    return incident
+
+
 async def approve_incident(admin: User, *, incident_id: int) -> CalendarIncident:
     target = await get_incident(incident_id)
 

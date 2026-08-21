@@ -55,6 +55,21 @@ class IncidentCrudMutations:
             raise_service_error(exc)
         return GenericMutationReturn(ok=True)
 
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def submit_calendar_incident(
+        self, info: Info, calendar_incident_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        is_admin = await has_admin_claim(info.context.user)
+        try:
+            await services.submit_incident(
+                info.context.user,
+                is_admin=is_admin,
+                incident_id=int(calendar_incident_id),
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
     @strawberry.mutation(permission_classes=[IsAdmin])
     async def approve_calendar_incident(
         self, info: Info, calendar_incident_id: strawberry.ID

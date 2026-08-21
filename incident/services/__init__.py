@@ -28,6 +28,7 @@ from .incidents import (
     create_incident,
     delete_incident,
     reject_incident,
+    submit_incident,
     update_incident,
 )
 from .social_links import (
@@ -60,6 +61,7 @@ __all__ = [
     "reject_incident",
     "remove_incident_vote",
     "set_incident_vote",
+    "submit_incident",
     "submit_social_media_link",
     "update_chronology",
     "update_incident",

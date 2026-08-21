@@ -189,3 +189,38 @@ async def test_approve_requires_pending_for_non_revision():
 
     with pytest.raises(services.IncidentNotEditableError):
         await services.approve_incident(author, incident_id=draft.id)
+
+
+@pytest.mark.django_db
+async def test_submit_moves_draft_to_pending_approval():
+    author = await _make_user(11)
+    draft = await services.create_incident(author, is_admin=False, data=_write())
+
+    submitted = await services.submit_incident(
+        author, is_admin=False, incident_id=draft.id
+    )
+
+    assert submitted.status == CalendarIncidentStatus.PENDING_APPROVAL
+
+    await sync_to_async(draft.refresh_from_db)()
+    assert draft.status == CalendarIncidentStatus.PENDING_APPROVAL
+
+
+@pytest.mark.django_db
+async def test_submit_rejects_live_and_non_author():
+    author = await _make_user(12)
+    other = await _make_user(13)
+    live = await services.create_incident(author, is_admin=True, data=_write())
+
+    with pytest.raises(services.IncidentNotEditableError):
+        await services.submit_incident(other, is_admin=False, incident_id=live.id)
+    with pytest.raises(services.IncidentNotEditableError):
+        await services.submit_incident(author, is_admin=False, incident_id=live.id)
+
+
+@pytest.mark.django_db
+async def test_submit_missing_incident_raises():
+    user = await _make_user(14)
+
+    with pytest.raises(services.IncidentServiceError):
+        await services.submit_incident(user, is_admin=False, incident_id=999999)
