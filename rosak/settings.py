@@ -415,6 +415,9 @@ DEBUG_TOOLBAR_PANELS = [
 RECAPTCHA_KEY = os.environ.get("RECAPTCHA_SECRET")
 RECAPTCHA_MIN_SCORE = 0.85
 
+# Firebase callable endpoint for AI incident extraction (extractIncidentData).
+EXTRACT_INCIDENT_DATA_URL = os.environ.get("EXTRACT_INCIDENT_DATA_URL")
+
 ################################
 #    Jejak Credit Multiplier   #
 ################################

@@ -7,7 +7,7 @@ from graphql.error import GraphQLError
 from strawberry.types import Info
 
 from common.schema.scalars import GenericMutationReturn
-from incident import services
+from incident import extraction, services
 from incident.schema.filters import (
     CalendarIncidentFilter,
     StationIncidentFilter,
@@ -16,6 +16,7 @@ from incident.schema.filters import (
 from incident.schema.inputs import (
     CalendarIncidentChronologyInput,
     CalendarIncidentInput,
+    ExtractDataInput,
     SocialMediaLinkInput,
 )
 from incident.schema.orderings import CalendarIncidentOrder
@@ -23,6 +24,7 @@ from incident.schema.resolvers import get_calendar_incidents_by_severity_count
 from incident.schema.scalars import (
     CalendarIncidentGroupByDateSeverityScalar,
     CalendarIncidentScalar,
+    ExtractedIncidentDataScalar,
     StationIncident,
     VehicleIncident,
 )
@@ -320,3 +322,19 @@ class IncidentMutations:
             info.context.user, link_id=int(social_media_link_id)
         )
         return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def extract_data_from_url(
+        self, info: Info, input: ExtractDataInput
+    ) -> ExtractedIncidentDataScalar:
+        auth_header = info.context.request.headers.get("Authorization")
+        id_token = auth_header.removeprefix("Bearer ").strip() if auth_header else None
+        try:
+            result = await extraction.extract_data_from_url(
+                url=input.url, id_token=id_token
+            )
+        except extraction.ExtractionError as exc:
+            raise GraphQLError(str(exc)) from exc
+        return ExtractedIncidentDataScalar(
+            request_id=result["requestId"], data=result["data"]
+        )

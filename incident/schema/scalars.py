@@ -42,6 +42,12 @@ class CalendarIncidentGroupByDateSeverityScalar:
     is_long_term: Optional[bool]
 
 
+@strawberry.type
+class ExtractedIncidentDataScalar:
+    request_id: str
+    data: strawberry.scalars.JSON
+
+
 @strawberry_django.type(models.CalendarIncidentCategory)
 class CalendarIncidentCategoryScalar:
     name: str
