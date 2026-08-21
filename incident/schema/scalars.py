@@ -63,6 +63,7 @@ class ExtractedIncidentDataScalar:
 
 @strawberry_django.type(models.CalendarIncidentCategory)
 class CalendarIncidentCategoryScalar:
+    id: strawberry.auto
     name: str
 
 
