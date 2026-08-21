@@ -14,6 +14,7 @@ from incident.schema.filters import (
     VehicleIncidentFilter,
 )
 from incident.schema.inputs import (
+    CalendarIncidentChronologyInput,
     CalendarIncidentInput,
 )
 from incident.schema.orderings import CalendarIncidentOrder
@@ -57,16 +58,22 @@ def _write_from_input(data: CalendarIncidentInput) -> services.IncidentWrite:
     )
 
 
+def _chronology_write_from_input(
+    chronology: CalendarIncidentChronologyInput,
+) -> services.ChronologyWrite:
+    return services.ChronologyWrite(
+        indicator=chronology.indicator,
+        datetime=_maybe_value(chronology.datetime),
+        source_url=_maybe_value(chronology.source_url, ""),
+        content=_maybe_value(chronology.content, ""),
+    )
+
+
 def _chronology_writes(
     data: CalendarIncidentInput,
 ) -> tuple[services.ChronologyWrite, ...]:
     return tuple(
-        services.ChronologyWrite(
-            indicator=chronology.indicator,
-            datetime=_maybe_value(chronology.datetime),
-            source_url=_maybe_value(chronology.source_url, ""),
-            content=_maybe_value(chronology.content, ""),
-        )
+        _chronology_write_from_input(chronology)
         for chronology in _maybe_value(data.chronologies) or ()
     )
 
@@ -169,6 +176,87 @@ class IncidentMutations:
                 info.context.user,
                 is_admin=is_admin,
                 incident_id=int(calendar_incident_id),
+            )
+        except services.IncidentServiceError as exc:
+            _raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def create_chronology(
+        self,
+        info: Info,
+        calendar_incident_id: strawberry.ID,
+        input: CalendarIncidentChronologyInput,
+    ) -> GenericMutationReturn:
+        is_admin = await has_admin_claim(info.context.user)
+        try:
+            await services.create_chronology(
+                info.context.user,
+                is_admin=is_admin,
+                calendar_incident_id=int(calendar_incident_id),
+                write=_chronology_write_from_input(input),
+            )
+        except services.IncidentServiceError as exc:
+            _raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def update_chronology(
+        self,
+        info: Info,
+        chronology_id: strawberry.ID,
+        input: CalendarIncidentChronologyInput,
+    ) -> GenericMutationReturn:
+        is_admin = await has_admin_claim(info.context.user)
+        try:
+            await services.update_chronology(
+                info.context.user,
+                is_admin=is_admin,
+                chronology_id=int(chronology_id),
+                write=_chronology_write_from_input(input),
+            )
+        except services.IncidentServiceError as exc:
+            _raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsAdmin])
+    async def approve_chronology(
+        self, info: Info, chronology_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        try:
+            await services.approve_chronology(
+                info.context.user, chronology_id=int(chronology_id)
+            )
+        except services.IncidentServiceError as exc:
+            _raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def reorder_chronology(
+        self, info: Info, chronology_id: strawberry.ID, target_order: int
+    ) -> GenericMutationReturn:
+        is_admin = await has_admin_claim(info.context.user)
+        try:
+            await services.reorder_chronology(
+                info.context.user,
+                is_admin=is_admin,
+                chronology_id=int(chronology_id),
+                target_order=target_order,
+            )
+        except services.IncidentServiceError as exc:
+            _raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def delete_chronology(
+        self, info: Info, chronology_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        is_admin = await has_admin_claim(info.context.user)
+        try:
+            await services.delete_chronology(
+                info.context.user,
+                is_admin=is_admin,
+                chronology_id=int(chronology_id),
             )
         except services.IncidentServiceError as exc:
             _raise_service_error(exc)
