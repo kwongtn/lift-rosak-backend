@@ -18,6 +18,9 @@ class SocialMediaLinkWrite:
     title: str = ""
     incident_id: int | None = None
     category_ids: tuple[int, ...] = ()
+    line_ids: tuple[int, ...] = ()
+    vehicle_ids: tuple[int, ...] = ()
+    station_ids: tuple[int, ...] = ()
 
 
 async def submit_social_media_link(
@@ -41,6 +44,12 @@ async def submit_social_media_link(
     )
     if write.category_ids:
         await sync_to_async(link.categories.set)(write.category_ids)
+    if write.line_ids:
+        await sync_to_async(link.lines.set)(write.line_ids)
+    if write.vehicle_ids:
+        await sync_to_async(link.vehicles.set)(write.vehicle_ids)
+    if write.station_ids:
+        await sync_to_async(link.stations.set)(write.station_ids)
     return link
 
 

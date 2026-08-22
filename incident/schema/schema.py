@@ -62,10 +62,7 @@ class IncidentScalars:
     )
 
     calendar_incident_categories: List[CalendarIncidentCategoryScalar] = (
-        strawberry_django.field(
-            resolver=get_calendar_incident_categories,
-            permission_classes=[IsAdmin],
-        )
+        strawberry_django.field(resolver=get_calendar_incident_categories)
     )
 
 

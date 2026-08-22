@@ -62,3 +62,6 @@ class SocialMediaLinkInput:
     # Optional GenericFK target — omit for "just dumping" links.
     incident_id: Maybe[strawberry.ID | None] = strawberry.UNSET
     category_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
+    line_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
+    vehicle_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
+    station_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET

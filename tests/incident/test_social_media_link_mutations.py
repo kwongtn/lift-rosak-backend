@@ -60,6 +60,45 @@ async def test_submit_social_media_link_with_and_without_incident():
 
 
 @pytest.mark.django_db
+async def test_submit_social_media_link_with_line_vehicle_station_tags():
+    from operation.models import Line, Station, Vehicle, VehicleType
+
+    user = await _make_user(5)
+
+    line = await sync_to_async(Line.objects.create)(
+        code="TST", display_name="Test Line", display_color="#123456"
+    )
+    v_type = await sync_to_async(VehicleType.objects.create)(
+        internal_name="TST_TYPE", display_name="Test Type"
+    )
+    vehicle = await sync_to_async(Vehicle.objects.create)(
+        identification_no="TST-01", vehicle_type=v_type
+    )
+    station = await sync_to_async(Station.objects.create)(display_name="Test Station")
+
+    link = await services.submit_social_media_link(
+        user,
+        write=services.SocialMediaLinkWrite(
+            url="https://x.com/lrt/status/999",
+            title="Tagged with assets",
+            line_ids=(line.id,),
+            vehicle_ids=(vehicle.id,),
+            station_ids=(station.id,),
+        ),
+    )
+
+    assert await sync_to_async(list)(link.lines.values_list("id", flat=True)) == [
+        line.id
+    ]
+    assert await sync_to_async(list)(link.vehicles.values_list("id", flat=True)) == [
+        vehicle.id
+    ]
+    assert await sync_to_async(list)(link.stations.values_list("id", flat=True)) == [
+        station.id
+    ]
+
+
+@pytest.mark.django_db
 async def test_mark_social_media_link_completed_records_admin_user():
     submitter = await _make_user(2)
     admin = await _make_user(3)

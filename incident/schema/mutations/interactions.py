@@ -61,6 +61,9 @@ class SocialMediaLinkMutations:
                         else None
                     ),
                     category_ids=tuple(maybe_value(input.category_ids) or ()),
+                    line_ids=tuple(maybe_value(input.line_ids) or ()),
+                    vehicle_ids=tuple(maybe_value(input.vehicle_ids) or ()),
+                    station_ids=tuple(maybe_value(input.station_ids) or ()),
                 ),
             )
         except services.IncidentServiceError as exc:
