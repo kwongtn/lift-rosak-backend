@@ -72,6 +72,7 @@ django==5.2.17
     # via django-health-check
     # via django-hijack
     # via django-model-utils
+    # via django-safedelete
     # via django-simple-history
     # via django-storages
     # via django-timezone-field
@@ -94,6 +95,7 @@ django-hijack==3.7.8
 django-mdeditor==0.1.20
 django-model-utils==5.0.0
 django-ordered-model==3.7.4
+django-safedelete==1.5.0
 django-simple-history==3.12.0
 django-storages==1.14.6
 django-timezone-field==7.1
@@ -163,6 +165,7 @@ kombu==5.6.2
 msgpack==1.1.0
     # via cachecontrol
 packaging==24.2
+    # via django-safedelete
     # via kombu
     # via strawberry-graphql
 pendulum==3.0.0
