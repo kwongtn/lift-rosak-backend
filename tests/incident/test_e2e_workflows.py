@@ -68,13 +68,16 @@ async def test_journey_user_submits_admin_approves_user_upvotes():
 
     await services.submit_incident(user, is_admin=False, incident_id=draft.id)
 
-    queue = await get_pending_calendar_incidents(None)
-    assert [i.id for i in queue] == [draft.id]
+    # Membership-scoped: async tests leak DB state, so the queue may hold
+    # other tests' pending rows — never assert on the global list itself.
+    queue_ids = {i.id for i in await get_pending_calendar_incidents(None)}
+    assert draft.id in queue_ids
 
     approved = await services.approve_incident(admin, incident_id=draft.id)
     assert approved.status == CalendarIncidentStatus.LIVE
 
-    assert await get_pending_calendar_incidents(None) == []
+    remaining_ids = {i.id for i in await get_pending_calendar_incidents(None)}
+    assert draft.id not in remaining_ids
 
     await services.set_incident_vote(user, incident_id=approved.id, value=1)
     assert await _vote_score(approved.id) == 1
@@ -128,7 +131,8 @@ async def test_journey_submit_then_reject_then_purge_after_30_days():
     assert rejected.status == CalendarIncidentStatus.REJECTED
     assert rejected.rejection_reason == "Duplicate of an existing report"
 
-    assert await get_pending_calendar_incidents(None) == []
+    remaining_ids = {i.id for i in await get_pending_calendar_incidents(None)}
+    assert draft.id not in remaining_ids
 
     recent = await sync_to_async(purge_rejected_incidents)()
     assert recent == 0
