@@ -5,15 +5,18 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('common', '0020_vote_model'),
+        ("common", "0020_vote_model"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='vote',
-            name='user',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='votes', to='common.user'),
+            model_name="vote",
+            name="user",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="votes",
+                to="common.user",
+            ),
         ),
     ]

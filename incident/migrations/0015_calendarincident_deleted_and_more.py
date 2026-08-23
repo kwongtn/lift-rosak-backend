@@ -10,70 +10,180 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('incident', '0014_socialmedialink'),
+        ("incident", "0014_socialmedialink"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='calendarincident',
-            name='deleted',
+            model_name="calendarincident",
+            name="deleted",
             field=models.DateTimeField(db_index=True, editable=False, null=True),
         ),
         migrations.AddField(
-            model_name='calendarincident',
-            name='deleted_by_cascade',
+            model_name="calendarincident",
+            name="deleted_by_cascade",
             field=models.BooleanField(default=False, editable=False),
         ),
         migrations.AddField(
-            model_name='calendarincident',
-            name='parent_incident',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='draft_revisions', to='incident.calendarincident'),
+            model_name="calendarincident",
+            name="parent_incident",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="draft_revisions",
+                to="incident.calendarincident",
+            ),
         ),
         migrations.AddField(
-            model_name='calendarincident',
-            name='status',
-            field=django_choices_field.fields.TextChoicesField(choices=[('draft', 'Draft'), ('pending_approval', 'Pending Approval'), ('live', 'Live'), ('rejected', 'Rejected')], default='draft', max_length=16),
+            model_name="calendarincident",
+            name="status",
+            field=django_choices_field.fields.TextChoicesField(
+                choices=[
+                    ("draft", "Draft"),
+                    ("pending_approval", "Pending Approval"),
+                    ("live", "Live"),
+                    ("rejected", "Rejected"),
+                ],
+                default="draft",
+                max_length=16,
+            ),
         ),
         migrations.AddField(
-            model_name='calendarincident',
-            name='version',
+            model_name="calendarincident",
+            name="version",
             field=models.PositiveIntegerField(default=1),
         ),
         migrations.CreateModel(
-            name='HistoricalCalendarIncident',
+            name="HistoricalCalendarIncident",
             fields=[
-                ('id', models.BigIntegerField(auto_created=True, blank=True, db_index=True, verbose_name='ID')),
-                ('order', models.PositiveIntegerField(db_index=True, editable=False, verbose_name='order')),
-                ('deleted', models.DateTimeField(db_index=True, editable=False, null=True)),
-                ('deleted_by_cascade', models.BooleanField(default=False, editable=False)),
-                ('created', model_utils.fields.AutoCreatedField(default=django.utils.timezone.now, editable=False, verbose_name='created')),
-                ('modified', model_utils.fields.AutoLastModifiedField(default=django.utils.timezone.now, editable=False, verbose_name='modified')),
-                ('start_datetime', models.DateTimeField()),
-                ('end_datetime', models.DateTimeField(blank=True, null=True)),
-                ('long_term', models.BooleanField(default=False, help_text='If the incident is long-term, only start date will be shown in the month calendar view.')),
-                ('inaccurate', models.BooleanField(default=False, help_text="Displays the 'inaccurate' indicator.")),
-                ('severity', models.CharField(choices=[('MAJOR', 'Major'), ('MINOR', 'Minor'), ('OTHERS', 'Others')], max_length=16)),
-                ('impact_factor', models.DecimalField(blank=True, decimal_places=2, default=0, help_text='Scores to deduct from full score of 100 per day. Will be prorated based on usual service hours when consolidating.', max_digits=5)),
-                ('title', models.CharField(default=None, max_length=64)),
-                ('brief', models.TextField(default=None)),
-                ('details', models.TextField(blank=True, default='')),
-                ('status', django_choices_field.fields.TextChoicesField(choices=[('draft', 'Draft'), ('pending_approval', 'Pending Approval'), ('live', 'Live'), ('rejected', 'Rejected')], default='draft', max_length=16)),
-                ('version', models.PositiveIntegerField(default=1)),
-                ('history_id', models.AutoField(primary_key=True, serialize=False)),
-                ('history_date', models.DateTimeField(db_index=True)),
-                ('history_change_reason', models.CharField(max_length=100, null=True)),
-                ('history_type', models.CharField(choices=[('+', 'Created'), ('~', 'Changed'), ('-', 'Deleted')], max_length=1)),
-                ('history_user', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to=settings.AUTH_USER_MODEL)),
-                ('parent_incident', models.ForeignKey(blank=True, db_constraint=False, null=True, on_delete=django.db.models.deletion.DO_NOTHING, related_name='+', to='incident.calendarincident')),
+                (
+                    "id",
+                    models.BigIntegerField(
+                        auto_created=True, blank=True, db_index=True, verbose_name="ID"
+                    ),
+                ),
+                (
+                    "order",
+                    models.PositiveIntegerField(
+                        db_index=True, editable=False, verbose_name="order"
+                    ),
+                ),
+                (
+                    "deleted",
+                    models.DateTimeField(db_index=True, editable=False, null=True),
+                ),
+                (
+                    "deleted_by_cascade",
+                    models.BooleanField(default=False, editable=False),
+                ),
+                (
+                    "created",
+                    model_utils.fields.AutoCreatedField(
+                        default=django.utils.timezone.now,
+                        editable=False,
+                        verbose_name="created",
+                    ),
+                ),
+                (
+                    "modified",
+                    model_utils.fields.AutoLastModifiedField(
+                        default=django.utils.timezone.now,
+                        editable=False,
+                        verbose_name="modified",
+                    ),
+                ),
+                ("start_datetime", models.DateTimeField()),
+                ("end_datetime", models.DateTimeField(blank=True, null=True)),
+                (
+                    "long_term",
+                    models.BooleanField(
+                        default=False,
+                        help_text="If the incident is long-term, only start date will be shown in the month calendar view.",
+                    ),
+                ),
+                (
+                    "inaccurate",
+                    models.BooleanField(
+                        default=False, help_text="Displays the 'inaccurate' indicator."
+                    ),
+                ),
+                (
+                    "severity",
+                    models.CharField(
+                        choices=[
+                            ("MAJOR", "Major"),
+                            ("MINOR", "Minor"),
+                            ("OTHERS", "Others"),
+                        ],
+                        max_length=16,
+                    ),
+                ),
+                (
+                    "impact_factor",
+                    models.DecimalField(
+                        blank=True,
+                        decimal_places=2,
+                        default=0,
+                        help_text="Scores to deduct from full score of 100 per day. Will be prorated based on usual service hours when consolidating.",
+                        max_digits=5,
+                    ),
+                ),
+                ("title", models.CharField(default=None, max_length=64)),
+                ("brief", models.TextField(default=None)),
+                ("details", models.TextField(blank=True, default="")),
+                (
+                    "status",
+                    django_choices_field.fields.TextChoicesField(
+                        choices=[
+                            ("draft", "Draft"),
+                            ("pending_approval", "Pending Approval"),
+                            ("live", "Live"),
+                            ("rejected", "Rejected"),
+                        ],
+                        default="draft",
+                        max_length=16,
+                    ),
+                ),
+                ("version", models.PositiveIntegerField(default=1)),
+                ("history_id", models.AutoField(primary_key=True, serialize=False)),
+                ("history_date", models.DateTimeField(db_index=True)),
+                ("history_change_reason", models.CharField(max_length=100, null=True)),
+                (
+                    "history_type",
+                    models.CharField(
+                        choices=[("+", "Created"), ("~", "Changed"), ("-", "Deleted")],
+                        max_length=1,
+                    ),
+                ),
+                (
+                    "history_user",
+                    models.ForeignKey(
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="+",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+                (
+                    "parent_incident",
+                    models.ForeignKey(
+                        blank=True,
+                        db_constraint=False,
+                        null=True,
+                        on_delete=django.db.models.deletion.DO_NOTHING,
+                        related_name="+",
+                        to="incident.calendarincident",
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'historical calendar incident',
-                'verbose_name_plural': 'historical calendar incidents',
-                'ordering': ('-history_date', '-history_id'),
-                'get_latest_by': ('history_date', 'history_id'),
+                "verbose_name": "historical calendar incident",
+                "verbose_name_plural": "historical calendar incidents",
+                "ordering": ("-history_date", "-history_id"),
+                "get_latest_by": ("history_date", "history_id"),
             },
             bases=(simple_history.models.HistoricalChanges, models.Model),
         ),

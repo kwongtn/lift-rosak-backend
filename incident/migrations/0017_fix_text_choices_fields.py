@@ -5,30 +5,51 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('incident', '0016_calendarincidentchronology_deleted_and_more'),
+        ("incident", "0016_calendarincidentchronology_deleted_and_more"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='calendarincident',
-            name='severity',
-            field=django_choices_field.fields.TextChoicesField(choices=[('MAJOR', 'Major'), ('MINOR', 'Minor'), ('OTHERS', 'Others')], max_length=6),
+            model_name="calendarincident",
+            name="severity",
+            field=django_choices_field.fields.TextChoicesField(
+                choices=[("MAJOR", "Major"), ("MINOR", "Minor"), ("OTHERS", "Others")],
+                max_length=6,
+            ),
         ),
         migrations.AlterField(
-            model_name='calendarincidentchronology',
-            name='indicator',
-            field=django_choices_field.fields.TextChoicesField(choices=[('GREEN', 'Green'), ('RED', 'Red'), ('BLUE', 'Blue'), ('GRAY', 'Gray')], max_length=5),
+            model_name="calendarincidentchronology",
+            name="indicator",
+            field=django_choices_field.fields.TextChoicesField(
+                choices=[
+                    ("GREEN", "Green"),
+                    ("RED", "Red"),
+                    ("BLUE", "Blue"),
+                    ("GRAY", "Gray"),
+                ],
+                max_length=5,
+            ),
         ),
         migrations.AlterField(
-            model_name='historicalcalendarincident',
-            name='severity',
-            field=django_choices_field.fields.TextChoicesField(choices=[('MAJOR', 'Major'), ('MINOR', 'Minor'), ('OTHERS', 'Others')], max_length=6),
+            model_name="historicalcalendarincident",
+            name="severity",
+            field=django_choices_field.fields.TextChoicesField(
+                choices=[("MAJOR", "Major"), ("MINOR", "Minor"), ("OTHERS", "Others")],
+                max_length=6,
+            ),
         ),
         migrations.AlterField(
-            model_name='historicalcalendarincidentchronology',
-            name='indicator',
-            field=django_choices_field.fields.TextChoicesField(choices=[('GREEN', 'Green'), ('RED', 'Red'), ('BLUE', 'Blue'), ('GRAY', 'Gray')], max_length=5),
+            model_name="historicalcalendarincidentchronology",
+            name="indicator",
+            field=django_choices_field.fields.TextChoicesField(
+                choices=[
+                    ("GREEN", "Green"),
+                    ("RED", "Red"),
+                    ("BLUE", "Blue"),
+                    ("GRAY", "Gray"),
+                ],
+                max_length=5,
+            ),
         ),
     ]

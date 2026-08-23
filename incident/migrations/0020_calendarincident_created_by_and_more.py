@@ -5,31 +5,51 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('common', '0021_alter_vote_user'),
-        ('incident', '0019_alter_socialmedialink_completed_by'),
+        ("common", "0021_alter_vote_user"),
+        ("incident", "0019_alter_socialmedialink_completed_by"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='calendarincident',
-            name='created_by',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='calendar_incidents', to='common.user'),
+            model_name="calendarincident",
+            name="created_by",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="calendar_incidents",
+                to="common.user",
+            ),
         ),
         migrations.AddField(
-            model_name='calendarincident',
-            name='rejection_reason',
-            field=models.TextField(blank=True, default='', help_text='Reason entered by the admin who rejected this incident.'),
+            model_name="calendarincident",
+            name="rejection_reason",
+            field=models.TextField(
+                blank=True,
+                default="",
+                help_text="Reason entered by the admin who rejected this incident.",
+            ),
         ),
         migrations.AddField(
-            model_name='historicalcalendarincident',
-            name='created_by',
-            field=models.ForeignKey(blank=True, db_constraint=False, null=True, on_delete=django.db.models.deletion.DO_NOTHING, related_name='+', to='common.user'),
+            model_name="historicalcalendarincident",
+            name="created_by",
+            field=models.ForeignKey(
+                blank=True,
+                db_constraint=False,
+                null=True,
+                on_delete=django.db.models.deletion.DO_NOTHING,
+                related_name="+",
+                to="common.user",
+            ),
         ),
         migrations.AddField(
-            model_name='historicalcalendarincident',
-            name='rejection_reason',
-            field=models.TextField(blank=True, default='', help_text='Reason entered by the admin who rejected this incident.'),
+            model_name="historicalcalendarincident",
+            name="rejection_reason",
+            field=models.TextField(
+                blank=True,
+                default="",
+                help_text="Reason entered by the admin who rejected this incident.",
+            ),
         ),
     ]

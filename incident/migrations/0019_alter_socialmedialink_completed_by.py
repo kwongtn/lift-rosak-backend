@@ -5,16 +5,21 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('common', '0021_alter_vote_user'),
-        ('incident', '0018_alter_socialmedialink_user'),
+        ("common", "0021_alter_vote_user"),
+        ("incident", "0018_alter_socialmedialink_user"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='socialmedialink',
-            name='completed_by',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='completed_social_media_links', to='common.user'),
+            model_name="socialmedialink",
+            name="completed_by",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="completed_social_media_links",
+                to="common.user",
+            ),
         ),
     ]
