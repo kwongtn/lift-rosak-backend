@@ -1,3 +1,4 @@
+
 type Asset {
   id: ID!
   assetType: String!
@@ -37,7 +38,22 @@ type BusType {
 }
 
 type CalendarIncidentCategoryScalar {
+  id: ID!
   name: String!
+}
+
+enum CalendarIncidentChronologyIndicator {
+  GREEN
+  RED
+  BLUE
+  GRAY
+}
+
+input CalendarIncidentChronologyInput {
+  indicator: CalendarIncidentChronologyIndicator!
+  datetime: DateTime
+  sourceUrl: String
+  content: String
 }
 
 type CalendarIncidentChronologyScalar {
@@ -48,6 +64,9 @@ type CalendarIncidentChronologyScalar {
   datetime: DateTime!
   content: String!
   sourceUrl: String
+  voteScore: Int!
+  voteBreakdown: VoteBreakdown!
+  userVote: Int!
 }
 
 input CalendarIncidentDateFilter {
@@ -74,6 +93,24 @@ type CalendarIncidentGroupByDateSeverityScalar {
   isLongTerm: Boolean
 }
 
+input CalendarIncidentInput {
+  title: String!
+  brief: String!
+  startDatetime: DateTime!
+  severity: CalendarIncidentSeverity!
+  endDatetime: DateTime
+  longTerm: Boolean
+  inaccurate: Boolean
+  impactFactor: Float
+  details: String
+  lineIds: [ID!]
+  vehicleIds: [ID!]
+  stationIds: [ID!]
+  categoryIds: [ID!]
+  chronologies: [CalendarIncidentChronologyInput!]
+  version: Int
+}
+
 input CalendarIncidentOrder {
   id: Ordering
   order: Ordering
@@ -84,9 +121,10 @@ input CalendarIncidentOrder {
 
 type CalendarIncidentScalar {
   id: ID!
+  created: DateTime!
   startDatetime: DateTime!
   endDatetime: DateTime
-  severity: String!
+  severity: CalendarIncidentSeverity!
   title: String!
   brief: String!
   details: String!
@@ -99,8 +137,17 @@ type CalendarIncidentScalar {
   categories: [CalendarIncidentCategoryScalar!]!
   chronologies: [CalendarIncidentChronologyScalar!]!
   medias: [MediaScalar!]!
+  voteScore: Int!
+  voteBreakdown: VoteBreakdown!
+  userVote: Int!
   hasDetails: Boolean!
   lastUpdated: DateTime!
+}
+
+enum CalendarIncidentSeverity {
+  MAJOR
+  MINOR
+  OTHERS
 }
 
 """Date (isoformat)"""
@@ -283,6 +330,15 @@ type EventScalar {
   isMine: Boolean!
 }
 
+input ExtractDataInput {
+  url: String!
+}
+
+type ExtractedIncidentDataScalar {
+  requestId: String!
+  data: JSON!
+}
+
 type FavouriteVehicleData {
   vehicle: Vehicle!
   count: Int!
@@ -290,6 +346,7 @@ type FavouriteVehicleData {
 
 type GenericMutationReturn {
   ok: Boolean!
+  id: Int
 }
 
 """A geographical point that gets 'x, y' or 'x, y, z' as a tuple."""
@@ -498,6 +555,23 @@ type Mutation {
   deleteEvent(input: DeleteEventInput!): GenericMutationReturn!
   addEvent(input: EventInput!): EventScalar!
   markAsRead(input: MarkEventAsReadInput!): GenericMutationReturn!
+  createCalendarIncident(input: CalendarIncidentInput!): GenericMutationReturn!
+  updateCalendarIncident(calendarIncidentId: ID!, input: CalendarIncidentInput!): GenericMutationReturn!
+  submitCalendarIncident(calendarIncidentId: ID!): GenericMutationReturn!
+  approveCalendarIncident(calendarIncidentId: ID!): GenericMutationReturn!
+  rejectCalendarIncident(calendarIncidentId: ID!, reason: String!): GenericMutationReturn!
+  deleteCalendarIncident(calendarIncidentId: ID!): GenericMutationReturn!
+  createChronology(calendarIncidentId: ID!, input: CalendarIncidentChronologyInput!): GenericMutationReturn!
+  updateChronology(chronologyId: ID!, input: CalendarIncidentChronologyInput!): GenericMutationReturn!
+  approveChronology(chronologyId: ID!): GenericMutationReturn!
+  reorderChronology(chronologyId: ID!, targetOrder: Int!): GenericMutationReturn!
+  deleteChronology(chronologyId: ID!): GenericMutationReturn!
+  upvote(calendarIncidentId: ID!): GenericMutationReturn!
+  downvote(calendarIncidentId: ID!): GenericMutationReturn!
+  removeVote(calendarIncidentId: ID!): GenericMutationReturn!
+  submitSocialMediaLink(input: SocialMediaLinkInput!): GenericMutationReturn!
+  markSocialMediaLinkCompleted(socialMediaLinkId: ID!): GenericMutationReturn!
+  extractDataFromUrl(input: ExtractDataInput!): ExtractedIncidentDataScalar!
   triggerLineVehicleStatusSnapshot(input: TriggerInput!): GenericMutationReturn!
 }
 
@@ -572,9 +646,33 @@ type Query {
   stationIncidents(filters: StationIncidentFilter): [StationIncident!]!
   calendarIncidents(filters: CalendarIncidentFilter, order: CalendarIncidentOrder): [CalendarIncidentScalar!]!
   calendarIncidentsBySeverityCount(startDate: Date, endDate: Date, groupBy: GroupByEnum! = DAY): [CalendarIncidentGroupByDateSeverityScalar!]!
+  pendingCalendarIncidents(search: String): [CalendarIncidentScalar!]!
+  socialMediaLinks(search: String, categoryId: ID, completed: Boolean): [SocialMediaLinkScalar!]!
+  calendarIncidentCategories: [CalendarIncidentCategoryScalar!]!
   locations(filters: LocationFilter, order: LocationOrder, pagination: OffsetPaginationInput): [Location!]!
   buses(order: BusOrder, pagination: OffsetPaginationInput): [Bus!]!
   locationsCount(filters: LocationFilter): Int!
+}
+
+input SocialMediaLinkInput {
+  url: String!
+  title: String
+  incidentId: ID
+  categoryIds: [ID!]
+  lineIds: [ID!]
+  vehicleIds: [ID!]
+  stationIds: [ID!]
+}
+
+type SocialMediaLinkScalar {
+  id: ID!
+  url: String!
+  title: String!
+  created: DateTime!
+  completed: Boolean!
+  completedAt: DateTime
+  user: UserScalar!
+  categories: [CalendarIncidentCategoryScalar!]!
 }
 
 type Source {
@@ -866,6 +964,11 @@ input VehicleTypeFilter {
   NOT: VehicleTypeFilter
   DISTINCT: Boolean
   lineId: ID
+}
+
+type VoteBreakdown {
+  upvotes: Int!
+  downvotes: Int!
 }
 
 input WebLocationInput {
