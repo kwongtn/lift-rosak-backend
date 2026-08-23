@@ -84,6 +84,7 @@ class IncidentModelTests(TestCase):
         )
         chronology = CalendarIncidentChronology.objects.create(
             calendar_incident=incident,
+            indicator=CalendarIncidentChronologyIndicator.GREEN,
             content="Repair team dispatched",
             datetime=timezone.now(),
         )
