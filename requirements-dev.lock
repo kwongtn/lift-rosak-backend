@@ -270,6 +270,7 @@ requests==2.34.2
     # via imgurpython
 rsa==4.9
     # via google-auth
+ruff==0.16.4
 s3transfer==0.19.2
     # via boto3
 sentry-sdk==2.66.1
