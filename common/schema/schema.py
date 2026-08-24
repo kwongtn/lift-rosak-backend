@@ -42,8 +42,8 @@ class CommonScalars:
         try:
             from common.models import User
 
-            return await User.objects.aget(id=int(id))
-        except (User.DoesNotExist, ValueError):
+            return await User.objects.aget(firebase_id=id)
+        except User.DoesNotExist:
             return None
 
     @strawberry.field

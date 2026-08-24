@@ -610,7 +610,7 @@ class UserPrivacyTests(TestCase):
         self.assertFalse(user.spotting_data_public)
 
     async def test_public_user_query_returns_user_by_id(self):
-        """publicUser(id:) query should return user when ID exists"""
+        """publicUser(id:) query should return user when Firebase uid exists"""
         from common.models import User
         from rosak.tests import execute_graphql_async
 
@@ -630,10 +630,30 @@ class UserPrivacyTests(TestCase):
             }
         """
         result = await execute_graphql_async(
-            query, variables={"id": str(owner.id)}, user=other_user
+            query, variables={"id": owner.firebase_id}, user=other_user
         )
         self.assertIsNone(result.errors, f"Query failed: {result.errors}")
         self.assertEqual(result.data["publicUser"]["nickname"], "OwnerUser")
+
+    async def test_public_user_query_returns_null_for_unknown_uid(self):
+        """publicUser(id:) should return null for a non-existent Firebase uid"""
+        from common.models import User
+        from rosak.tests import execute_graphql_async
+
+        viewer = await User.objects.acreate(firebase_id="viewer-uid", nickname="V")
+
+        query = """
+            query GetPublicUser($id: ID!) {
+                publicUser(id: $id) {
+                    nickname
+                }
+            }
+        """
+        result = await execute_graphql_async(
+            query, variables={"id": "no-such-firebase-uid"}, user=viewer
+        )
+        self.assertIsNone(result.errors)
+        self.assertIsNone(result.data["publicUser"])
 
     async def test_spottings_field_null_when_private(self):
         """Owner's spottings should be null for non-owners when private"""
@@ -658,7 +678,7 @@ class UserPrivacyTests(TestCase):
             }
         """
         result = await execute_graphql_async(
-            query, variables={"id": str(owner.id)}, user=other_user
+            query, variables={"id": owner.firebase_id}, user=other_user
         )
         self.assertIsNone(result.errors)
         self.assertIsNone(
@@ -688,7 +708,7 @@ class UserPrivacyTests(TestCase):
             }
         """
         result = await execute_graphql_async(
-            query, variables={"id": str(owner.id)}, user=other_user
+            query, variables={"id": owner.firebase_id}, user=other_user
         )
         self.assertIsNone(result.errors)
         self.assertIsNotNone(
@@ -715,7 +735,7 @@ class UserPrivacyTests(TestCase):
             }
         """
         result = await execute_graphql_async(
-            query, variables={"id": str(owner.id)}, user=owner
+            query, variables={"id": owner.firebase_id}, user=owner
         )
         self.assertIsNone(result.errors)
         self.assertIsNotNone(
