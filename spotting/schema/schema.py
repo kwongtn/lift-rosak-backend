@@ -11,7 +11,7 @@ from strawberry.types import Info
 
 from common.schema.scalars import GenericMutationReturn
 from operation.models import StationLine
-from rosak.permissions import IsAdmin, IsLoggedIn, IsRecaptchaChallengePassed
+from rosak.permissions import IsLoggedIn, IsRecaptchaChallengePassed
 from spotting import models
 from spotting.enums import SpottingDataSource, SpottingEventType
 from spotting.schema.filters import EventFilter
@@ -175,9 +175,7 @@ class SpottingMutations:
             wheel_status=event.wheel_status,
         )
 
-    @strawberry.mutation(
-        permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed, IsAdmin]
-    )
+    @strawberry.mutation(permission_classes=[IsLoggedIn, IsRecaptchaChallengePassed])
     async def mark_as_read(
         self, input: MarkEventAsReadInput, info: Info
     ) -> GenericMutationReturn:

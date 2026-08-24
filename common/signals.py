@@ -3,7 +3,8 @@ from django.dispatch import receiver
 
 from common.enums import ClearanceType, TemporaryMediaStatus
 from common.models import TemporaryMedia
-from common.tasks import (  # check_temporary_media_nsfw,
+from common.tasks import (
+    check_temporary_media_nsfw,
     convert_temporary_media_to_media_task,
 )
 
@@ -33,8 +34,8 @@ def convert_temporary_media_to_media(
                     "temporary_media_id": instance.id,
                 }
             )
-            # check_temporary_media_nsfw.apply_async(
-            #     kwargs={
-            #         "temporary_media_id": instance.id,
-            #     }
-            # )
+            check_temporary_media_nsfw.apply_async(
+                kwargs={
+                    "temporary_media_id": instance.id,
+                }
+            )

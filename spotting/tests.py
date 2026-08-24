@@ -791,10 +791,11 @@ class SpottingGraphQLTests(TestCase):
                 return_value=mock_firebase_non_admin_user,
             ),
         ):
-            res_forbidden = await execute_graphql_async(
+            res_non_admin = await execute_graphql_async(
                 mutation, variables=variables, user=self.user
             )
-            self.assertIsNotNone(res_forbidden.errors)
+            self.assertIsNone(res_non_admin.errors)
+            self.assertTrue(res_non_admin.data["markAsRead"]["ok"])
 
         with (
             patch(

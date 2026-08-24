@@ -112,6 +112,7 @@ class StationIncident(IncidentAbstractModel):
             models.UniqueConstraint(
                 fields=["is_last", "station"],
                 name="%(app_label)s_%(class)s_unique_is_last_station",
+                condition=Q(is_last=True),
             ),
         ]
 
