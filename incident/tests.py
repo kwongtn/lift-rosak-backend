@@ -614,6 +614,25 @@ class TestCalendarIncidentFilter(TestCase):
             self._apply_date_filter(date_input)
         self.assertIn("date range requires both start and end", str(ctx.exception))
 
+    def _apply_ongoing_filter(self, value):
+        from incident.schema.filters import CalendarIncidentFilter
+
+        filter_method = vars(CalendarIncidentFilter)["ongoing"]
+        q = filter_method(CalendarIncidentFilter(), value=value, prefix="")
+        return CalendarIncident.objects.filter(q)
+
+    def test_filter_ongoing_true_matches_only_incidents_without_end_date(self):
+        results = self._apply_ongoing_filter(True)
+        self.assertIn(self.incident_ongoing_jan, results)
+        self.assertNotIn(self.incident_jan, results)
+        self.assertNotIn(self.incident_jun, results)
+
+    def test_filter_ongoing_false_matches_only_resolved_incidents(self):
+        results = self._apply_ongoing_filter(False)
+        self.assertIn(self.incident_jan, results)
+        self.assertIn(self.incident_jun, results)
+        self.assertNotIn(self.incident_ongoing_jan, results)
+
 
 class TestFilterDecorators(TestCase):
     """Test that filter decorators are correctly applied."""

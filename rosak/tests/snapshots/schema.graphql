@@ -83,6 +83,7 @@ input CalendarIncidentFilter {
   OR: CalendarIncidentFilter
   NOT: CalendarIncidentFilter
   DISTINCT: Boolean
+  ongoing: Boolean
   date: CalendarIncidentDateFilter
 }
 

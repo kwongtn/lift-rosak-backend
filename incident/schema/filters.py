@@ -52,6 +52,14 @@ class CalendarIncidentFilter:
     severity: Optional[str]
 
     @strawberry_django.filter_field
+    def ongoing(self, value: bool, prefix) -> Q:
+        """Incidents with no end date yet — independent of any `date` window, so a
+        client can always fetch "what's currently broken" without knowing/guessing which
+        date range it started in (see docs/components/incident.md's read-only status-page
+        feature opportunity)."""
+        return Q(end_datetime__isnull=True) if value else Q(end_datetime__isnull=False)
+
+    @strawberry_django.filter_field
     def date(self, value: CalendarIncidentDateFilter, prefix) -> Q:
         root_q = Q()
 
