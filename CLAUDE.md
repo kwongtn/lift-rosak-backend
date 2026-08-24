@@ -164,7 +164,9 @@ of wrong cross-app assumptions.
 credentials, and never echo their contents into logs or output.
 
 **Git commits** — history is conventional-commits (`feat(incident): …`,
-`fix(ci): …`). When a commit includes AI-assisted work, append a `Co-authored-by:`
+`fix(ci): …`). Commit at logical checkpoints — one concern per commit — so the history
+reads chronologically and the working tree is never left full of uncommitted changes;
+push only when asked. When a commit includes AI-assisted work, append a `Co-authored-by:`
 trailer that names the agent **and** the model used, e.g.
 `Co-authored-by: opencode (opencode-go/deepseek-v4-flash) <noreply@opencode.ai>` or
 `Co-authored-by: Claude Code (claude-sonnet-4-5) <noreply@anthropic.com>`. Never omit
