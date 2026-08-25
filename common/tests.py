@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils.timezone import now
 from strawberry import UNSET
 from strawberry.types.maybe import Some
@@ -744,7 +744,7 @@ class UserPrivacyTests(TestCase):
         )
 
 
-class SpottingDataPublicMigrationTests(TransactionTestCase):
+class SpottingDataPublicMigrationTests(TestCase):
     """Test migration sets correct defaults for spotting_data_public"""
 
     def test_new_users_have_private_data_by_default(self):
