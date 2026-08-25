@@ -11,13 +11,21 @@ class TelegramLogAdmin(
     list_display = (
         "__str__",
         "direction",
+        "retry_count",
+        "last_error",
+        "sent_at",
         "created",
         "modified",
     )
     list_filter = ("direction",)
 
     model = TelegramLogs
-    readonly_fields = ("prettified_payload",)
+    readonly_fields = (
+        "prettified_payload",
+        "retry_count",
+        "last_error",
+        "sent_at",
+    )
 
     def prettified_payload(self, instance):
         self.prettify_json(instance.payload)

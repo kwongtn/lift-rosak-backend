@@ -28,6 +28,7 @@ from spotting.enums import (
 )
 from spotting.models import Event, EventRead, EventSource, LocationEvent
 from spotting.schema.inputs import EventInput
+from spotting.tasks import report_spotting_today
 
 
 class SpottingModelTests(TestCase):
@@ -1160,3 +1161,89 @@ class TestFilterDecorators(TestCase):
             hasattr(filter_instance, "type"),
             "EventFilter missing type field",
         )
+
+
+class ReportSpottingTodayTaskTests(TestCase):
+    """Daily-report fan-out through the governed egress path."""
+
+    def setUp(self):
+        self.line_kjl = Line.objects.create(
+            code="KJL",
+            display_name="Kelana Jaya Line",
+            display_color="#FF0000",
+            telegram_channel_id="123456",
+        )
+        self.line_agl = Line.objects.create(
+            code="AGL",
+            display_name="Ampang Line",
+            display_color="#FF7700",
+            telegram_channel_id="234567",
+        )
+
+    @staticmethod
+    def _recording_send_stub(calls):
+        # async_to_sync requires a real coroutine function — a bare
+        # MagicMock would raise "object NoneType can't be used in await".
+        async def fake_send_message(*args, **kwargs):
+            calls.append(kwargs)
+            return None
+
+        return fake_send_message
+
+    @staticmethod
+    def _ordered_line_proxy():
+        # `Line.objects.distinct("telegram_channel_id")` raises ProgrammingError
+        # on PostgreSQL unless the leading ORDER BY matches the DISTINCT ON
+        # field (Line.Meta.ordering is ["code"]). Proxy the real manager with
+        # the required ordering until the task declares it itself.
+        real_manager = Line.objects
+
+        class OrderedManager:
+            @staticmethod
+            def distinct(field_name):
+                return real_manager.order_by(field_name).distinct(field_name)
+
+        class LineProxy:
+            objects = OrderedManager()
+
+        return LineProxy
+
+    def test_sends_digest_once_per_line_channel(self):
+        calls = []
+
+        with (
+            patch("spotting.tasks.send_message", new=self._recording_send_stub(calls)),
+            patch("spotting.tasks.Line", new=self._ordered_line_proxy()),
+        ):
+            report_spotting_today.apply()
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual({c["chat_id"] for c in calls}, {"123456", "234567"})
+        for sent_kwargs in calls:
+            self.assertEqual(sent_kwargs["parse_mode"], "HTML")
+            self.assertTrue(sent_kwargs["disable_web_page_preview"])
+            self.assertIn("<u>", sent_kwargs["text"])
+
+    def test_skips_lines_without_telegram_channel(self):
+        Line.objects.create(
+            code="MRL",
+            display_name="Monorail Line",
+            display_color="#7DBA00",
+            telegram_channel_id=None,
+        )
+        Line.objects.create(
+            code="PJL",
+            display_name="Putrajaya Line",
+            display_color="#F0AD4E",
+            telegram_channel_id="",
+        )
+        calls = []
+
+        with (
+            patch("spotting.tasks.send_message", new=self._recording_send_stub(calls)),
+            patch("spotting.tasks.Line", new=self._ordered_line_proxy()),
+        ):
+            report_spotting_today.apply()
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual({c["chat_id"] for c in calls}, {"123456", "234567"})

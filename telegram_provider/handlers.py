@@ -27,7 +27,7 @@ from spotting.enums import (
 from spotting.models import Event, EventSource
 from telegram_provider.models import TelegramLogs, TelegramSpottingEventLog
 from telegram_provider.parsers import spotting_parser
-from telegram_provider.utils import get_daily_updates, infinite_retry_on_error
+from telegram_provider.utils import get_daily_updates, retry_on_error, send_message
 
 if TYPE_CHECKING:
     from telegram.ext import ContextTypes
@@ -76,11 +76,12 @@ async def error_handler(update: object, context: "ContextTypes.DEFAULT_TYPE") ->
     )
     print(message)
 
-    # # Finally, send the message
-    # # TODO: Fix this
-    # await context.bot.send_message(
-    #     chat_id="DEVELOPER_CHAT_ID", text=message, parse_mode=ParseMode.HTML
-    # )
+    if settings.TELEGRAM_ADMIN_CHAT_ID:
+        await send_message(
+            chat_id=settings.TELEGRAM_ADMIN_CHAT_ID,
+            text=message,
+            parse_mode="HTML",
+        )
 
 
 async def help(update: Update, context) -> None:
@@ -191,9 +192,7 @@ async def delete(update: Update, context) -> None:
     event: "Event" = event_log.spotting_event
     try:
         await event.auser_deletion(user_id=user.id)
-        await infinite_retry_on_error(
-            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
-        )
+        await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_UP)
     except Exception as e:
         await update.message.reply_html(
             text=f"Failed to delete spotting entry for {event.id}: {str(e)}"
@@ -222,9 +221,7 @@ async def spot(update: Update, context) -> None:
         await update.message.reply_text(
             text=str(e),
         )
-        await infinite_retry_on_error(
-            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
-        )
+        await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN)
         raise e
 
     try:
@@ -315,9 +312,7 @@ async def spot(update: Update, context) -> None:
             print(f"Message is None: {update.to_json()}")
             return
 
-        await infinite_retry_on_error(
-            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
-        )
+        await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_UP)
 
     except Exception as e:
         print(e)
@@ -327,9 +322,7 @@ async def spot(update: Update, context) -> None:
             print(f"Message is None: {update.to_json()}")
             return
 
-        await infinite_retry_on_error(
-            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
-        )
+        await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN)
         raise e
 
 
