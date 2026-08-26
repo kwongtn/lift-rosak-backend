@@ -1,6 +1,6 @@
-# CLAUDE.md — rosak_backend
+# AGENTS.md — rosak_backend
 
-Django 4.2 + Strawberry GraphQL backend for the MLPTF/LRT community platform.
+Django 5.2 + Strawberry GraphQL backend for the MLPTF/LRT community platform.
 **This repo is backend-only.** The Angular SPA at `community.mlptf.org.my` lives in a
 separate repository and is only a consumer of `POST /graphql/` — never add frontend
 code here.
@@ -166,8 +166,7 @@ credentials, and never echo their contents into logs or output.
 **Git commits** — history is conventional-commits (`feat(incident): …`,
 `fix(ci): …`). Commit at logical checkpoints — one concern per commit — so the history
 reads chronologically and the working tree is never left full of uncommitted changes;
-push only when asked. When a commit includes AI-assisted work, append a `Co-authored-by:`
-trailer that names the agent **and** the model used, e.g.
-`Co-authored-by: opencode (opencode-go/deepseek-v4-flash) <noreply@opencode.ai>` or
-`Co-authored-by: Claude Code (claude-sonnet-4-5) <noreply@anthropic.com>`. Never omit
-the trailer for AI-assisted work, and never attribute AI work to a human co-author.
+push only when asked. Any AI-assisted commit must append a `Co-authored-by:` trailer naming the agent **and**
+the model used, e.g. `Co-authored-by: opencode (opencode-go/deepseek-v4-flash)
+<noreply@opencode.ai>` or `Co-authored-by: Claude Code (claude-sonnet-4-5)
+<noreply@anthropic.com>`. Never attribute AI work to a human co-author.
