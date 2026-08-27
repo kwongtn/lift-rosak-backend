@@ -5,7 +5,7 @@
 - **Core Responsibility:** A shared-primitives library app. It owns no data of its own and exposes no
   URLs, tasks or signals. It solves exactly one problem: giving the domain apps (`spotting`,
   `operation`, `incident`, `common`, `telegram_provider`, `chartography`) a single definition of
-  *cross-cutting geospatial and date-bucketing primitives* — an abstract GIS model, a lat/long
+  _cross-cutting geospatial and date-bucketing primitives_ — an abstract GIS model, a lat/long
   admin form, GeoDjango ↔ GraphQL scalars, one shared enum and one shared GraphQL input.
 - **Domain/Layer:** Django shared-kernel / cross-app foundation layer. It spans three layers at once:
   ORM (abstract model), Django admin presentation (form + mixin) and GraphQL schema primitives
@@ -16,22 +16,22 @@
 
 ### Exported abstractions (the app's real public API)
 
-| Primitive | File | Kind |
-| --- | --- | --- |
-| `WebLocationModel` | `generic/models.py` | Abstract Django GIS model (`accuracy`, `altitude`, `altitude_accuracy`, `heading`, `speed`, `location: PointField`) — mirrors the browser Geolocation API payload |
-| `GeometricForm` | `generic/views.py` | Abstract `forms.ModelForm` replacing the admin GIS map widget with `latitude`/`longitude` float fields |
-| `JsonPrettifyAdminMixin` | `generic/admin.py` | Admin mixin, `prettify_json()` → Pygments-highlighted JSON |
-| `DateGroupings` | `generic/schema/enums.py` | `@strawberry.enum` — `YEAR / MONTH / WEEK / DAY` |
-| `WebLocationInput` | `generic/schema/inputs.py` | `@strawberry.input` mirroring `WebLocationModel` (flat `latitude`/`longitude`/`altitude`) |
-| `GeoPoint`, `GeoLineString`, `GeoLinearRing`, `GeoPolygon`, `GeoMultiPoint` | `generic/schema/scalars.py` | `strawberry.scalar` wrappers over `django.contrib.gis.geos` types |
-| `Point2D`, `GeometricSearchField`, `Point2D_SearchField` | `generic/types.py` | Plain `TypedDict`s for radius search — **currently unused anywhere** |
-| `GenericScalars`, `GenericMutations` | `generic/schema/schema.py` | Empty Strawberry query/mutation roots (see caveats) |
-| `PublicSpottingStats` | `generic/schema/types.py` | Empty `@strawberry.type` stub (see caveats) |
+| Primitive                                                                   | File                        | Kind                                                                                                                                                              |
+| --------------------------------------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WebLocationModel`                                                          | `generic/models.py`         | Abstract Django GIS model (`accuracy`, `altitude`, `altitude_accuracy`, `heading`, `speed`, `location: PointField`) — mirrors the browser Geolocation API payload |
+| `GeometricForm`                                                             | `generic/views.py`          | Abstract `forms.ModelForm` replacing the admin GIS map widget with `latitude`/`longitude` float fields                                                            |
+| `JsonPrettifyAdminMixin`                                                    | `generic/admin.py`          | Admin mixin, `prettify_json()` → Pygments-highlighted JSON                                                                                                        |
+| `DateGroupings`                                                             | `generic/schema/enums.py`   | `@strawberry.enum` — `YEAR / MONTH / WEEK / DAY`                                                                                                                  |
+| `WebLocationInput`                                                          | `generic/schema/inputs.py`  | `@strawberry.input` mirroring `WebLocationModel` (flat `latitude`/`longitude`/`altitude`)                                                                         |
+| `GeoPoint`, `GeoLineString`, `GeoLinearRing`, `GeoPolygon`, `GeoMultiPoint` | `generic/schema/scalars.py` | `strawberry.scalar` wrappers over `django.contrib.gis.geos` types                                                                                                 |
+| `Point2D`, `GeometricSearchField`, `Point2D_SearchField`                    | `generic/types.py`          | Plain `TypedDict`s for radius search — **currently unused anywhere**                                                                                              |
+| `GenericScalars`, `GenericMutations`                                        | `generic/schema/schema.py`  | Empty Strawberry query/mutation roots (see caveats)                                                                                                               |
+| `PublicSpottingStats`                                                       | `generic/schema/types.py`   | Empty `@strawberry.type` stub (see caveats)                                                                                                                       |
 
 ### Inputs (GraphQL arguments / input types / form data)
 
 - `WebLocationInput` — all seven fields typed `Optional[float]` **with no default**, so in Strawberry
-  they surface as nullable-but-*required* arguments. Consumers nevertheless test them against
+  they surface as nullable-but-_required_ arguments. Consumers nevertheless test them against
   `strawberry.UNSET` (`spotting/schema/schema.py:125-155`), a branch that cannot be reached as
   declared. Flagging as an inconsistency, not fixing it here.
 - `GeoPoint` scalar as an input: `parse_value=lambda v: Point(v)` turns an `(x, y[, z])` tuple into a
@@ -64,7 +64,7 @@
 - **`operation`** — `operation/admin.py:125` `StationForm(GeometricForm)`;
   `operation/schema/scalars.py:12-13,26,79,305` uses `DateGroupings` + `GeoPoint`;
   `operation/views.py:13,32,107` uses `DateGroupings`. `operation/schema/inputs.py:6` has a
-  *commented-out* `GeoPoint` import.
+  _commented-out_ `GeoPoint` import.
 - **`incident`** — `incident/admin.py:40,67` `VehicleIncidentLocationForm` and
   `StationIncidentLocationForm`, both `GeometricForm` subclasses.
 - **`common`** — `common/utils.py`, `common/schema/scalars.py`, `common/schema/types.py`,
@@ -77,10 +77,10 @@
 
 - **Stateless by design.** No models are concrete, so `generic/migrations/` contains only
   `__init__.py` — zero migrations have ever been generated for this app. Schema evolution of the
-  location fields therefore lives entirely in the *consuming* apps' migrations (e.g. `spotting`).
+  location fields therefore lives entirely in the _consuming_ apps' migrations (e.g. `spotting`).
 - The only real logic is `GeometricForm`'s bidirectional Point ↔ (lat, long) marshalling, and it is
   configured by **class attribute mutation, not inheritance**: subclasses assign
-  `GeometricForm.Meta.model` / `GeometricForm.Meta.widgets` on the *parent's* `Meta`. Because every
+  `GeometricForm.Meta.model` / `GeometricForm.Meta.widgets` on the _parent's_ `Meta`. Because every
   subclass writes to the same shared `Meta` object, this is order-dependent global mutation and a
   latent cross-app bug if two forms are ever bound in an unexpected import order. Worth noting; not
   changed here.
@@ -114,15 +114,11 @@
    and `rosak/schema.py` does **not** include them. A `@strawberry.type` with no fields is invalid in
    GraphQL, so wiring them in as-is would fail schema construction. Intent appears to be a public
    (unauthenticated) spotting-stats endpoint, but nothing is implemented.
-2. **Copy-paste bug in `generic/schema/scalars.py:40`** — `GeoMultiPoint` is declared as
-   `NewType("GeoLineString", Tuple[GeoPoint])`, i.e. it reuses the `GeoLineString` GraphQL name.
-   If both scalars were ever referenced in the same schema this would be a duplicate-type-name
-   collision. It is latent only because neither is used yet.
-3. **`generic/types.py` is dead code.** `Point2D`, `GeometricSearchField` and `Point2D_SearchField`
+2. **`generic/types.py` is dead code.** `Point2D`, `GeometricSearchField` and `Point2D_SearchField`
    have no importers; the radius-search feature they were meant to type was never built.
-4. **`generic/schema/` has no `__init__.py`.** It resolves as an implicit namespace package, which
+3. **`generic/schema/` has no `__init__.py`.** It resolves as an implicit namespace package, which
    works but is inconsistent with e.g. `spotting/schema/__init__.py`.
-5. **`generic/tests.py` is empty (0 bytes).** The shared primitives used by five apps have no test
+4. **`generic/tests.py` is empty (0 bytes).** The shared primitives used by five apps have no test
    coverage at all.
 
 ## 💡 Potential Feature Opportunities
@@ -154,19 +150,13 @@ apps, plus the correctness work that unblocks them.
    interpolating between station points, and a `GeoPolygon` filter argument gives deterministic
    bounding-box / corridor queries ("everything inside this map viewport") for `spotting` and
    `incident` via PostGIS `__within` / `__intersects`.
-   **Readiness:** `Partially ready` — the blocker is the copy-paste bug at
-   `/home/kwongtn/rosak_backend/generic/schema/scalars.py:40`, where `GeoMultiPoint` is declared as
-   `strawberry.scalar(NewType("GeoLineString", ...))`. That reuses `GeoLineString`'s GraphQL type
-   name, so the moment both scalars appear in one schema, `strawberry.Schema(...)` construction in
-   `rosak/schema.py` fails with a duplicate-type-name error. Change the `NewType` string to
-   `"GeoMultiPoint"` first (it is referenced nowhere, so this is a safe rename), then add the model
-   field plus migration in `operation/`.
+   **Readiness:** `Partially ready` — `GeoMultiPoint` now correctly uses `NewType("GeoMultiPoint", ...)` in `generic/schema/scalars.py`. Add the model field plus migration in `operation/`.
 
 3. **A `GeometricForm` that is safe to reuse, unblocking further GIS admin screens.** All four
    subclasses — `spotting/admin.py:15`, `operation/admin.py:125`, `incident/admin.py:40` and
    `incident/admin.py:67` — configure the form by assigning to the **parent's** shared
    `GeometricForm.Meta`. `incident` sets `GeometricForm.Meta.widgets = {"location":
-   forms.HiddenInput()}` while `spotting` and `operation` deliberately comment that line out, so
+forms.HiddenInput()}` while `spotting` and `operation` deliberately comment that line out, so
    whether the `location` field renders hidden in the spotting and station admin depends purely on
    module import order. Separately, `required = False` on each subclass is dead code: `latitude` and
    `longitude` are constructed in `GeometricForm`'s own class body with `required=required` while
@@ -181,7 +171,7 @@ apps, plus the correctness work that unblocks them.
 4. **Validation parity between the GraphQL ingestion path and the admin path.** The admin form bounds
    coordinates (`latitude` ±90, `longitude` ±180 in `generic/views.py:23-32`), but the mutation path
    does not: `spotting/schema/schema.py:148` builds `Point(x=location_input.longitude,
-   y=location_input.latitude)` straight from `WebLocationInput` with no range check, so a client can
+y=location_input.latitude)` straight from `WebLocationInput` with no range check, so a client can
    persist a `LocationEvent` at latitude 500. Adding a `clean()` (or `Meta.constraints`) on
    `WebLocationModel` — coordinate bounds, `accuracy` within a configured metre tolerance, and
    optionally a great-circle-distance ÷ elapsed-time check against a reporter's previous
@@ -191,7 +181,7 @@ apps, plus the correctness work that unblocks them.
    discards a legitimate `longitude == 0`.
    **Readiness:** `Partially ready` — two blockers. First, `WebLocationInput`
    (`generic/schema/inputs.py`) declares all seven fields as `Optional[float]` with **no default**,
-   which Strawberry renders as nullable-but-*required* arguments, making the `strawberry.UNSET`
+   which Strawberry renders as nullable-but-_required_ arguments, making the `strawberry.UNSET`
    branches at `spotting/schema/schema.py:125-153` unreachable; give each field
    `= strawberry.UNSET` so partial submissions and per-field validation both become expressible.
    Second, `generic/tests.py` is 0 bytes, so there is no harness to prove new validation rules do not
@@ -204,18 +194,7 @@ apps, plus the correctness work that unblocks them.
    `get_trends` aggregation helper, with no new query surface. The enum is a closed exhaustive switch
    (`common/utils.py:88-105` and `:64-81` both `raise RuntimeError` on an unknown member), so the
    blast radius is precisely known.
-   **Readiness:** `Not ready` — the enum edit is one line, but
-   `/home/kwongtn/rosak_backend/common/utils.py:58-81` `get_default_start_time()` is currently broken
-   for three of its four existing branches: it assigns `today.month = 1` (line 65), `today.day = 1`
-   (line 70) and `today.day = ...` (line 74) on a `datetime.date`, which is immutable and raises
-   `AttributeError: attribute 'month' of 'datetime.date' objects is not writable`. Only the `DAY`
-   branch works, which is why every caller
-   (`common/schema/scalars.py:153`, `operation/schema/scalars.py:85,311`, `common/utils.py:160`)
-   defaults to `DateGroupings.DAY`. Rewrite those branches with `date.replace(...)` first, then add
-   the new members and their arms in `get_default_start_time()`, `get_group_strs()`
-   (`common/utils.py:84-105`), the `display_year` / `display_month` / `display_week` lists
-   (`common/utils.py:162-170`) and the `date_group == DateGroupings.WEEK` check at
-   `common/utils.py:286`.
+   **Readiness:** `Partially ready` — `get_default_start_time()` is fixed (uses `date.replace()`). Add the enum members and their arms in `get_default_start_time()`, `get_group_strs()` (`common/utils.py:84-105`), the `display_year` / `display_month` / `display_week` lists (`common/utils.py:162-170`) and the `date_group == DateGroupings.WEEK` check at `common/utils.py:286`.
 
 ## 💡 Potential AI Feature Opportunities
 
