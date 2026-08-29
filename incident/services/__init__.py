@@ -33,6 +33,7 @@ from .incidents import (
 )
 from .social_links import (
     SocialMediaLinkWrite,
+    delete_social_media_link,
     mark_social_media_link_completed,
     submit_social_media_link,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "create_incident",
     "delete_chronology",
     "delete_incident",
+    "delete_social_media_link",
     "get_incident",
     "is_author",
     "mark_social_media_link_completed",

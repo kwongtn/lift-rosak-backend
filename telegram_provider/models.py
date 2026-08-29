@@ -24,3 +24,16 @@ class TelegramSpottingEventLog(models.Model):
         on_delete=models.CASCADE,
         related_name="telegram_logs",
     )
+
+
+class TelegramSocialMediaLinkLog(models.Model):
+    social_media_link = models.ForeignKey(
+        "incident.SocialMediaLink",
+        on_delete=models.CASCADE,
+        related_name="telegram_social_media_link_logs",
+    )
+    telegram_log = models.ForeignKey(
+        "telegram_provider.TelegramLogs",
+        on_delete=models.CASCADE,
+        related_name="social_media_link_logs",
+    )

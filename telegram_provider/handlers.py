@@ -16,8 +16,9 @@ from telegram import Update
 from telegram.constants import ReactionEmoji
 
 from common.models import User, UserVerificationCode
+from incident import services
 from operation.enums import VehicleStatus
-from operation.models import Line, Vehicle
+from operation.models import Line, StationLine, Vehicle
 from spotting.enums import (
     SpottingDataSource,
     SpottingEventType,
@@ -25,8 +26,12 @@ from spotting.enums import (
     SpottingWheelStatus,
 )
 from spotting.models import Event, EventSource
-from telegram_provider.models import TelegramLogs, TelegramSpottingEventLog
-from telegram_provider.parsers import spotting_parser
+from telegram_provider.models import (
+    TelegramLogs,
+    TelegramSocialMediaLinkLog,
+    TelegramSpottingEventLog,
+)
+from telegram_provider.parsers import link_parser, spotting_parser
 from telegram_provider.utils import get_daily_updates, retry_on_error, send_message
 
 if TYPE_CHECKING:
@@ -324,6 +329,183 @@ async def spot(update: Update, context) -> None:
 
         await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN)
         raise e
+
+
+async def submit_link(update: Update, context) -> None:
+    # Check if user has verified account
+    user = await User.objects.filter(telegram_id=update.message.from_user.id).afirst()
+
+    # If no, send error and ask user to verify before proceeding
+    if user is None:
+        await update.message.reply_html(
+            text=f'Please use the <code>/verify [code]</code> command to verify your telegram account before proceeding. You may obtain the code from the <a href="{env_url_dict.get(settings.ENVIRONMENT)}">TranSPOT</a> site, or visit <a href="https://github.com/kwongtn/rosak_firebase/wiki/Linking-to-Telegram">our wiki</a> for a detailed tutorial.'
+        )
+        return
+
+    # Else, parse syntax
+    parser = link_parser()
+    args = None
+    try:
+        args = parser.parse_args(update.message.text.split(" ")[1:])
+    except ArgumentError as e:
+        await update.message.reply_text(
+            text=str(e),
+        )
+        await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN)
+        raise e
+
+    try:
+        # Search for line
+        lines = Line.objects.filter(telegram_channel_id=update.effective_chat.id)
+
+        if not await lines.aexists():
+            error_text = "No line assigned for this channel."
+            await update.message.reply_html(text=error_text)
+            raise Exception(error_text)
+
+        line = await lines.afirst()
+
+        # Resolve optional vehicle within the line
+        vehicle_id = None
+        if args.vehicle:
+            vehicle = await Vehicle.objects.filter(
+                Q(identification_no__istartswith=args.vehicle)
+                & Q(lines__in=lines)
+                & ~Q(
+                    status__in=[
+                        VehicleStatus.MARRIED,
+                        VehicleStatus.DECOMMISSIONED,
+                    ]
+                )
+            ).afirst()
+
+            if vehicle is None:
+                error_text = (
+                    f"No vehicle found with the number <code>{args.vehicle}</code>"
+                )
+                await update.message.reply_html(text=error_text)
+                raise Exception(error_text)
+
+            vehicle_id = vehicle.id
+
+        # Resolve optional station within the line
+        station_id = None
+        if args.station:
+            station_line = None
+            for lookup in (
+                Q(internal_representation__iexact=args.station),
+                Q(station__display_name__iexact=args.station),
+                Q(display_name__iexact=args.station),
+            ):
+                station_line = (
+                    await StationLine.objects.filter(line__in=lines)
+                    .filter(lookup)
+                    .select_related("station")
+                    .afirst()
+                )
+                if station_line is not None:
+                    break
+
+            if station_line is None:
+                error_text = (
+                    f"No station found with the name <code>{args.station}</code>"
+                )
+                await update.message.reply_html(text=error_text)
+                raise Exception(error_text)
+
+            station_id = station_line.station_id
+
+        write = services.SocialMediaLinkWrite(
+            url=args.url,
+            title=args.title or "",
+            incident_id=args.incident_id,
+            line_ids=(line.id,),
+            vehicle_ids=(vehicle_id,) if vehicle_id is not None else (),
+            station_ids=(station_id,) if station_id is not None else (),
+        )
+
+        telegram_log, link = await asyncio.gather(
+            TelegramLogs.objects.filter(
+                payload__message__message_id=update.message.message_id
+            )
+            .order_by("-id")
+            .afirst(),
+            services.submit_social_media_link(user=user, write=write),
+        )
+
+        await TelegramSocialMediaLinkLog.objects.acreate(
+            social_media_link_id=link.id,
+            telegram_log_id=telegram_log.id,
+        )
+
+        if update.message is None:
+            # Flag message as error and do sentry bug record
+            print(f"Message is None: {update.to_json()}")
+            return
+
+        await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_UP)
+
+    except services.IncidentServiceError as e:
+        await update.message.reply_html(text=f"Failed to submit link: {str(e)}")
+        await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN)
+        return
+    except Exception as e:
+        print(e)
+        print(e.__class__)
+        if update.message is None:
+            # Flag message as error and do sentry bug record
+            print(f"Message is None: {update.to_json()}")
+            return
+
+        await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN)
+        raise e
+
+
+async def delete_link(update: Update, context) -> None:
+    # Check if user has verified account
+    user = await User.objects.filter(telegram_id=update.message.from_user.id).afirst()
+
+    # If no, send error and ask user to verify before proceeding
+    if user is None:
+        await update.message.reply_html(
+            text=f'Please use the <code>/verify [code]</code> command to verify your telegram account before proceeding. You may obtain the code from the <a href="{env_url_dict.get(settings.ENVIRONMENT)}">TranSPOT</a> site, or visit <a href="https://github.com/kwongtn/rosak_firebase/wiki/Linking-to-Telegram">our wiki</a> for a detailed tutorial.'
+        )
+        return
+
+    # Check if is a reply for another message
+    source_message = update.message.reply_to_message
+    if source_message is None:
+        await update.message.reply_html(
+            text="Please reply to the link entry you want to delete."
+        )
+        return
+
+    link_log = (
+        await TelegramSocialMediaLinkLog.objects.filter(
+            telegram_log__payload__message__message_id=source_message.message_id,
+            telegram_log__payload__message__chat__id=source_message.chat.id,
+        )
+        .select_related("social_media_link")
+        .afirst()
+    )
+    if link_log is None:
+        await update.message.reply_html(text="No link entry found for this message.")
+        return
+
+    link = link_log.social_media_link
+    try:
+        await services.delete_social_media_link(user=user, link_id=link.id)
+        await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_UP)
+    except services.IncidentServiceError as e:
+        await update.message.reply_html(text=f"Failed to delete link: {str(e)}")
+        await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN)
+        return
+    except Exception as e:
+        await update.message.reply_html(
+            text=f"Failed to delete link {link.id}: {str(e)}"
+        )
+        await retry_on_error(update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN)
+        return
 
 
 async def spotting_today(update: Update, context) -> None:

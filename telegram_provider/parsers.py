@@ -149,3 +149,51 @@ def spotting_parser():
     # )
 
     return parser
+
+
+def link_parser():
+    parser = ArgumentParser(
+        prog="/link",
+        description="Submit an incident link entry.",
+        formatter_class=Formatter,
+        add_help=False,
+    )
+
+    parser.add_argument(
+        "url",
+        help="URL of the incident link to submit.",
+    )
+
+    parser.add_argument(
+        "-id",
+        "--incident-id",
+        type=int,
+        help="Incident ID to associate the link with.",
+        default=None,
+    )
+
+    parser.add_argument(
+        "-t",
+        "--title",
+        type=str,
+        help="Title of the link.",
+        default="",
+    )
+
+    parser.add_argument(
+        "-v",
+        "--vehicle",
+        type=str,
+        help="Vehicle associated with the link.",
+        default=None,
+    )
+
+    parser.add_argument(
+        "-st",
+        "--station",
+        type=str,
+        help="Station associated with the link.",
+        default=None,
+    )
+
+    return parser

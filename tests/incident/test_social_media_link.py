@@ -1,9 +1,13 @@
+import asyncio
+
 from django.contrib.contenttypes.models import ContentType
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from common.models import User
 from incident.models import CalendarIncident, CalendarIncidentCategory, SocialMediaLink
+from incident.services import delete_social_media_link
+from incident.services.errors import IncidentServiceError
 from operation.models import Line, Station, Vehicle, VehicleType
 
 
@@ -94,3 +98,31 @@ class SocialMediaLinkTests(TestCase):
         self.assertTrue(
             CalendarIncidentCategory.objects.filter(name="Just Reporting").exists()
         )
+
+
+class SocialMediaLinkAsyncTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        self.user = User.objects.create(firebase_id="test-user-sml-async")
+        self.other_user = User.objects.create(firebase_id="other-user-async")
+
+    def test_delete_social_media_link_ownership(self):
+        """Owner can delete their link; non-owner raises IncidentServiceError."""
+        link = SocialMediaLink.objects.create(
+            url="https://example.com/test",
+            user=self.user,
+        )
+
+        # Owner can delete
+        asyncio.run(delete_social_media_link(self.user, link_id=link.id))
+        self.assertFalse(SocialMediaLink.objects.filter(id=link.id).exists())
+
+        # Non-owner cannot delete
+        link2 = SocialMediaLink.objects.create(
+            url="https://example.com/test2",
+            user=self.user,
+        )
+        with self.assertRaises(IncidentServiceError):
+            asyncio.run(delete_social_media_link(self.other_user, link_id=link2.id))
+        self.assertTrue(SocialMediaLink.objects.filter(id=link2.id).exists())

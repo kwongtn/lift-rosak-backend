@@ -10,6 +10,7 @@ from common.models import User
 from incident.models import CalendarIncident, SocialMediaLink
 
 from .access import get_incident
+from .errors import IncidentServiceError
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,3 +70,12 @@ async def mark_social_media_link_completed(
     await sync_to_async(_sync)()
     await sync_to_async(link.refresh_from_db)()
     return link
+
+
+async def delete_social_media_link(user: User, *, link_id: int) -> None:
+    link = await SocialMediaLink.objects.aget(pk=link_id)
+    if link.user_id != user.id:
+        raise IncidentServiceError(
+            f"SocialMediaLink {link_id} is not owned by this user."
+        )
+    await link.adelete()

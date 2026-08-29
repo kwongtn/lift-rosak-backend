@@ -44,6 +44,12 @@ handlers_dict = {
     "spotting_today": {
         "description": "Displays spotting stats for today",
     },
+    "link": {
+        "description": "Submit a social media link to an incident on this line",
+    },
+    "deletelink": {
+        "description": "Delete a link you submitted (reply to it)",
+    },
 }
 
 
@@ -86,6 +92,7 @@ class ASGILifespanSignalHandler:
         from telegram_provider.handlers import (
             dad_joke,
             delete,
+            delete_link,
             error_handler,
             favourite_vehicle,
             help,
@@ -93,6 +100,7 @@ class ASGILifespanSignalHandler:
             ping,
             spot,
             spotting_today,
+            submit_link,
             verify,
         )
 
@@ -107,6 +115,8 @@ class ASGILifespanSignalHandler:
             "spot": spot,
             "spotting_today": spotting_today,
             "delete": delete,
+            "link": submit_link,
+            "deletelink": delete_link,
         }
 
         for k, v in handlers_mapping.items():

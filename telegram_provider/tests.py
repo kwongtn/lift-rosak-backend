@@ -1,15 +1,25 @@
 import asyncio
+from contextlib import ExitStack, contextmanager
+from ctypes import ArgumentError
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from django.test import TestCase, override_settings
+from telegram.constants import ReactionEmoji
 from telegram.error import BadRequest
 
+from incident.services import IncidentServiceError, SocialMediaLinkWrite
 from operation.models import Line
 from telegram_provider.enums import MessageDirection
-from telegram_provider.handlers import error_handler, spotting_today
+from telegram_provider.handlers import (
+    delete_link,
+    error_handler,
+    spotting_today,
+    submit_link,
+)
 from telegram_provider.models import TelegramLogs
+from telegram_provider.parsers import link_parser
 from telegram_provider.tasks import cleanup_telegram_logs
 from telegram_provider.utils import (
     PerChatRateLimiter,
@@ -502,3 +512,340 @@ class ErrorHandlerTests(TestCase):
                 asyncio.run(error_handler(update, context))
 
         mock_send.assert_not_awaited()
+
+
+class LinkHandlerTests(TestCase):
+    """Coverage for /link (submit_link) and /deletelink (delete_link) handlers.
+
+    Plain TestCase (not IsolatedAsyncioTestCase): its instances hold a
+    _contextvars.Context which Django's --parallel runner cannot pickle.
+    Coroutines are driven via asyncio.run() so every assertion executes.
+
+    The handlers perform several async-ORM lookups (User, Line, Vehicle,
+    StationLine, TelegramLogs, TelegramSocialMediaLinkLog) that would hit a
+    separate connection invisible to the TestCase transaction, so each model
+    class is patched and its queryset methods stubbed with AsyncMock —
+    mirroring the SpottingTodayHandlerTests pattern. The incident services are
+    stubbed with AsyncMock so no real rows are written.
+    """
+
+    def setUp(self):
+        self.line = MagicMock(name="line")
+        self.line.id = 42
+        self.vehicle = MagicMock(name="vehicle")
+        self.vehicle.id = 7
+        self.station_line = MagicMock(name="station_line")
+        self.station_line.station_id = 13
+        self.user = MagicMock(name="user")
+        self.user.id = 99
+        self.link = MagicMock(name="social_media_link")
+        self.link.id = 555
+        self.telegram_log = MagicMock(name="telegram_log")
+        self.telegram_log.id = 888
+        self.link_log = MagicMock(name="telegram_social_media_link_log")
+        self.link_log.social_media_link = self.link
+
+    @contextmanager
+    def _mock_handlers(self):
+        with ExitStack() as stack:
+            mocks = {}
+            mocks["user"] = stack.enter_context(
+                patch("telegram_provider.handlers.User")
+            )
+            mocks["line"] = stack.enter_context(
+                patch("telegram_provider.handlers.Line")
+            )
+            mocks["vehicle"] = stack.enter_context(
+                patch("telegram_provider.handlers.Vehicle")
+            )
+            mocks["station_line"] = stack.enter_context(
+                patch("telegram_provider.handlers.StationLine")
+            )
+            mocks["telegram_log"] = stack.enter_context(
+                patch("telegram_provider.handlers.TelegramLogs")
+            )
+            mocks["link_log"] = stack.enter_context(
+                patch("telegram_provider.handlers.TelegramSocialMediaLinkLog")
+            )
+            mocks["submit"] = stack.enter_context(
+                patch(
+                    "telegram_provider.handlers.services.submit_social_media_link",
+                    new_callable=AsyncMock,
+                )
+            )
+            mocks["delete"] = stack.enter_context(
+                patch(
+                    "telegram_provider.handlers.services.delete_social_media_link",
+                    new_callable=AsyncMock,
+                )
+            )
+            mocks["retry"] = stack.enter_context(
+                patch(
+                    "telegram_provider.handlers.retry_on_error",
+                    new_callable=AsyncMock,
+                )
+            )
+            yield mocks
+
+    def _make_update(self, text, reply_to_message=object()):
+        update = MagicMock(name="update")
+        update.message = MagicMock(name="message")
+        update.message.text = text
+        update.message.from_user = MagicMock()
+        update.message.from_user.id = 12345
+        update.message.message_id = 777
+        update.message.reply_to_message = reply_to_message
+        update.message.reply_html = AsyncMock()
+        update.message.reply_text = AsyncMock()
+        update.message.set_reaction = AsyncMock()
+        update.effective_chat = MagicMock()
+        update.effective_chat.id = 123456
+        return update
+
+    def _context(self, args=None):
+        context = MagicMock(name="context")
+        context.args = args
+        return context
+
+    def _stub_user(self, mocks, user):
+        mocks["user"].objects.filter.return_value.afirst = AsyncMock(return_value=user)
+
+    def _stub_line(self, mocks, exists=True, line=None):
+        line = line or self.line
+        qs = mocks["line"].objects.filter.return_value
+        qs.aexists = AsyncMock(return_value=exists)
+        qs.afirst = AsyncMock(return_value=line if exists else None)
+
+    def _stub_telegram_log(self, mocks):
+        qs = mocks["telegram_log"].objects.filter.return_value
+        qs.order_by.return_value.afirst = AsyncMock(return_value=self.telegram_log)
+
+    def _stub_link_log_acreate(self, mocks):
+        mocks["link_log"].objects.acreate = AsyncMock()
+
+    def test_submit_link_not_verified_prompts_verify_and_skips_service(self):
+        update = self._make_update("/link https://example.com")
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, None)
+            asyncio.run(submit_link(update, context))
+
+        mocks["submit"].assert_not_awaited()
+        update.message.reply_html.assert_awaited_once()
+        self.assertIn("/verify", update.message.reply_html.await_args.kwargs["text"])
+        mocks["retry"].assert_not_awaited()
+
+    def test_submit_link_no_line_replies_and_reacts_down(self):
+        update = self._make_update("/link https://example.com")
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks, exists=False)
+            with self.assertRaises(Exception):
+                asyncio.run(submit_link(update, context))
+
+        mocks["submit"].assert_not_awaited()
+        update.message.reply_html.assert_awaited_once_with(
+            text="No line assigned for this channel."
+        )
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
+        )
+
+    def test_submit_link_with_incident_id_calls_service_once(self):
+        update = self._make_update("/link https://example.com -id 5")
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks, exists=True)
+            self._stub_telegram_log(mocks)
+            self._stub_link_log_acreate(mocks)
+            mocks["submit"].return_value = self.link
+            asyncio.run(submit_link(update, context))
+
+        mocks["submit"].assert_awaited_once()
+        call_kwargs = mocks["submit"].await_args.kwargs
+        self.assertIs(call_kwargs["user"], self.user)
+        self.assertEqual(
+            call_kwargs["write"],
+            SocialMediaLinkWrite(
+                url="https://example.com",
+                title="",
+                incident_id=5,
+                line_ids=(self.line.id,),
+                vehicle_ids=(),
+                station_ids=(),
+            ),
+        )
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
+        )
+
+    def test_submit_link_line_only_sets_incident_id_none(self):
+        update = self._make_update("/link https://example.com")
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks, exists=True)
+            self._stub_telegram_log(mocks)
+            self._stub_link_log_acreate(mocks)
+            mocks["submit"].return_value = self.link
+            asyncio.run(submit_link(update, context))
+
+        mocks["submit"].assert_awaited_once()
+        write = mocks["submit"].await_args.kwargs["write"]
+        self.assertIsNone(write.incident_id)
+        self.assertEqual(write.line_ids, (self.line.id,))
+        self.assertEqual(write.vehicle_ids, ())
+        self.assertEqual(write.station_ids, ())
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
+        )
+
+    def test_submit_link_with_vehicle_resolves_vehicle_id(self):
+        update = self._make_update("/link https://example.com -v KJL01")
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks, exists=True)
+            mocks["vehicle"].objects.filter.return_value.afirst = AsyncMock(
+                return_value=self.vehicle
+            )
+            self._stub_telegram_log(mocks)
+            self._stub_link_log_acreate(mocks)
+            mocks["submit"].return_value = self.link
+            asyncio.run(submit_link(update, context))
+
+        write = mocks["submit"].await_args.kwargs["write"]
+        self.assertEqual(write.vehicle_ids, (self.vehicle.id,))
+        self.assertEqual(write.station_ids, ())
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
+        )
+
+    def test_submit_link_with_station_resolves_station_id(self):
+        update = self._make_update("/link https://example.com -st KG05")
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks, exists=True)
+            st_qs = MagicMock(name="stationline_qs")
+            st_qs.filter.return_value = st_qs
+            st_qs.select_related.return_value = st_qs
+            st_qs.afirst = AsyncMock(return_value=self.station_line)
+            mocks["station_line"].objects.filter.return_value = st_qs
+            self._stub_telegram_log(mocks)
+            self._stub_link_log_acreate(mocks)
+            mocks["submit"].return_value = self.link
+            asyncio.run(submit_link(update, context))
+
+        write = mocks["submit"].await_args.kwargs["write"]
+        self.assertEqual(write.station_ids, (self.station_line.station_id,))
+        self.assertEqual(write.vehicle_ids, ())
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
+        )
+
+    def test_submit_link_invalid_incident_id_replies_error_and_reacts_down(self):
+        update = self._make_update("/link https://example.com -id 999")
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks, exists=True)
+            self._stub_telegram_log(mocks)
+            self._stub_link_log_acreate(mocks)
+            mocks["submit"].side_effect = IncidentServiceError("Incident 999 not found")
+            asyncio.run(submit_link(update, context))
+
+        mocks["submit"].assert_awaited_once()
+        update.message.reply_html.assert_awaited_once_with(
+            text="Failed to submit link: Incident 999 not found"
+        )
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
+        )
+
+    def test_delete_link_owner_success_calls_service_and_reacts_up(self):
+        reply = MagicMock(name="reply_to_message")
+        reply.message_id = 777
+        reply.chat = MagicMock()
+        reply.chat.id = 123456
+        update = self._make_update("/deletelink", reply_to_message=reply)
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            ll_qs = MagicMock(name="linklog_qs")
+            ll_qs.select_related.return_value = ll_qs
+            ll_qs.afirst = AsyncMock(return_value=self.link_log)
+            mocks["link_log"].objects.filter.return_value = ll_qs
+            asyncio.run(delete_link(update, context))
+
+        mocks["delete"].assert_awaited_once_with(user=self.user, link_id=self.link.id)
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
+        )
+
+    def test_delete_link_not_owner_replies_error_and_reacts_down(self):
+        reply = MagicMock(name="reply_to_message")
+        reply.message_id = 777
+        reply.chat = MagicMock()
+        reply.chat.id = 123456
+        update = self._make_update("/deletelink", reply_to_message=reply)
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            ll_qs = MagicMock(name="linklog_qs")
+            ll_qs.select_related.return_value = ll_qs
+            ll_qs.afirst = AsyncMock(return_value=self.link_log)
+            mocks["link_log"].objects.filter.return_value = ll_qs
+            mocks["delete"].side_effect = IncidentServiceError(
+                "SocialMediaLink 555 is not owned by this user."
+            )
+            asyncio.run(delete_link(update, context))
+
+        mocks["delete"].assert_awaited_once()
+        update.message.reply_html.assert_awaited_once_with(
+            text="Failed to delete link: SocialMediaLink 555 is not owned by this user."
+        )
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
+        )
+
+    def test_delete_link_no_reply_target_prompts_and_skips_service(self):
+        update = self._make_update("/deletelink", reply_to_message=None)
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            asyncio.run(delete_link(update, context))
+
+        mocks["delete"].assert_not_awaited()
+        update.message.reply_html.assert_awaited_once_with(
+            text="Please reply to the link entry you want to delete."
+        )
+        mocks["retry"].assert_not_awaited()
+
+    def test_link_parser_valid_argv_parses(self):
+        args = link_parser().parse_args(
+            ["https://example.com", "-id", "5", "-t", "My Title"]
+        )
+        self.assertEqual(args.url, "https://example.com")
+        self.assertEqual(args.incident_id, 5)
+        self.assertEqual(args.title, "My Title")
+
+    def test_link_parser_missing_url_raises_argument_error(self):
+        with self.assertRaises(ArgumentError):
+            link_parser().parse_args([])
+
+    def test_link_parser_invalid_incident_id_raises_argument_error(self):
+        with self.assertRaises(ArgumentError):
+            link_parser().parse_args(["https://example.com", "-id", "notanint"])
