@@ -128,15 +128,24 @@ class IncidentModelTests(TestCase):
                     is_last=True,
                 )
 
-    def test_station_incident_unconditional_unique_constraint_blocks_second_historical(
-        self,
-    ):
+    def test_station_incident_conditional_unique_constraint_blocks_second_last(self):
+        # The constraint only enforces uniqueness for the current (is_last=True)
+        # incident, so multiple historical incidents are allowed but a second
+        # current one is blocked.
         StationIncident.objects.create(
             station=self.station,
             date=date(2026, 1, 1),
             severity=IncidentSeverity.CRITICAL,
             title="First historical incident",
             brief="Escalator issue",
+            is_last=False,
+        )
+        StationIncident.objects.create(
+            station=self.station,
+            date=date(2026, 1, 3),
+            severity=IncidentSeverity.TRIVIA,
+            title="Second historical incident",
+            brief="Lighting issue",
             is_last=False,
         )
         StationIncident.objects.create(
@@ -152,11 +161,11 @@ class IncidentModelTests(TestCase):
             with transaction.atomic():
                 StationIncident.objects.create(
                     station=self.station,
-                    date=date(2026, 1, 3),
-                    severity=IncidentSeverity.TRIVIA,
-                    title="Second historical incident",
-                    brief="Lighting issue",
-                    is_last=False,
+                    date=date(2026, 1, 4),
+                    severity=IncidentSeverity.CRITICAL,
+                    title="Duplicate last incident",
+                    brief="Lift issue",
+                    is_last=True,
                 )
 
     def test_calendar_incident_naive_datetime_storage_pin(self):
