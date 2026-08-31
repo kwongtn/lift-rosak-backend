@@ -54,7 +54,7 @@ class SocialMediaLinkMutations:
                 info.context.user,
                 write=services.SocialMediaLinkWrite(
                     url=input.url,
-                    title=maybe_value(input.title, ""),
+                    title=maybe_value(input.title, "") or "",
                     incident_id=(
                         int(incident_id)
                         if (incident_id := maybe_value(input.incident_id)) is not None

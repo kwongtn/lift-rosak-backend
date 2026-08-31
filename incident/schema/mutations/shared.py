@@ -38,7 +38,7 @@ def write_from_input(data: CalendarIncidentInput) -> services.IncidentWrite:
         long_term=maybe_value(data.long_term, False),
         inaccurate=maybe_value(data.inaccurate, False),
         impact_factor=Decimal(str(maybe_value(data.impact_factor, 0))),
-        details=maybe_value(data.details, ""),
+        details=maybe_value(data.details, "") or "",
         line_ids=tuple(maybe_value(data.line_ids) or ()),
         vehicle_ids=tuple(maybe_value(data.vehicle_ids) or ()),
         station_ids=tuple(maybe_value(data.station_ids) or ()),
@@ -52,8 +52,8 @@ def chronology_write_from_input(
     return services.ChronologyWrite(
         indicator=chronology.indicator,
         datetime=maybe_value(chronology.datetime),
-        source_url=maybe_value(chronology.source_url, ""),
-        content=maybe_value(chronology.content, ""),
+        source_url=maybe_value(chronology.source_url, "") or "",
+        content=maybe_value(chronology.content, "") or "",
     )
 
 

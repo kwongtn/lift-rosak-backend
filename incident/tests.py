@@ -726,3 +726,66 @@ class SocialMediaLinkTests(TestCase):
         self.assertTrue(
             CalendarIncidentCategory.objects.filter(name="Just Reporting").exists()
         )
+
+    def test_submit_social_media_link_title_null_coerced_via_graphql(self):
+        query = """
+            mutation SubmitSocialMediaLink($input: SocialMediaLinkInput!) {
+                submitSocialMediaLink(input: $input) {
+                    ok
+                }
+            }
+        """
+        result = execute_graphql(
+            query,
+            variables={
+                "input": {
+                    "url": "https://www.facebook.com/groups/developerkaki/permalink/2951657628513464",
+                    "title": None,
+                    "lineIds": [],
+                    "vehicleIds": [],
+                    "stationIds": [],
+                    "categoryIds": [],
+                }
+            },
+            user=self.user,
+        )
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        self.assertTrue(result.data["submitSocialMediaLink"]["ok"])
+        from incident.models import SocialMediaLink
+
+        link = SocialMediaLink.objects.filter(
+            url="https://www.facebook.com/groups/developerkaki/permalink/2951657628513464"
+        ).first()
+        self.assertIsNotNone(link)
+        self.assertEqual(link.title, "")
+
+    def test_submit_social_media_link_title_omitted_coerced_via_graphql(self):
+        query = """
+            mutation SubmitSocialMediaLink($input: SocialMediaLinkInput!) {
+                submitSocialMediaLink(input: $input) {
+                    ok
+                }
+            }
+        """
+        result = execute_graphql(
+            query,
+            variables={
+                "input": {
+                    "url": "https://www.facebook.com/groups/developerkaki/permalink/2951657628513465",
+                    "lineIds": [],
+                    "vehicleIds": [],
+                    "stationIds": [],
+                    "categoryIds": [],
+                }
+            },
+            user=self.user,
+        )
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        self.assertTrue(result.data["submitSocialMediaLink"]["ok"])
+        from incident.models import SocialMediaLink
+
+        link = SocialMediaLink.objects.filter(
+            url="https://www.facebook.com/groups/developerkaki/permalink/2951657628513465"
+        ).first()
+        self.assertIsNotNone(link)
+        self.assertEqual(link.title, "")

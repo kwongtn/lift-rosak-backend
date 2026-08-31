@@ -38,7 +38,7 @@ async def submit_social_media_link(
 
     link = await sync_to_async(SocialMediaLink.objects.create)(
         url=write.url,
-        title=write.title,
+        title=write.title or "",
         user=user,
         content_type=content_type,
         object_id=object_id,

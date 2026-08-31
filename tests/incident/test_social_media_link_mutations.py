@@ -99,6 +99,41 @@ async def test_submit_social_media_link_with_line_vehicle_station_tags():
 
 
 @pytest.mark.django_db
+async def test_submit_social_media_link_title_null_and_omitted_coerce_to_empty():
+    user = await _make_user(10)
+
+    link_none = await services.submit_social_media_link(
+        user,
+        write=services.SocialMediaLinkWrite(
+            url="https://x.com/lrt/status/null-title",
+            title=None,  # type: ignore[arg-type]
+        ),
+    )
+    await sync_to_async(link_none.refresh_from_db)()
+    assert link_none.title == ""
+
+    # Omitted title (default "") already stores ""
+    link_default = await services.submit_social_media_link(
+        user,
+        write=services.SocialMediaLinkWrite(
+            url="https://x.com/lrt/status/default-title",
+        ),
+    )
+    await sync_to_async(link_default.refresh_from_db)()
+    assert link_default.title == ""
+
+    link_empty = await services.submit_social_media_link(
+        user,
+        write=services.SocialMediaLinkWrite(
+            url="https://x.com/lrt/status/empty-title",
+            title="",
+        ),
+    )
+    await sync_to_async(link_empty.refresh_from_db)()
+    assert link_empty.title == ""
+
+
+@pytest.mark.django_db
 async def test_mark_social_media_link_completed_records_admin_user():
     submitter = await _make_user(2)
     admin = await _make_user(3)

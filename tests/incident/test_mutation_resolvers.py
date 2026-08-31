@@ -259,6 +259,45 @@ async def test_social_link_resolvers_submit_and_complete():
 
 
 @pytest.mark.django_db
+async def test_social_link_resolver_title_null_and_unset_coerce_to_empty():
+    user = await _make_user(8)
+    info = _Info(user)
+    links = SocialMediaLinkMutations()
+
+    ok_null = await links.submit_social_media_link(
+        info,
+        input=SocialMediaLinkInput(
+            url="https://www.facebook.com/groups/developerkaki/permalink/2951657628513464",
+            title=strawberry.Some(None),
+            category_ids=strawberry.Some([]),
+            line_ids=strawberry.Some([]),
+            vehicle_ids=strawberry.Some([]),
+            station_ids=strawberry.Some([]),
+        ),
+    )
+    assert ok_null.ok is True
+    link_null = await SocialMediaLink.objects.filter(
+        url="https://www.facebook.com/groups/developerkaki/permalink/2951657628513464"
+    ).afirst()
+    assert link_null is not None
+    assert link_null.title == ""
+
+    ok_unset = await links.submit_social_media_link(
+        info,
+        input=SocialMediaLinkInput(
+            url="https://www.facebook.com/groups/developerkaki/permalink/2951657628513465",
+            category_ids=strawberry.Some([]),
+        ),
+    )
+    assert ok_unset.ok is True
+    link_unset = await SocialMediaLink.objects.filter(
+        url="https://www.facebook.com/groups/developerkaki/permalink/2951657628513465"
+    ).afirst()
+    assert link_unset is not None
+    assert link_unset.title == ""
+
+
+@pytest.mark.django_db
 async def test_extract_resolver_returns_scalar(monkeypatch):
     async def fake_extract(url: str, id_token: str | None):
         return {"requestId": "rid-1", "data": {"title": "extracted"}}
