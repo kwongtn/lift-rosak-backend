@@ -49,8 +49,8 @@ async def create_chronology(
         calendar_incident=incident,
         indicator=write.indicator,
         datetime=write.datetime,
-        source_url=write.source_url,
-        content=write.content,
+        source_url=write.source_url or "",
+        content=write.content or "",
         status=incident.status,
     )
     chronology.clean()
@@ -75,8 +75,8 @@ async def update_chronology(
     def _sync() -> None:
         chronology.indicator = write.indicator
         chronology.datetime = write.datetime
-        chronology.source_url = write.source_url
-        chronology.content = write.content
+        chronology.source_url = write.source_url or ""
+        chronology.content = write.content or ""
         chronology.calendar_incident = incident
         chronology.clean()
         chronology.save()

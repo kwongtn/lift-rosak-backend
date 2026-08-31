@@ -73,8 +73,8 @@ async def replace_chronologies(
                     calendar_incident=incident,
                     indicator=write.indicator,
                     datetime=write.datetime,
-                    source_url=write.source_url,
-                    content=write.content,
+                    source_url=write.source_url or "",
+                    content=write.content or "",
                     status=inherit_status,
                 )
                 chronology.clean()
@@ -92,9 +92,9 @@ async def create_incident(
 ) -> CalendarIncident:
     status = CalendarIncidentStatus.LIVE if is_admin else CalendarIncidentStatus.DRAFT
     incident = await sync_to_async(CalendarIncident.objects.create)(
-        title=data.title,
-        brief=data.brief,
-        details=data.details,
+        title=data.title or "",
+        brief=data.brief or "",
+        details=data.details or "",
         start_datetime=data.start_datetime,
         end_datetime=data.end_datetime,
         long_term=data.long_term,
@@ -146,9 +146,9 @@ async def _apply_field_update(
 ) -> CalendarIncident:
     def _sync() -> None:
         with transaction.atomic():
-            incident.title = data.title
-            incident.brief = data.brief
-            incident.details = data.details
+            incident.title = data.title or ""
+            incident.brief = data.brief or ""
+            incident.details = data.details or ""
             incident.start_datetime = data.start_datetime
             incident.end_datetime = data.end_datetime
             incident.long_term = data.long_term
@@ -170,9 +170,9 @@ async def _create_revision(
     chronologies: tuple[ChronologyWrite, ...],
 ) -> CalendarIncident:
     revision = await sync_to_async(CalendarIncident.objects.create)(
-        title=data.title,
-        brief=data.brief,
-        details=data.details,
+        title=data.title or "",
+        brief=data.brief or "",
+        details=data.details or "",
         start_datetime=data.start_datetime,
         end_datetime=data.end_datetime,
         long_term=data.long_term,
@@ -246,9 +246,9 @@ async def _merge_revision_into_parent(
                 pk=revision.parent_incident_id
             )
 
-            parent.title = revision.title
-            parent.brief = revision.brief
-            parent.details = revision.details
+            parent.title = revision.title or ""
+            parent.brief = revision.brief or ""
+            parent.details = revision.details or ""
             parent.start_datetime = revision.start_datetime
             parent.end_datetime = revision.end_datetime
             parent.long_term = revision.long_term

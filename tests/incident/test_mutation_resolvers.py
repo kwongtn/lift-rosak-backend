@@ -298,6 +298,81 @@ async def test_social_link_resolver_title_null_and_unset_coerce_to_empty():
 
 
 @pytest.mark.django_db
+async def test_create_calendar_incident_details_null_and_unset_coerce_to_empty(
+    no_admin_claim,
+):
+    user = await _make_user(9)
+    info = _Info(user)
+    crud = IncidentCrudMutations()
+
+    ok_null = await crud.create_calendar_incident(
+        info,
+        input=CalendarIncidentInput(
+            title="Test",
+            brief="Test",
+            start_datetime=dt.datetime(2026, 8, 31, 16, 33, tzinfo=dt.timezone.utc),
+            severity="MAJOR",
+            details=strawberry.Some(None),
+            end_datetime=strawberry.Some(None),
+            line_ids=strawberry.Some([]),
+            vehicle_ids=strawberry.Some([]),
+            station_ids=strawberry.Some([]),
+            chronologies=strawberry.Some([]),
+        ),
+    )
+    assert ok_null.ok is True
+    incident_null = await crud.create_calendar_incident(
+        info,
+        input=CalendarIncidentInput(
+            title="Test2",
+            brief="Test2",
+            start_datetime=dt.datetime(2026, 8, 31, 16, 33, tzinfo=dt.timezone.utc),
+            severity="MAJOR",
+        ),
+    )
+    assert incident_null.ok is True
+    # verify via service that details defaults to ""
+    from incident.models import CalendarIncident
+
+    incidents = [
+        i
+        async for i in CalendarIncident.objects.filter(
+            title__in=["Test", "Test2"]
+        ).order_by("id")
+    ]
+    assert len(incidents) == 2
+    for inc in incidents:
+        assert inc.details == ""
+
+
+@pytest.mark.django_db
+async def test_update_calendar_incident_details_null_coerced(no_admin_claim):
+    author = await _make_user(10)
+    info = _Info(author)
+    crud = IncidentCrudMutations()
+    draft = await services.create_incident(
+        author, is_admin=False, data=_service_write()
+    )
+    # update with explicit null details should coerce to ""
+    updated = await crud.update_calendar_incident(
+        info,
+        calendar_incident_id=strawberry_id(draft.id),
+        input=CalendarIncidentInput(
+            title="Updated",
+            brief="Updated brief",
+            start_datetime=dt.datetime(2026, 8, 1, 8, 0, tzinfo=dt.timezone.utc),
+            severity="MINOR",
+            details=strawberry.Some(None),
+        ),
+    )
+    assert updated.ok is True
+    from asgiref.sync import sync_to_async
+
+    await sync_to_async(draft.refresh_from_db)()
+    assert draft.details == ""
+
+
+@pytest.mark.django_db
 async def test_extract_resolver_returns_scalar(monkeypatch):
     async def fake_extract(url: str, id_token: str | None):
         return {"requestId": "rid-1", "data": {"title": "extracted"}}

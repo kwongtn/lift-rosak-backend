@@ -789,3 +789,138 @@ class SocialMediaLinkTests(TestCase):
         ).first()
         self.assertIsNotNone(link)
         self.assertEqual(link.title, "")
+
+    def test_create_calendar_incident_details_null_coerced_via_graphql(self):
+        from unittest.mock import patch
+
+        query = """
+            mutation CreateCalendarIncident($input: CalendarIncidentInput!) {
+                createCalendarIncident(input: $input) {
+                    ok
+                    id
+                }
+            }
+        """
+        with patch(
+            "incident.schema.mutations.incidents.has_admin_claim",
+            return_value=False,
+        ):
+            result = execute_graphql(
+                query,
+                variables={
+                    "input": {
+                        "title": "Test",
+                        "brief": "Test",
+                        "details": None,
+                        "startDatetime": "2026-08-31T16:33:00.000Z",
+                        "endDatetime": None,
+                        "severity": "MAJOR",
+                        "longTerm": False,
+                        "inaccurate": False,
+                        "lineIds": [],
+                        "vehicleIds": [],
+                        "stationIds": [],
+                        "chronologies": [],
+                    }
+                },
+                user=self.user,
+            )
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        self.assertTrue(result.data["createCalendarIncident"]["ok"])
+        incident_id = result.data["createCalendarIncident"]["id"]
+        self.assertIsNotNone(incident_id)
+        from incident.models import CalendarIncident
+
+        incident = CalendarIncident.objects.get(pk=int(incident_id))
+        self.assertEqual(incident.details, "")
+        self.assertEqual(incident.title, "Test")
+        self.assertEqual(incident.brief, "Test")
+
+    def test_create_calendar_incident_details_omitted_coerced_via_graphql(self):
+        from unittest.mock import patch
+
+        query = """
+            mutation CreateCalendarIncident($input: CalendarIncidentInput!) {
+                createCalendarIncident(input: $input) {
+                    ok
+                    id
+                }
+            }
+        """
+        with patch(
+            "incident.schema.mutations.incidents.has_admin_claim",
+            return_value=False,
+        ):
+            result = execute_graphql(
+                query,
+                variables={
+                    "input": {
+                        "title": "Test2",
+                        "brief": "Test2",
+                        "startDatetime": "2026-08-31T16:33:00.000Z",
+                        "severity": "MAJOR",
+                        "lineIds": [],
+                        "vehicleIds": [],
+                        "stationIds": [],
+                        "chronologies": [],
+                    }
+                },
+                user=self.user,
+            )
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        self.assertTrue(result.data["createCalendarIncident"]["ok"])
+        incident_id = result.data["createCalendarIncident"]["id"]
+        from incident.models import CalendarIncident
+
+        incident = CalendarIncident.objects.get(pk=int(incident_id))
+        self.assertEqual(incident.details, "")
+
+    def test_create_calendar_incident_chronology_null_fields_coerced_via_graphql(self):
+        from unittest.mock import patch
+
+        query = """
+            mutation CreateCalendarIncident($input: CalendarIncidentInput!) {
+                createCalendarIncident(input: $input) {
+                    ok
+                    id
+                }
+            }
+        """
+        with patch(
+            "incident.schema.mutations.incidents.has_admin_claim",
+            return_value=False,
+        ):
+            result = execute_graphql(
+                query,
+                variables={
+                    "input": {
+                        "title": "Chrono Test",
+                        "brief": "Chrono brief",
+                        "details": "detail",
+                        "startDatetime": "2026-08-31T16:33:00.000Z",
+                        "severity": "MINOR",
+                        "lineIds": [],
+                        "vehicleIds": [],
+                        "stationIds": [],
+                        "chronologies": [
+                            {
+                                "indicator": "RED",
+                                "datetime": None,
+                                "sourceUrl": None,
+                                "content": None,
+                            }
+                        ],
+                    }
+                },
+                user=self.user,
+            )
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        self.assertTrue(result.data["createCalendarIncident"]["ok"])
+        from incident.models import CalendarIncidentChronology
+
+        chrono = CalendarIncidentChronology.objects.filter(
+            calendar_incident_id=int(result.data["createCalendarIncident"]["id"])
+        ).first()
+        self.assertIsNotNone(chrono)
+        self.assertEqual(chrono.source_url, "")
+        self.assertEqual(chrono.content, "")
