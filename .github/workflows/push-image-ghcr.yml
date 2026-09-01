@@ -49,7 +49,7 @@ jobs:
       - name: Extract git metadata
         id: git_info
         run: |
-          echo "commit_hash=$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "commit_hash=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "commit_time=$(git log -1 --format=%cd --date=rfc)" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
