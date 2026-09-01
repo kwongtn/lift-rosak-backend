@@ -72,6 +72,35 @@ async def mark_social_media_link_completed(
     return link
 
 
+async def update_social_media_link(
+    admin_user: User, *, link_id: int, write: SocialMediaLinkWrite
+) -> SocialMediaLink:
+    link = await SocialMediaLink.objects.aget(pk=link_id)
+
+    def _sync() -> None:
+        link.url = write.url
+        link.title = write.title or ""
+        if write.incident_id is not None:
+            content_type = ContentType.objects.get_for_model(CalendarIncident)
+            link.content_type = content_type
+            link.object_id = write.incident_id
+        else:
+            link.content_type = None
+            link.object_id = None
+        link.save()
+        link.categories.set(write.category_ids)
+        link.lines.set(write.line_ids)
+        link.vehicles.set(write.vehicle_ids)
+        link.stations.set(write.station_ids)
+
+    if write.incident_id is not None:
+        await get_incident(write.incident_id)
+
+    await sync_to_async(_sync)()
+    await sync_to_async(link.refresh_from_db)()
+    return link
+
+
 async def delete_social_media_link(user: User, *, link_id: int) -> None:
     link = await SocialMediaLink.objects.aget(pk=link_id)
     if link.user_id != user.id:

@@ -79,6 +79,35 @@ class SocialMediaLinkMutations:
         )
         return GenericMutationReturn(ok=True)
 
+    @strawberry.mutation(permission_classes=[IsAdmin])
+    async def update_social_media_link(
+        self,
+        info: Info,
+        social_media_link_id: strawberry.ID,
+        input: SocialMediaLinkInput,
+    ) -> GenericMutationReturn:
+        try:
+            await services.update_social_media_link(
+                info.context.user,
+                link_id=int(social_media_link_id),
+                write=services.SocialMediaLinkWrite(
+                    url=input.url,
+                    title=maybe_value(input.title, "") or "",
+                    incident_id=(
+                        int(incident_id)
+                        if (incident_id := maybe_value(input.incident_id)) is not None
+                        else None
+                    ),
+                    category_ids=tuple(maybe_value(input.category_ids) or ()),
+                    line_ids=tuple(maybe_value(input.line_ids) or ()),
+                    vehicle_ids=tuple(maybe_value(input.vehicle_ids) or ()),
+                    station_ids=tuple(maybe_value(input.station_ids) or ()),
+                ),
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
 
 @strawberry.type
 class ExtractionMutations:

@@ -36,6 +36,7 @@ from .social_links import (
     delete_social_media_link,
     mark_social_media_link_completed,
     submit_social_media_link,
+    update_social_media_link,
 )
 from .votes import remove_incident_vote, set_incident_vote
 
@@ -66,5 +67,6 @@ __all__ = [
     "submit_incident",
     "submit_social_media_link",
     "update_chronology",
+    "update_social_media_link",
     "update_incident",
 ]

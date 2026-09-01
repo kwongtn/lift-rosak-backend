@@ -78,6 +78,9 @@ class SocialMediaLinkScalar:
 
     user: UserScalar
     categories: List[CalendarIncidentCategoryScalar]
+    lines: List[Line]
+    vehicles: List[Vehicle]
+    stations: List[Station]
 
 
 @strawberry_django.type(models.CalendarIncident)
