@@ -1,4 +1,3 @@
-
 type Asset {
   id: ID!
   assetType: String!
@@ -126,6 +125,7 @@ type CalendarIncidentScalar {
   startDatetime: DateTime!
   endDatetime: DateTime
   severity: CalendarIncidentSeverity!
+  status: CalendarIncidentStatus!
   title: String!
   brief: String!
   details: String!
@@ -149,6 +149,13 @@ enum CalendarIncidentSeverity {
   MAJOR
   MINOR
   OTHERS
+}
+
+enum CalendarIncidentStatus {
+  DRAFT
+  PENDING_APPROVAL
+  LIVE
+  REJECTED
 }
 
 """Date (isoformat)"""
@@ -572,6 +579,7 @@ type Mutation {
   removeVote(calendarIncidentId: ID!): GenericMutationReturn!
   submitSocialMediaLink(input: SocialMediaLinkInput!): GenericMutationReturn!
   markSocialMediaLinkCompleted(socialMediaLinkId: ID!): GenericMutationReturn!
+  updateSocialMediaLink(socialMediaLinkId: ID!, input: SocialMediaLinkInput!): GenericMutationReturn!
   extractDataFromUrl(input: ExtractDataInput!): ExtractedIncidentDataScalar!
   triggerLineVehicleStatusSnapshot(input: TriggerInput!): GenericMutationReturn!
 }
@@ -649,6 +657,7 @@ type Query {
   calendarIncidentsBySeverityCount(startDate: Date, endDate: Date, groupBy: GroupByEnum! = DAY): [CalendarIncidentGroupByDateSeverityScalar!]!
   pendingCalendarIncidents(search: String): [CalendarIncidentScalar!]!
   socialMediaLinks(search: String, categoryId: ID, completed: Boolean): [SocialMediaLinkScalar!]!
+  publicSocialMediaLinks(lineId: ID): [SocialMediaLinkScalar!]!
   calendarIncidentCategories: [CalendarIncidentCategoryScalar!]!
   locations(filters: LocationFilter, order: LocationOrder, pagination: OffsetPaginationInput): [Location!]!
   buses(order: BusOrder, pagination: OffsetPaginationInput): [Bus!]!
@@ -674,6 +683,9 @@ type SocialMediaLinkScalar {
   completedAt: DateTime
   user: UserScalar!
   categories: [CalendarIncidentCategoryScalar!]!
+  lines: [Line!]!
+  vehicles: [Vehicle!]!
+  stations: [Station!]!
 }
 
 type Source {

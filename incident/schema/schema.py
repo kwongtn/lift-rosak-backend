@@ -20,6 +20,7 @@ from incident.schema.resolvers import (
     get_calendar_incident_categories,
     get_calendar_incidents_by_severity_count,
     get_pending_calendar_incidents,
+    get_public_social_media_links,
     get_social_media_links,
 )
 from incident.schema.scalars import (
@@ -59,6 +60,10 @@ class IncidentScalars:
     social_media_links: List[SocialMediaLinkScalar] = strawberry_django.field(
         resolver=get_social_media_links,
         permission_classes=[IsAdmin],
+    )
+
+    public_social_media_links: List[SocialMediaLinkScalar] = strawberry_django.field(
+        resolver=get_public_social_media_links,
     )
 
     calendar_incident_categories: List[CalendarIncidentCategoryScalar] = (

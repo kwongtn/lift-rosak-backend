@@ -185,6 +185,18 @@ async def get_social_media_links(
     return [link async for link in queryset.distinct()]
 
 
+async def get_public_social_media_links(
+    root,
+    line_id: strawberry.Maybe[strawberry.ID] = None,
+) -> List[SocialMediaLink]:
+    queryset = SocialMediaLink.objects.all().order_by("-created")
+
+    if line_id is not None:
+        queryset = queryset.filter(lines__id=line_id.value)
+
+    return [link async for link in queryset.distinct()]
+
+
 async def get_calendar_incident_categories(root) -> List[CalendarIncidentCategory]:
     return [
         category async for category in CalendarIncidentCategory.objects.order_by("name")

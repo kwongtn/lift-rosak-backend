@@ -1,11 +1,13 @@
 import asyncio
 
+import strawberry
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from common.models import User
 from incident.models import CalendarIncident, CalendarIncidentCategory, SocialMediaLink
+from incident.schema.resolvers import get_public_social_media_links
 from incident.services import delete_social_media_link
 from incident.services.errors import IncidentServiceError
 from operation.models import Line, Station, Vehicle, VehicleType
@@ -126,3 +128,94 @@ class SocialMediaLinkAsyncTests(TransactionTestCase):
         with self.assertRaises(IncidentServiceError):
             asyncio.run(delete_social_media_link(self.other_user, link_id=link2.id))
         self.assertTrue(SocialMediaLink.objects.filter(id=link2.id).exists())
+
+
+def _make_link(user_n, *, completed=False):
+    user = User.objects.create(firebase_id=f"test-pub-sml-{user_n}")
+    return SocialMediaLink.objects.create(
+        url=f"https://example.com/pub-{user_n}",
+        title=f"Public link {user_n}",
+        user=user,
+        completed=completed,
+    )
+
+
+class PublicSocialMediaLinkTests(TransactionTestCase):
+    reset_sequences = True
+
+    def test_public_social_media_links_no_auth_required(self):
+        approved = _make_link(1, completed=True)
+        pending = _make_link(2, completed=False)
+
+        results = asyncio.run(get_public_social_media_links(None))
+        result_ids = {link.id for link in results}
+
+        self.assertIn(approved.id, result_ids)
+        self.assertIn(pending.id, result_ids)
+
+    def test_public_social_media_links_returns_both_approved_and_pending(self):
+        approved = _make_link(10, completed=True)
+        pending = _make_link(11, completed=False)
+
+        results = asyncio.run(get_public_social_media_links(None))
+        by_id = {link.id: link for link in results}
+
+        self.assertIn(approved.id, by_id)
+        self.assertIn(pending.id, by_id)
+        self.assertTrue(by_id[approved.id].completed)
+        self.assertFalse(by_id[pending.id].completed)
+
+    def test_public_social_media_links_line_id_filters(self):
+        line_a = Line.objects.create(
+            code="PUB_A", display_name="Public Line A", display_color="#111111"
+        )
+        line_b = Line.objects.create(
+            code="PUB_B", display_name="Public Line B", display_color="#222222"
+        )
+
+        link_on_a = _make_link(20)
+        link_on_a.lines.set([line_a])
+
+        link_on_b = _make_link(21)
+        link_on_b.lines.set([line_b])
+
+        results_a = asyncio.run(
+            get_public_social_media_links(None, line_id=strawberry.Some(str(line_a.id)))
+        )
+        ids_a = {link.id for link in results_a}
+        self.assertIn(link_on_a.id, ids_a)
+        self.assertNotIn(link_on_b.id, ids_a)
+
+        results_b = asyncio.run(
+            get_public_social_media_links(None, line_id=strawberry.Some(str(line_b.id)))
+        )
+        ids_b = {link.id for link in results_b}
+        self.assertIn(link_on_b.id, ids_b)
+        self.assertNotIn(link_on_a.id, ids_b)
+
+    def test_public_social_media_links_ordered_newest_first(self):
+        oldest = _make_link(30)
+        middle = _make_link(31)
+        newest = _make_link(32)
+
+        results = asyncio.run(get_public_social_media_links(None))
+        result_ids = [link.id for link in results]
+
+        self.assertIn(oldest.id, result_ids)
+        self.assertIn(middle.id, result_ids)
+        self.assertIn(newest.id, result_ids)
+        self.assertLess(result_ids.index(newest.id), result_ids.index(oldest.id))
+
+    def test_public_social_media_links_no_line_id_returns_all(self):
+        line = Line.objects.create(
+            code="PUB_ALL", display_name="Public All", display_color="#333333"
+        )
+        tagged = _make_link(40)
+        tagged.lines.set([line])
+        untagged = _make_link(41)
+
+        results = asyncio.run(get_public_social_media_links(None))
+        result_ids = {link.id for link in results}
+
+        self.assertIn(tagged.id, result_ids)
+        self.assertIn(untagged.id, result_ids)
