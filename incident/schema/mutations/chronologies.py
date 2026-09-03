@@ -93,3 +93,42 @@ class ChronologyMutations:
         except services.IncidentServiceError as exc:
             raise_service_error(exc)
         return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def request_chronology_deletion(
+        self, info: Info, chronology_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        is_admin = await has_admin_claim(info.context.user)
+        try:
+            await services.request_chronology_deletion(
+                info.context.user,
+                is_admin=is_admin,
+                chronology_id=int(chronology_id),
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsAdmin])
+    async def approve_chronology_deletion(
+        self, info: Info, chronology_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        try:
+            await services.approve_chronology_deletion(
+                info.context.user, chronology_id=int(chronology_id)
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsAdmin])
+    async def reject_chronology_deletion(
+        self, info: Info, chronology_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        try:
+            await services.reject_chronology_deletion(
+                info.context.user, chronology_id=int(chronology_id)
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True)

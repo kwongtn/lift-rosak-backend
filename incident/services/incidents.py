@@ -10,7 +10,11 @@ from safedelete.models import HARD_DELETE
 
 from common.models import User
 from incident.enums import CalendarIncidentStatus
-from incident.models import CalendarIncident, CalendarIncidentChronology
+from incident.models import (
+    CalendarIncident,
+    CalendarIncidentChronology,
+    CalendarIncidentMedia,
+)
 
 from .access import get_incident, is_author, may_edit
 from .errors import ConcurrencyConflictError, IncidentNotEditableError
@@ -62,20 +66,62 @@ async def replace_chronologies(
     writes: tuple[ChronologyWrite, ...],
     inherit_status: CalendarIncidentStatus,
 ) -> None:
-    """Swap the incident's chronologies for `writes`; new rows inherit status."""
+    """Swap the incident's chronologies for `writes`; new rows inherit status.
+
+    Pending-moderation states (PENDING_DELETION, PENDING_APPROVAL) on old rows
+    survive the replace when the new write matches the same chronology by the
+    stable identity tuple (indicator, datetime, source_url, content) — so an
+    admin saving a LIVE incident does not silently cancel a pending chronology
+    deletion request. Only approve/rejectChronologyDeletion mutations may
+    resolve a PENDING_DELETION state.
+
+    Caveat: if a user edits BOTH a chronology's content and expects the
+    deletion-preservation for that same row, the flag is lost — the content
+    change means no old row matches, so inherit_status applies. Acceptable:
+    they materially changed the row.
+    """
+
+    _PRESERVE = frozenset(
+        {
+            CalendarIncidentStatus.PENDING_DELETION,
+            CalendarIncidentStatus.PENDING_APPROVAL,
+        }
+    )
 
     def _sync() -> None:
         with transaction.atomic():
+            # Snapshot old pending statuses keyed by stable identity.
+            snapshot: dict[
+                tuple[str, dt.datetime | None, str, str],
+                CalendarIncidentStatus,
+            ] = {}
             for existing in incident.chronologies.all():
+                if existing.status in _PRESERVE:
+                    snapshot[
+                        (
+                            existing.indicator,
+                            existing.datetime,
+                            existing.source_url or "",
+                            existing.content or "",
+                        )
+                    ] = existing.status
                 existing.delete()
+
             for write in writes:
+                key = (
+                    write.indicator,
+                    write.datetime,
+                    write.source_url or "",
+                    write.content or "",
+                )
+                status = snapshot.pop(key, inherit_status)
                 chronology = CalendarIncidentChronology(
                     calendar_incident=incident,
                     indicator=write.indicator,
                     datetime=write.datetime,
                     source_url=write.source_url or "",
                     content=write.content or "",
-                    status=inherit_status,
+                    status=status,
                 )
                 chronology.clean()
                 chronology.save()
@@ -127,15 +173,46 @@ async def update_incident(
         )
 
     if not may_edit(editor, is_admin=is_admin, incident=incident):
-        raise IncidentNotEditableError(
-            "Only the author or an admin may edit this incident."
-        )
+        if incident.status != CalendarIncidentStatus.LIVE:
+            raise IncidentNotEditableError(
+                "Only the author or an admin may edit this incident."
+            )
 
     if incident.status == CalendarIncidentStatus.DRAFT:
         updated = await _apply_field_update(incident, data, chronologies)
         return UpdateResult(incident=updated, created_revision=False)
 
-    revision = await _create_revision(incident, data, chronologies)
+    if is_admin:
+        updated = await _apply_field_update(incident, data, chronologies)
+        return UpdateResult(incident=updated, created_revision=False)
+
+    # Spec C1: author editing their own PENDING_APPROVAL incident contributes
+    # back to the same object — no revision spawned (only the creator can edit
+    # a pending row, and all edits fold back into it).
+    if (
+        is_author(editor, incident)
+        and incident.status == CalendarIncidentStatus.PENDING_APPROVAL
+    ):
+        updated = await _apply_field_update(incident, data, chronologies)
+        return UpdateResult(incident=updated, created_revision=False)
+
+    open_draft = await CalendarIncident.objects.filter(
+        parent_incident=incident,
+        status=CalendarIncidentStatus.DRAFT,
+    ).afirst()
+    if open_draft is not None:
+        if open_draft.created_by_id == editor.id:
+            # Same actor resumes their own open draft (e.g. retry after a
+            # failed submit). Apply in place to the existing DRAFT — frontend
+            # gets its id back to (re)chain submitCalendarIncident.
+            updated = await _apply_field_update(open_draft, data, chronologies)
+            return UpdateResult(incident=updated, created_revision=True)
+        raise IncidentNotEditableError(
+            "An unapproved edit draft already exists for this incident. "
+            "Please allow the draft to approve before proceeding."
+        )
+
+    revision = await _create_revision(editor, incident, data, chronologies)
     return UpdateResult(incident=revision, created_revision=True)
 
 
@@ -165,6 +242,7 @@ async def _apply_field_update(
 
 
 async def _create_revision(
+    editor: User,
     live_incident: CalendarIncident,
     data: IncidentWrite,
     chronologies: tuple[ChronologyWrite, ...],
@@ -181,7 +259,7 @@ async def _create_revision(
         impact_factor=data.impact_factor,
         status=CalendarIncidentStatus.DRAFT,
         parent_incident_id=live_incident.pk,
-        created_by_id=live_incident.created_by_id,
+        created_by=editor,
     )
     await _apply_m2m(revision, data)
     await replace_chronologies(
@@ -265,6 +343,15 @@ async def _merge_revision_into_parent(
             parent.stations.set(revision.stations.all())
             parent.categories.set(revision.categories.all())
 
+            existing_media_ids = set(parent.medias.values_list("id", flat=True))
+            for media in revision.medias.all():
+                if media.id not in existing_media_ids:
+                    CalendarIncidentMedia.objects.create(
+                        calendar_incident=parent,
+                        media=media,
+                    )
+                    existing_media_ids.add(media.id)
+
             for existing in parent.chronologies.all():
                 existing.delete()
             for order, chronology in enumerate(revision.chronologies.order_by("order")):
@@ -304,12 +391,49 @@ async def reject_incident(
 async def delete_incident(actor: User, *, is_admin: bool, incident_id: int) -> None:
     incident = await get_incident(incident_id)
 
-    if not is_admin and (
-        incident.status != CalendarIncidentStatus.DRAFT
-        or not is_author(actor, incident)
-    ):
-        raise IncidentNotEditableError(
-            "Authors may only delete their own drafts; admins may delete any."
-        )
+    if not is_admin:
+        if not is_author(actor, incident) or incident.status not in (
+            CalendarIncidentStatus.DRAFT,
+            CalendarIncidentStatus.PENDING_APPROVAL,
+        ):
+            raise IncidentNotEditableError(
+                "Authors may only delete their own drafts or pending submissions; "
+                "admins may delete any."
+            )
 
+    # Resolve pending children before soft-deleting the parent. safedelete's
+    # SOFT_DELETE does NOT cascade (by design — that's why this step exists):
+    # orphaned draft revisions and pending chronologies would otherwise
+    # survive the parent. HARD_DELETE paths keep DB-level CASCADE.
+    await _resolve_pending_children(incident)
     await sync_to_async(incident.delete)()
+
+
+async def _resolve_pending_children(incident: CalendarIncident) -> None:
+    """Soft-delete open draft revisions and pending chronologies of `incident`.
+
+    Called before the parent is soft-deleted so no orphaned pending children
+    survive (spec D6). Covers the explicit gap: a chronology marked
+    PENDING_DELETION on a LIVE incident, then the admin deletes the parent —
+    the chronology's pending state dies with the parent.
+    """
+
+    def _sync() -> None:
+        # Open draft revisions (parent_incident=incident, status=DRAFT).
+        for revision in CalendarIncident.objects.filter(
+            parent_incident=incident,
+            status=CalendarIncidentStatus.DRAFT,
+        ):
+            revision.delete()
+
+        # Chronologies with a pending state (PENDING_APPROVAL or PENDING_DELETION).
+        for chronology in CalendarIncidentChronology.objects.filter(
+            calendar_incident=incident,
+            status__in=(
+                CalendarIncidentStatus.PENDING_APPROVAL,
+                CalendarIncidentStatus.PENDING_DELETION,
+            ),
+        ):
+            chronology.delete()
+
+    await sync_to_async(_sync)()

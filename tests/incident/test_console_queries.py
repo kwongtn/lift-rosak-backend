@@ -109,6 +109,66 @@ async def test_pending_incidents_excludes_other_statuses():
 
 
 @pytest.mark.django_db
+async def test_pending_incidents_includes_live_with_pending_deletion_chronologies():
+    """Spec E1 surface: LIVE incidents with a PENDING_DELETION chronology join the queue."""
+
+    admin = await _make_user(61)
+
+    live_with_request = await services.create_incident(
+        admin, is_admin=True, data=_write(title="Live with pending deletion")
+    )
+    # Two pending-deletion rows on one incident exercise the join dedup below.
+    await replace_chronologies(
+        live_with_request,
+        (
+            services.ChronologyWrite(
+                indicator="BLUE",
+                content="mark for delete",
+                source_url="https://x.com/live-pending-delete",
+            ),
+            services.ChronologyWrite(
+                indicator="GRAY",
+                content="also marked",
+                source_url="",
+            ),
+        ),
+        inherit_status=CalendarIncidentStatus.PENDING_DELETION,
+    )
+
+    live_clean = await services.create_incident(
+        admin, is_admin=True, data=_write(title="Live clean")
+    )
+    await replace_chronologies(
+        live_clean,
+        (
+            services.ChronologyWrite(
+                indicator="GREEN", content="all good", source_url=""
+            ),
+        ),
+        inherit_status=CalendarIncidentStatus.LIVE,
+    )
+
+    pending = await _make_pending(user_n=62, title="Pending approval row")
+
+    results = await get_pending_calendar_incidents(None)
+    result_ids = [i.id for i in results]
+    assert live_with_request.id in result_ids
+    assert result_ids.count(live_with_request.id) == 1
+    assert live_clean.id not in result_ids
+    assert pending.id in result_ids
+    # Oldest-first across both segments; live_with_request predates `pending`.
+    assert result_ids.index(live_with_request.id) < result_ids.index(pending.id)
+
+    search_ids = {
+        i.id
+        for i in await get_pending_calendar_incidents(
+            None, search=strawberry.Some("live-pending-delete")
+        )
+    }
+    assert search_ids == {live_with_request.id}
+
+
+@pytest.mark.django_db
 async def test_social_media_links_text_search():
     user = await _make_user(20)
     url_hit = await sync_to_async(SocialMediaLink.objects.create)(

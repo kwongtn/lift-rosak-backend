@@ -7,7 +7,7 @@ from django.db.models import Count, F, Q
 from strawberry.types import Info
 from strawberry_django.relay import DjangoListConnection
 
-from common.models import Media, User, UserVerificationCode
+from common.models import Media, User, UserVerificationCode, Vote
 from common.schema.inputs import UserInput
 from common.schema.scalars import (
     MediasGroupByPeriodScalar,
@@ -32,6 +32,18 @@ class CommonScalars:
         from common.models import User
 
         return await User.objects.aget(id=info.context.user.id)
+
+    @strawberry.field(permission_classes=[IsLoggedIn])
+    async def my_votes_cast(self, info: Info) -> int:
+        """Total votes (up + down) the caller has cast across all content types.
+
+        Spec AC3: only the aggregate is public; what was voted on stays private —
+        no list, no per-content-type breakdown. Single COUNT query, no N+1.
+        """
+        if not info.context.user:
+            return 0
+
+        return await Vote.objects.filter(user=info.context.user).acount()
 
     @strawberry.field
     async def public_user(self, info: Info, id: strawberry.ID) -> Optional[UserScalar]:

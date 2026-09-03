@@ -8,7 +8,7 @@ from common.schema.scalars import GenericMutationReturn
 from incident import extraction, services
 from incident.schema.inputs import ExtractDataInput, SocialMediaLinkInput
 from incident.schema.scalars import ExtractedIncidentDataScalar
-from rosak.permissions import IsAdmin, IsLoggedIn
+from rosak.permissions import IsAdmin, IsLoggedIn, has_admin_claim
 
 from .shared import maybe_value, raise_service_error
 
@@ -42,6 +42,42 @@ class VoteMutations:
         )
         return GenericMutationReturn(ok=True)
 
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def upvote_chronology(
+        self, info: Info, chronology_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        try:
+            await services.set_chronology_vote(
+                info.context.user, chronology_id=int(chronology_id), value=1
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def downvote_chronology(
+        self, info: Info, chronology_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        try:
+            await services.set_chronology_vote(
+                info.context.user, chronology_id=int(chronology_id), value=-1
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def remove_chronology_vote(
+        self, info: Info, chronology_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        try:
+            await services.remove_chronology_vote(
+                info.context.user, chronology_id=int(chronology_id)
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
 
 @strawberry.type
 class SocialMediaLinkMutations:
@@ -49,12 +85,15 @@ class SocialMediaLinkMutations:
     async def submit_social_media_link(
         self, info: Info, input: SocialMediaLinkInput
     ) -> GenericMutationReturn:
+        is_admin = await has_admin_claim(info.context.user)
         try:
             await services.submit_social_media_link(
                 info.context.user,
+                is_admin=is_admin,
                 write=services.SocialMediaLinkWrite(
                     url=input.url,
                     title=maybe_value(input.title, "") or "",
+                    description=maybe_value(input.description, "") or "",
                     incident_id=(
                         int(incident_id)
                         if (incident_id := maybe_value(input.incident_id)) is not None
@@ -93,6 +132,10 @@ class SocialMediaLinkMutations:
                 write=services.SocialMediaLinkWrite(
                     url=input.url,
                     title=maybe_value(input.title, "") or "",
+                    # Tri-state: omit (UNSET) leaves unchanged; Some(v) sets to v.
+                    description=(
+                        input.description.value if input.description else None
+                    ),
                     incident_id=(
                         int(incident_id)
                         if (incident_id := maybe_value(input.incident_id)) is not None
@@ -102,6 +145,7 @@ class SocialMediaLinkMutations:
                     line_ids=tuple(maybe_value(input.line_ids) or ()),
                     vehicle_ids=tuple(maybe_value(input.vehicle_ids) or ()),
                     station_ids=tuple(maybe_value(input.station_ids) or ()),
+                    status=input.status.value if input.status else None,
                 ),
             )
         except services.IncidentServiceError as exc:

@@ -10,6 +10,7 @@ from strawberry.types.maybe import Maybe
 from incident.enums import (
     CalendarIncidentChronologyIndicator,
     CalendarIncidentSeverity,
+    SocialMediaLinkStatus,
 )
 
 # Register the TextChoices enums with Strawberry so they render as GraphQL
@@ -19,6 +20,7 @@ CalendarIncidentSeverityInput = strawberry.enum(CalendarIncidentSeverity)
 CalendarIncidentChronologyIndicatorInput = strawberry.enum(
     CalendarIncidentChronologyIndicator
 )
+SocialMediaLinkStatusInput = strawberry.enum(SocialMediaLinkStatus)
 
 
 @strawberry.input
@@ -59,9 +61,12 @@ class ExtractDataInput:
 class SocialMediaLinkInput:
     url: str
     title: Maybe[str | None] = strawberry.UNSET
+    description: Maybe[str | None] = strawberry.UNSET
     # Optional GenericFK target — omit for "just dumping" links.
     incident_id: Maybe[strawberry.ID | None] = strawberry.UNSET
     category_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
     line_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
     vehicle_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
     station_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
+    # Tri-state: omit to leave unchanged on update; set explicitly to change.
+    status: Maybe[SocialMediaLinkStatusInput | None] = strawberry.UNSET

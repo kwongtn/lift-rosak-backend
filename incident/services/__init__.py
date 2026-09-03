@@ -10,9 +10,12 @@ from .access import get_incident, is_author, may_edit
 from .chronologies import (
     ChronologyUpdate,
     approve_chronology,
+    approve_chronology_deletion,
     create_chronology,
     delete_chronology,
+    reject_chronology_deletion,
     reorder_chronology,
+    request_chronology_deletion,
     update_chronology,
 )
 from .errors import (
@@ -38,7 +41,12 @@ from .social_links import (
     submit_social_media_link,
     update_social_media_link,
 )
-from .votes import remove_incident_vote, set_incident_vote
+from .votes import (
+    remove_chronology_vote,
+    remove_incident_vote,
+    set_chronology_vote,
+    set_incident_vote,
+)
 
 __all__ = [
     "ChronologyUpdate",
@@ -50,6 +58,7 @@ __all__ = [
     "SocialMediaLinkWrite",
     "UpdateResult",
     "approve_chronology",
+    "approve_chronology_deletion",
     "approve_incident",
     "create_chronology",
     "create_incident",
@@ -60,9 +69,13 @@ __all__ = [
     "is_author",
     "mark_social_media_link_completed",
     "may_edit",
-    "reorder_chronology",
+    "reject_chronology_deletion",
     "reject_incident",
+    "remove_chronology_vote",
+    "reorder_chronology",
     "remove_incident_vote",
+    "request_chronology_deletion",
+    "set_chronology_vote",
     "set_incident_vote",
     "submit_incident",
     "submit_social_media_link",

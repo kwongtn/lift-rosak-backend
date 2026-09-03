@@ -7,6 +7,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 
 from common.models import User
+from incident.enums import SocialMediaLinkStatus
 from incident.models import CalendarIncident, SocialMediaLink
 
 from .access import get_incident
@@ -17,15 +18,19 @@ from .errors import IncidentServiceError
 class SocialMediaLinkWrite:
     url: str
     title: str = ""
+    # None = don't change (update); "" / "text" = set to that value.
+    description: str | None = None
     incident_id: int | None = None
     category_ids: tuple[int, ...] = ()
     line_ids: tuple[int, ...] = ()
     vehicle_ids: tuple[int, ...] = ()
     station_ids: tuple[int, ...] = ()
+    # None = don't change (update); enum value = set to that value.
+    status: str | None = None
 
 
 async def submit_social_media_link(
-    user: User, *, write: SocialMediaLinkWrite
+    user: User, *, is_admin: bool, write: SocialMediaLinkWrite
 ) -> SocialMediaLink:
     content_type = None
     object_id = None
@@ -36,10 +41,17 @@ async def submit_social_media_link(
         )
         object_id = write.incident_id
 
+    status = (
+        SocialMediaLinkStatus.LIVE
+        if is_admin
+        else SocialMediaLinkStatus.PENDING_APPROVAL
+    )
     link = await sync_to_async(SocialMediaLink.objects.create)(
         url=write.url,
         title=write.title or "",
+        description=write.description or "",
         user=user,
+        status=status,
         content_type=content_type,
         object_id=object_id,
     )
@@ -80,6 +92,10 @@ async def update_social_media_link(
     def _sync() -> None:
         link.url = write.url
         link.title = write.title or ""
+        if write.description is not None:
+            link.description = write.description
+        if write.status is not None:
+            link.status = write.status
         if write.incident_id is not None:
             content_type = ContentType.objects.get_for_model(CalendarIncident)
             link.content_type = content_type

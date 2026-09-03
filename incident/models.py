@@ -19,6 +19,7 @@ from incident.enums import (
     CalendarIncidentSeverity,
     CalendarIncidentStatus,
     IncidentSeverity,
+    SocialMediaLinkStatus,
 )
 
 if TYPE_CHECKING:
@@ -342,9 +343,16 @@ class CalendarIncidentMedia(TimeStampedModel):
 class SocialMediaLink(TimeStampedModel):
     url = models.URLField()
     title = models.CharField(max_length=256, blank=True, default="")
+    description = models.TextField(blank=True, default="")
     # common.User (platform identity from Firebase tokens), not django auth.User —
     # same rationale as common.Vote.user.
     user = models.ForeignKey("common.User", on_delete=models.CASCADE)
+    # Approval status. DB-level default is PENDING_APPROVAL; the submit service
+    # overrides it to LIVE for admin actors at creation time.
+    status = TextChoicesField(
+        choices_enum=SocialMediaLinkStatus,
+        default=SocialMediaLinkStatus.PENDING_APPROVAL,
+    )
 
     content_type = models.ForeignKey(
         ContentType, on_delete=models.CASCADE, null=True, blank=True

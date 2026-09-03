@@ -58,6 +58,7 @@ input CalendarIncidentChronologyInput {
 type CalendarIncidentChronologyScalar {
   id: ID!
   order: Int!
+  status: CalendarIncidentStatus!
   calendarIncident: CalendarIncidentScalar!
   indicator: String!
   datetime: DateTime!
@@ -91,6 +92,13 @@ type CalendarIncidentGroupByDateSeverityScalar {
   date: Date!
   count: Int!
   isLongTerm: Boolean
+}
+
+type CalendarIncidentHistoryEntryScalar {
+  timestamp: DateTime!
+  actor: String
+  changeType: String!
+  changedFields: [String!]!
 }
 
 input CalendarIncidentInput {
@@ -130,6 +138,7 @@ type CalendarIncidentScalar {
   brief: String!
   details: String!
   impactFactor: Float!
+  version: Int!
   longTerm: Boolean!
   inaccurate: Boolean!
   lines: [Line!]!
@@ -137,10 +146,12 @@ type CalendarIncidentScalar {
   stations: [Station!]!
   categories: [CalendarIncidentCategoryScalar!]!
   chronologies: [CalendarIncidentChronologyScalar!]!
+  user: UserScalar
   medias: [MediaScalar!]!
   voteScore: Int!
   voteBreakdown: VoteBreakdown!
   userVote: Int!
+  links(first: Int! = 10, after: String = null): SocialMediaLinkConnection!
   hasDetails: Boolean!
   lastUpdated: DateTime!
 }
@@ -156,6 +167,7 @@ enum CalendarIncidentStatus {
   PENDING_APPROVAL
   LIVE
   REJECTED
+  PENDING_DELETION
 }
 
 """Date (isoformat)"""
@@ -574,9 +586,15 @@ type Mutation {
   approveChronology(chronologyId: ID!): GenericMutationReturn!
   reorderChronology(chronologyId: ID!, targetOrder: Int!): GenericMutationReturn!
   deleteChronology(chronologyId: ID!): GenericMutationReturn!
+  requestChronologyDeletion(chronologyId: ID!): GenericMutationReturn!
+  approveChronologyDeletion(chronologyId: ID!): GenericMutationReturn!
+  rejectChronologyDeletion(chronologyId: ID!): GenericMutationReturn!
   upvote(calendarIncidentId: ID!): GenericMutationReturn!
   downvote(calendarIncidentId: ID!): GenericMutationReturn!
   removeVote(calendarIncidentId: ID!): GenericMutationReturn!
+  upvoteChronology(chronologyId: ID!): GenericMutationReturn!
+  downvoteChronology(chronologyId: ID!): GenericMutationReturn!
+  removeChronologyVote(chronologyId: ID!): GenericMutationReturn!
   submitSocialMediaLink(input: SocialMediaLinkInput!): GenericMutationReturn!
   markSocialMediaLinkCompleted(socialMediaLinkId: ID!): GenericMutationReturn!
   updateSocialMediaLink(socialMediaLinkId: ID!, input: SocialMediaLinkInput!): GenericMutationReturn!
@@ -645,6 +663,7 @@ type Query {
     last: Int = null
   ): MediaTypeConnection!
   user: UserScalar!
+  myVotesCast: Int!
   publicUser(id: ID!): UserScalar
   mediasGroupByPeriod(type: DateGroupings!): [MediasGroupByPeriodScalar!]!
   events(filters: EventFilter, order: EventOrder, pagination: OffsetPaginationInput): [EventScalar!]!
@@ -656,28 +675,48 @@ type Query {
   calendarIncidents(filters: CalendarIncidentFilter, order: CalendarIncidentOrder): [CalendarIncidentScalar!]!
   calendarIncidentsBySeverityCount(startDate: Date, endDate: Date, groupBy: GroupByEnum! = DAY): [CalendarIncidentGroupByDateSeverityScalar!]!
   pendingCalendarIncidents(search: String): [CalendarIncidentScalar!]!
-  socialMediaLinks(search: String, categoryId: ID, completed: Boolean): [SocialMediaLinkScalar!]!
-  publicSocialMediaLinks(lineId: ID): [SocialMediaLinkScalar!]!
+  socialMediaLinks(search: String, categoryId: ID, completed: Boolean, lineId: ID, vehicleId: ID, stationId: ID, createdAfter: DateTime, createdBefore: DateTime): [SocialMediaLinkScalar!]!
+  publicSocialMediaLinks(incidentId: ID, lineId: ID, first: Int! = 20, after: String = null, mine: Boolean): SocialMediaLinkConnection!
   calendarIncidentCategories: [CalendarIncidentCategoryScalar!]!
+  calendarIncidentHistory(id: ID!, limit: Int! = 50): [CalendarIncidentHistoryEntryScalar!]!
   locations(filters: LocationFilter, order: LocationOrder, pagination: OffsetPaginationInput): [Location!]!
   buses(order: BusOrder, pagination: OffsetPaginationInput): [Bus!]!
   locationsCount(filters: LocationFilter): Int!
 }
 
+type SocialMediaLinkConnection {
+  edges: [SocialMediaLinkEdge!]!
+  pageInfo: SocialMediaLinkPageInfo!
+}
+
+type SocialMediaLinkEdge {
+  node: SocialMediaLinkScalar!
+  cursor: String!
+}
+
 input SocialMediaLinkInput {
   url: String!
   title: String
+  description: String
   incidentId: ID
   categoryIds: [ID!]
   lineIds: [ID!]
   vehicleIds: [ID!]
   stationIds: [ID!]
+  status: SocialMediaLinkStatus
+}
+
+type SocialMediaLinkPageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
 }
 
 type SocialMediaLinkScalar {
   id: ID!
   url: String!
   title: String!
+  description: String!
+  status: SocialMediaLinkStatus!
   created: DateTime!
   completed: Boolean!
   completedAt: DateTime
@@ -686,6 +725,12 @@ type SocialMediaLinkScalar {
   lines: [Line!]!
   vehicles: [Vehicle!]!
   stations: [Station!]!
+  completedBy: String
+}
+
+enum SocialMediaLinkStatus {
+  LIVE
+  PENDING_APPROVAL
 }
 
 type Source {

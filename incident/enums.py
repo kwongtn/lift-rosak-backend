@@ -29,3 +29,11 @@ class CalendarIncidentStatus(models.TextChoices):
     PENDING_APPROVAL = "pending_approval"
     LIVE = "live"
     REJECTED = "rejected"
+    # Only ever SET on chronologies (mark-for-delete flow). Never wired into
+    # incident approval flows — incidents never carry this status.
+    PENDING_DELETION = "pending_deletion"
+
+
+class SocialMediaLinkStatus(models.TextChoices):
+    LIVE = "live"
+    PENDING_APPROVAL = "pending_approval"

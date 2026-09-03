@@ -80,6 +80,9 @@ def no_admin_claim(monkeypatch):
     monkeypatch.setattr(
         "incident.schema.mutations.chronologies.has_admin_claim", _false
     )
+    monkeypatch.setattr(
+        "incident.schema.mutations.interactions.has_admin_claim", _false
+    )
     return _false
 
 
@@ -236,7 +239,7 @@ async def test_vote_resolvers_set_switch_remove():
 
 
 @pytest.mark.django_db
-async def test_social_link_resolvers_submit_and_complete():
+async def test_social_link_resolvers_submit_and_complete(no_admin_claim):
     user = await _make_user(7)
     info = _Info(user)
     links = SocialMediaLinkMutations()
@@ -259,7 +262,9 @@ async def test_social_link_resolvers_submit_and_complete():
 
 
 @pytest.mark.django_db
-async def test_social_link_resolver_title_null_and_unset_coerce_to_empty():
+async def test_social_link_resolver_title_null_and_unset_coerce_to_empty(
+    no_admin_claim,
+):
     user = await _make_user(8)
     info = _Info(user)
     links = SocialMediaLinkMutations()
@@ -343,6 +348,121 @@ async def test_create_calendar_incident_details_null_and_unset_coerce_to_empty(
     assert len(incidents) == 2
     for inc in incidents:
         assert inc.details == ""
+
+
+@pytest.mark.django_db
+async def test_update_mutation_returns_id_for_revision_path(no_admin_claim):
+    """Non-admin edit of LIVE creates a draft revision → id returned for chaining."""
+    from incident.models import CalendarIncident
+
+    author = await _make_user(100)
+    info = _Info(author)
+    crud = IncidentCrudMutations()
+
+    live = await services.create_incident(author, is_admin=True, data=_service_write())
+
+    updated = await crud.update_calendar_incident(
+        info,
+        calendar_incident_id=strawberry_id(live.id),
+        input=_incident_input(title="Edited"),
+    )
+    assert updated.ok is True
+    assert updated.id is not None
+
+    draft = await CalendarIncident.objects.filter(
+        parent_incident=live, status=CalendarIncidentStatus.DRAFT
+    ).afirst()
+    assert draft is not None
+    assert updated.id == draft.id
+
+
+@pytest.mark.django_db
+async def test_update_mutation_returns_id_for_same_actor_resume(no_admin_claim):
+    """Same-actor resume returns the existing draft's id."""
+    author = await _make_user(101)
+    info = _Info(author)
+    crud = IncidentCrudMutations()
+
+    live = await services.create_incident(author, is_admin=True, data=_service_write())
+
+    first = await crud.update_calendar_incident(
+        info,
+        calendar_incident_id=strawberry_id(live.id),
+        input=_incident_input(title="First"),
+    )
+    assert first.id is not None
+    draft_id = first.id
+
+    second = await crud.update_calendar_incident(
+        info,
+        calendar_incident_id=strawberry_id(live.id),
+        input=_incident_input(title="Resumed"),
+    )
+    assert second.id == draft_id
+
+
+@pytest.mark.django_db
+async def test_update_mutation_returns_none_for_in_place_paths(no_admin_claim):
+    """DRAFT in-place → id is None (frontend branches on it)."""
+    author = await _make_user(102)
+    info = _Info(author)
+    crud = IncidentCrudMutations()
+
+    # DRAFT in-place
+    draft = await services.create_incident(
+        author, is_admin=False, data=_service_write()
+    )
+    updated = await crud.update_calendar_incident(
+        info,
+        calendar_incident_id=strawberry_id(draft.id),
+        input=_incident_input(title="Draft revised"),
+    )
+    assert updated.ok is True
+    assert updated.id is None
+
+
+@pytest.mark.django_db
+async def test_update_mutation_returns_none_for_admin_in_place(monkeypatch):
+    """Admin in-place on LIVE → id is None."""
+
+    async def _true(user) -> bool:
+        return True
+
+    monkeypatch.setattr("incident.schema.mutations.incidents.has_admin_claim", _true)
+
+    admin = await _make_user(103)
+    info = _Info(admin)
+    crud = IncidentCrudMutations()
+
+    live = await services.create_incident(admin, is_admin=True, data=_service_write())
+    admin_updated = await crud.update_calendar_incident(
+        info,
+        calendar_incident_id=strawberry_id(live.id),
+        input=_incident_input(title="Admin edit"),
+    )
+    assert admin_updated.ok is True
+    assert admin_updated.id is None
+
+
+@pytest.mark.django_db
+async def test_update_mutation_returns_id_for_author_pending_in_place(no_admin_claim):
+    """Author editing own PENDING_APPROVAL in-place → id is None."""
+    author = await _make_user(104)
+    info = _Info(author)
+    crud = IncidentCrudMutations()
+
+    incident = await services.create_incident(
+        author, is_admin=False, data=_service_write()
+    )
+    await services.submit_incident(author, is_admin=False, incident_id=incident.id)
+
+    updated = await crud.update_calendar_incident(
+        info,
+        calendar_incident_id=strawberry_id(incident.id),
+        input=_incident_input(title="Pending revised"),
+    )
+    assert updated.ok is True
+    assert updated.id is None
 
 
 @pytest.mark.django_db

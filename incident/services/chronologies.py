@@ -132,16 +132,90 @@ async def reorder_chronology(
     return chronology
 
 
+async def request_chronology_deletion(
+    actor: User,
+    *,
+    is_admin: bool,
+    chronology_id: int,
+) -> CalendarIncidentChronology:
+    """Mark a LIVE chronology for deletion (author-or-admin; sets PENDING_DELETION).
+
+    Only valid on LIVE chronologies — DRAFT/PENDING_APPROVAL chronologies go
+    through the relaxed direct-delete path in ``delete_chronology``. Requesting
+    on an already-pending-deletion chronology raises an error.
+    """
+
+    chronology, incident = await _chronology_with_parent(chronology_id)
+
+    if not may_edit(actor, is_admin=is_admin, incident=incident):
+        raise IncidentNotEditableError(
+            "Only the author or an admin may request deletion of this chronology."
+        )
+
+    if chronology.status == CalendarIncidentStatus.PENDING_DELETION:
+        raise IncidentNotEditableError("This chronology is already pending deletion.")
+
+    if chronology.status != CalendarIncidentStatus.LIVE:
+        raise IncidentNotEditableError(
+            "Only LIVE chronologies can be marked for deletion; "
+            "draft or pending chronologies can be deleted directly."
+        )
+
+    def _sync() -> None:
+        chronology.status = CalendarIncidentStatus.PENDING_DELETION
+        chronology.clean()
+        chronology.save()
+
+    await sync_to_async(_sync)()
+    return chronology
+
+
+async def approve_chronology_deletion(admin: User, *, chronology_id: int) -> None:
+    """Admin-only: soft-delete a chronology marked for deletion."""
+
+    chronology, _ = await _chronology_with_parent(chronology_id)
+    await sync_to_async(chronology.delete)()
+
+
+async def reject_chronology_deletion(
+    admin: User, *, chronology_id: int
+) -> CalendarIncidentChronology:
+    """Admin-only: revert a PENDING_DELETION chronology back to LIVE.
+
+    The request flow only applies to LIVE chronologies, so the prior status
+    is always LIVE — we unconditionally revert to LIVE here.
+    """
+
+    chronology, _ = await _chronology_with_parent(chronology_id)
+
+    def _sync() -> None:
+        chronology.status = CalendarIncidentStatus.LIVE
+        chronology.clean()
+        chronology.save()
+
+    await sync_to_async(_sync)()
+    return chronology
+
+
 async def delete_chronology(actor: User, *, is_admin: bool, chronology_id: int) -> None:
     chronology, incident = await _chronology_with_parent(chronology_id)
 
-    if not is_admin and (
-        chronology.status != CalendarIncidentStatus.DRAFT
-        or not is_author(actor, incident)
-    ):
-        raise IncidentNotEditableError(
-            "Authors may only delete their own draft chronologies; "
-            "admins may delete any."
+    if not is_admin:
+        if not is_author(actor, incident):
+            raise IncidentNotEditableError(
+                "Authors may only delete their own chronologies; admins may delete any."
+            )
+        chronology_or_parent_pending = chronology.status in (
+            CalendarIncidentStatus.DRAFT,
+            CalendarIncidentStatus.PENDING_APPROVAL,
+        ) or incident.status in (
+            CalendarIncidentStatus.DRAFT,
+            CalendarIncidentStatus.PENDING_APPROVAL,
         )
+        if not chronology_or_parent_pending:
+            raise IncidentNotEditableError(
+                "Authors may only delete draft or pending chronologies, "
+                "or any chronology on a draft or pending incident."
+            )
 
     await sync_to_async(chronology.delete)()
