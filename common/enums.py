@@ -41,6 +41,9 @@ class TemporaryMediaStatus(models.TextChoices):
     # Pending garbage collection
     TO_DELETE = "TO_DELETE"
 
+    # Held for admin review (currently only untrusted video). Generic on purpose.
+    AWAITING_REVIEW = "AWAITING_REVIEW"
+
 
 class ClearanceType(models.TextChoices):
     TRUSTED_MEDIA_UPLOADER = "TRUSTED_MEDIA_UPLOADER"
