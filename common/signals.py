@@ -16,6 +16,9 @@ def convert_temporary_media_to_media(
     if not created:
         return
 
+    if instance.status == TemporaryMediaStatus.AWAITING_REVIEW:
+        return
+
     if instance.uploader.clearances.filter(
         name=ClearanceType.TRUSTED_MEDIA_UPLOADER
     ).exists():
