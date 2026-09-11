@@ -1,9 +1,11 @@
+import io
 from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.conf import settings
 from django.test import TestCase
 from django.utils.timezone import now
+from PIL import Image
 from strawberry import UNSET
 from strawberry.types.maybe import Some
 
@@ -27,16 +29,18 @@ from common.schema.scalars import UserScalar
 from common.tasks import (
     cleanup_expired_verification_codes,
     cleanup_temporary_media_task,
+    convert_temporary_media_to_media_task,
 )
 from common.utils import get_default_start_time
 from generic.schema.enums import DateGroupings
 from operation.models import Line, Vehicle, VehicleLine, VehicleType
 from rosak.tests import execute_graphql_async
 from spotting.enums import SpottingEventType, SpottingVehicleStatus
-from spotting.models import Event
+from spotting.models import Event, EventMedia
 
 SIGNAL_APPLY_ASYNC = "common.signals.convert_temporary_media_to_media_task.apply_async"
 TASK_APPLY_ASYNC = "common.tasks.convert_temporary_media_to_media_task.apply_async"
+SIGNAL_NSFW_APPLY_ASYNC = "common.signals.check_temporary_media_nsfw.apply_async"
 
 
 class CommonModelTests(TestCase):
@@ -1043,3 +1047,244 @@ class TestDjangoListConnection(TestCase):
         self.assertFalse(page_info["hasPreviousPage"])
         self.assertIsNotNone(page_info["startCursor"])
         self.assertIsNotNone(page_info["endCursor"])
+
+
+class TemporaryMediaConversionTaskTests(TestCase):
+    """Video skips PIL; image path still verifies + links EventMedia."""
+
+    def setUp(self):
+        self.user = User.objects.create(
+            firebase_id="convert-temporary-media-uid",
+            nickname="ConvertUser",
+        )
+        # Seed rows are not guaranteed in the shared --keepdb test DB.
+        FeatureFlag.objects.get_or_create(
+            name=FeatureFlagType.IMAGE_UPLOAD,
+            defaults={"enabled": True},
+        )
+        FeatureFlag.objects.filter(name=FeatureFlagType.IMAGE_UPLOAD).update(
+            enabled=True
+        )
+
+        vehicle_type = VehicleType.objects.create(
+            internal_name="CONVERT_MEDIA_VT",
+            display_name="Convert Media Vehicle Type",
+        )
+        self.vehicle = Vehicle.objects.create(
+            identification_no="Set 900",
+            vehicle_type=vehicle_type,
+            status=SpottingVehicleStatus.IN_SERVICE,
+        )
+        self.event = Event.objects.create(
+            reporter=self.user,
+            vehicle=self.vehicle,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date.today(),
+        )
+
+    def _create_temporary_media(self, metadata, filename):
+        # Creating a TemporaryMedia fires the post_save receiver, which would
+        # hit the real broker — patch out both dispatch calls.
+        with patch(SIGNAL_APPLY_ASYNC), patch(SIGNAL_NSFW_APPLY_ASYNC):
+            return TemporaryMedia.objects.create(
+                uploader=self.user,
+                file=f"temporary_media/{filename}",
+                upload_type=TemporaryMediaType.SPOTTING_EVENT,
+                status=TemporaryMediaStatus.PENDING,
+                metadata=metadata,
+            )
+
+    def _run_convert_task(self, temp_media, content, attachment):
+        with (
+            patch(
+                "storages.backends.s3boto3.S3Boto3Storage.open",
+                return_value=io.BytesIO(content),
+            ),
+            patch(
+                "storages.backends.s3boto3.S3Boto3Storage.url",
+                return_value="https://cdn.example.com/temporary_media",
+            ),
+            patch("common.tasks.requests.get") as mock_get,
+            patch("common.tasks.DiscordWebhook") as mock_webhook,
+            patch(
+                "common.imgur_storage.ImgurStorage._save",
+                return_value="stored_media",
+            ) as mock_storage_save,
+            patch("common.tasks.Image.open", wraps=Image.open) as mock_image_open,
+        ):
+            mock_get.return_value.content = content
+            mock_webhook.return_value.execute.return_value.json.return_value = {
+                "id": "discord-message-id",
+                "attachments": [attachment],
+            }
+            result = convert_temporary_media_to_media_task.apply(
+                kwargs={"temporary_media_id": temp_media.id}
+            )
+            self.assertTrue(result.successful(), result.traceback)
+
+        return mock_image_open, mock_storage_save
+
+    def test_video_temporary_media_converts_without_pil(self):
+        temp_media = self._create_temporary_media(
+            metadata={
+                "mime_type": "video/mp4",
+                "spotting_event_id": self.event.id,
+                "caption": "hi",
+                "duration": 12,
+                "width": 1920,
+                "height": 1080,
+                "file_name": "clip.mp4",
+            },
+            filename="clip.mp4",
+        )
+
+        mock_image_open, _ = self._run_convert_task(
+            temp_media,
+            content=b"\x00\x00\x00\x18ftypmp42 not a real video",
+            attachment={
+                "id": "discord-attachment-1",
+                "filename": "clip.mp4",
+                "width": 1920,
+                "height": 1080,
+                "content_type": "video/mp4",
+            },
+        )
+
+        mock_image_open.assert_not_called()
+
+        media = Media.objects.get(uploader=self.user)
+        self.assertEqual(media.content_type, "video/mp4")
+        self.assertEqual(media.caption, "hi")
+        self.assertEqual(media.duration, 12)
+        self.assertEqual(media.width, 1920)
+        self.assertEqual(media.height, 1080)
+        self.assertEqual(media.file_name, "clip.mp4")
+        self.assertTrue(
+            EventMedia.objects.filter(event=self.event, media=media).exists()
+        )
+
+        temp_media.refresh_from_db()
+        self.assertEqual(temp_media.status, TemporaryMediaStatus.TO_DELETE)
+        self.assertEqual(temp_media.fail_count, 0)
+
+    def test_image_temporary_media_still_verifies_and_links_event(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (3, 2), color="blue").save(buffer, format="JPEG")
+        image_bytes = buffer.getvalue()
+
+        temp_media = self._create_temporary_media(
+            metadata={
+                "mime_type": "image/jpeg",
+                "spotting_event_id": self.event.id,
+                "caption": "photo",
+                "width": 3,
+                "height": 2,
+                "file_name": "photo.jpg",
+            },
+            filename="photo.jpg",
+        )
+
+        mock_image_open, _ = self._run_convert_task(
+            temp_media,
+            content=image_bytes,
+            attachment={
+                "id": "discord-attachment-2",
+                "filename": "photo.jpg",
+                "width": 3,
+                "height": 2,
+                "content_type": "image/jpeg",
+            },
+        )
+
+        mock_image_open.assert_called_once()
+
+        media = Media.objects.get(uploader=self.user)
+        self.assertEqual(media.content_type, "image/jpeg")
+        self.assertEqual(media.caption, "photo")
+        self.assertIsNone(media.duration)
+        self.assertTrue(
+            EventMedia.objects.filter(event=self.event, media=media).exists()
+        )
+
+
+class TemporaryMediaReviewHoldAndCleanupTests(TestCase):
+    """AWAITING_REVIEW is held; cleanup converts OVERRIDE_CLEARED but is bounded."""
+
+    def setUp(self):
+        self.user = User.objects.create(
+            firebase_id="review-hold-cleanup-uid",
+        )
+        # Seed rows are not guaranteed in the shared --keepdb test DB.
+        FeatureFlag.objects.get_or_create(
+            name=FeatureFlagType.IMAGE_UPLOAD,
+            defaults={"enabled": True},
+        )
+        FeatureFlag.objects.filter(name=FeatureFlagType.IMAGE_UPLOAD).update(
+            enabled=True
+        )
+
+    def _create_temporary_media(self, status, fail_count=0):
+        with patch(SIGNAL_APPLY_ASYNC), patch(SIGNAL_NSFW_APPLY_ASYNC):
+            temp_media = TemporaryMedia.objects.create(
+                uploader=self.user,
+                upload_type=TemporaryMediaType.SPOTTING_EVENT,
+                status=status,
+                metadata={},
+            )
+        if fail_count:
+            TemporaryMedia.objects.filter(id=temp_media.id).update(
+                fail_count=fail_count
+            )
+            temp_media.refresh_from_db()
+        return temp_media
+
+    def test_awaiting_review_held(self):
+        with (
+            patch(SIGNAL_APPLY_ASYNC) as mock_signal_apply,
+            patch(TASK_APPLY_ASYNC) as mock_task_apply,
+        ):
+            temp_media = TemporaryMedia.objects.create(
+                uploader=self.user,
+                upload_type=TemporaryMediaType.SPOTTING_EVENT,
+                status=TemporaryMediaStatus.AWAITING_REVIEW,
+                metadata={},
+            )
+
+        mock_signal_apply.assert_not_called()
+        mock_task_apply.assert_not_called()
+
+        with patch(TASK_APPLY_ASYNC) as mock_task_apply:
+            cleanup_temporary_media_task.apply()
+
+        mock_task_apply.assert_not_called()
+
+        temp_media.refresh_from_db()
+        self.assertEqual(temp_media.status, TemporaryMediaStatus.AWAITING_REVIEW)
+
+    def test_override_cleared_converts(self):
+        temp_media = self._create_temporary_media(
+            TemporaryMediaStatus.OVERRIDE_CLEARED,
+        )
+
+        with patch(TASK_APPLY_ASYNC) as mock_task_apply:
+            cleanup_temporary_media_task.apply()
+
+        mock_task_apply.assert_called_once_with(
+            kwargs={"temporary_media_id": temp_media.id}
+        )
+
+    def test_cleanup_override_cleared_bounded(self):
+        temp_media = self._create_temporary_media(
+            TemporaryMediaStatus.OVERRIDE_CLEARED,
+            fail_count=5,
+        )
+
+        with patch(TASK_APPLY_ASYNC) as mock_task_apply:
+            cleanup_temporary_media_task.apply()
+
+        mock_task_apply.assert_not_called()
+
+        temp_media.refresh_from_db()
+        self.assertEqual(temp_media.status, TemporaryMediaStatus.OVERRIDE_CLEARED)
+        self.assertEqual(temp_media.fail_count, 5)
