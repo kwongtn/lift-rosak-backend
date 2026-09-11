@@ -47,6 +47,10 @@ def check_temporary_media_nsfw(self, *, temporary_media_id: str | int):
         )
         return
 
+    if (temp_media.metadata.get("mime_type") or "").startswith("video/"):
+        logger.info("Skipping NSFW check for video temp media %s", temp_media.id)
+        return
+
     if temp_media.uploader.clearances.filter(
         name=ClearanceType.TRUSTED_MEDIA_UPLOADER
     ).exists():
@@ -125,28 +129,34 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
 
         raise RuntimeError(f"Invalid upload type: {temp_media.upload_type}")
 
+    mime_type = temp_media.metadata.get("mime_type") or ""
+    is_video = mime_type.startswith("video/")
+
+    exif = {}
+    image_get_exif = {}
+
     try:
         with temp_media.file.open() as stream:
-            image_open = Image.open(stream)
-            image_open.verify()
+            if not is_video:
+                image_open = Image.open(stream)
+                image_open.verify()
 
-            exif = {}
-            if isinstance(
-                image_open,
-                (JpegImagePlugin.JpegImageFile, Jpeg2KImagePlugin.Jpeg2KImageFile),
-            ):
-                if image_get_exif := image_open.getexif():
-                    exif = {
-                        # Ensure we're not getting "TypeError: Object of type IFDRational is not JSON serializable".
-                        ExifTags.TAGS[k]: v
-                        for k, v in image_get_exif.items()
-                        if k in ExifTags.TAGS
-                        and type(v) not in [bytes, TiffImagePlugin.IFDRational]
-                    }
+                if isinstance(
+                    image_open,
+                    (JpegImagePlugin.JpegImageFile, Jpeg2KImagePlugin.Jpeg2KImageFile),
+                ):
+                    if image_get_exif := image_open.getexif():
+                        exif = {
+                            # Ensure we're not getting "TypeError: Object of type IFDRational is not JSON serializable".
+                            ExifTags.TAGS[k]: v
+                            for k, v in image_get_exif.items()
+                            if k in ExifTags.TAGS
+                            and type(v) not in [bytes, TiffImagePlugin.IFDRational]
+                        }
 
-                logger.info(exif)
-            else:
-                logger.info(f"No exif data for {temp_media.file.name}")
+                    logger.info(exif)
+                else:
+                    logger.info(f"No exif data for {temp_media.file.name}")
 
             image_response = requests.get(url=temp_media.file.url)
 
@@ -203,10 +213,17 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
                 uploader_id=temp_media.uploader_id,
                 message_id=discord_res["id"],
                 file_id=discord_attachment.get("id", None),
-                file_name=discord_attachment.get("filename", None),
-                width=discord_attachment.get("width", None),
-                height=discord_attachment.get("height", None),
-                content_type=discord_attachment.get("content_type", None),
+                file_name=discord_attachment.get("filename")
+                or temp_media.metadata.get("file_name"),
+                width=discord_attachment.get("width")
+                or temp_media.metadata.get("width"),
+                height=discord_attachment.get("height")
+                or temp_media.metadata.get("height"),
+                content_type=discord_attachment.get("content_type")
+                or mime_type
+                or None,
+                caption=temp_media.metadata.get("caption", "") or "",
+                duration=temp_media.metadata.get("duration"),
             )
 
             if temp_media.upload_type == TemporaryMediaType.SPOTTING_EVENT:
@@ -265,6 +282,7 @@ def cleanup_temporary_media_task(self, *args, **kwargs):
 
     for temp_media in TemporaryMedia.objects.filter(
         status__in=[TemporaryMediaStatus.OVERRIDE_CLEARED],
+        fail_count__lt=5,
     ).filter():
         convert_temporary_media_to_media_task.apply_async(
             kwargs={
