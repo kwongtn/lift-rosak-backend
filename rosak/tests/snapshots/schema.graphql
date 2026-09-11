@@ -525,6 +525,10 @@ type MediaScalar {
   height: Int!
   url: String
   discordSuffix: String!
+  caption: String!
+  duration: Int
+  contentType: String
+  fileName: String
 }
 
 type MediaType implements Node {
