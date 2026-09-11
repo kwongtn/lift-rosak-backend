@@ -11,11 +11,15 @@ from zoneinfo import ZoneInfo
 import requests
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.core.files import File
+from django.core.files.base import ContentFile
 from django.db.models import Count, Q
 from telegram import Update
 from telegram.constants import ReactionEmoji
 
-from common.models import User, UserVerificationCode
+from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
+from common.models import TemporaryMedia, User, UserVerificationCode
+from common.utils import should_upload_media
 from incident import services
 from operation.enums import VehicleStatus
 from operation.models import Line, StationLine, Vehicle
@@ -597,3 +601,162 @@ async def favourite_vehicle(update: Update, context) -> None:
     )
 
     await update.message.reply_html(text=output_html)
+
+
+def _media_extension(file_name: str | None, mime_type: str | None) -> str:
+    if file_name and "." in file_name:
+        return file_name.rsplit(".", 1)[-1].lower()
+    return {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/gif": "gif",
+        "video/mp4": "mp4",
+        "video/quicktime": "mov",
+    }.get(mime_type, "bin")
+
+
+async def media(update: Update, context) -> None:
+    message = update.message
+    if message is None:
+        return
+
+    width = None
+    height = None
+    duration = None
+    file_name = None
+    file_size = None
+
+    if message.photo:
+        largest = message.photo[-1]
+        kind = "image"
+        mime_type = "image/jpeg"
+        file_id = largest.file_id
+        width = largest.width
+        height = largest.height
+        file_size = largest.file_size
+    elif message.video:
+        kind = "video"
+        file_id = message.video.file_id
+        width = message.video.width
+        height = message.video.height
+        duration = message.video.duration
+        file_name = message.video.file_name
+        mime_type = message.video.mime_type
+        file_size = message.video.file_size
+    elif message.animation:
+        kind = "video"
+        mime_type = "video/mp4"
+        file_id = message.animation.file_id
+        width = message.animation.width
+        height = message.animation.height
+        duration = message.animation.duration
+        file_name = message.animation.file_name
+        file_size = message.animation.file_size
+    elif message.document:
+        document = message.document
+        if (document.mime_type or "").startswith("video/"):
+            kind = "video"
+        elif (document.mime_type or "").startswith("image/"):
+            kind = "image"
+        else:
+            await message.reply_html(text="Unsupported attachment type.")
+            return
+        file_id = document.file_id
+        file_name = document.file_name
+        mime_type = document.mime_type
+        file_size = document.file_size
+    else:
+        return
+
+    # Check if user has verified account
+    user = await User.objects.filter(telegram_id=message.from_user.id).afirst()
+
+    # If no, send error and ask user to verify before proceeding
+    if user is None:
+        await message.reply_html(
+            text=f'Please use the <code>/verify [code]</code> command to verify your telegram account before proceeding. You may obtain the code from the <a href="{env_url_dict.get(settings.ENVIRONMENT)}">TranSPOT</a> site, or visit <a href="https://github.com/kwongtn/rosak_firebase/wiki/Linking-to-Telegram">our wiki</a> for a detailed tutorial.'
+        )
+        return
+
+    if not await sync_to_async(should_upload_media)():
+        await message.reply_html(text="Media uploads are currently disabled.")
+        return
+
+    line = await Line.objects.filter(
+        telegram_channel_id=update.effective_chat.id
+    ).afirst()
+
+    if line is None:
+        await message.reply_html(text="No line assigned for this channel.")
+        return
+
+    vehicles = Vehicle.objects.filter(lines__in=[line])
+    event = (
+        await Event.objects.filter(reporter_id=user.id, vehicle__in=vehicles)
+        .order_by("-created")
+        .afirst()
+    )
+
+    if event is None:
+        await message.reply_html(
+            text="Please create a spotting entry first (e.g. /spot) before uploading media."
+        )
+        return
+
+    if file_size and file_size > 20 * 1024 * 1024:
+        await message.reply_html(text="File is too large (max 20 MB).")
+        return
+
+    tg_file = await context.bot.get_file(file_id)
+    content = bytes(await tg_file.download_as_bytearray())
+
+    ext = _media_extension(file_name, mime_type)
+    file_obj = File(ContentFile(content), name=f"telegram_{file_id}.{ext}")
+
+    @sync_to_async
+    def _is_trusted(u):
+        return u.clearances.filter(name=ClearanceType.TRUSTED_MEDIA_UPLOADER).exists()
+
+    trusted = await _is_trusted(user)
+
+    if trusted:
+        status = TemporaryMediaStatus.TRUSTED_CLEARED
+    elif kind == "video":
+        status = TemporaryMediaStatus.AWAITING_REVIEW
+    else:
+        status = TemporaryMediaStatus.PENDING
+
+    metadata = {
+        "spotting_event_id": event.id,
+        "telegram_message_id": message.message_id,
+        "telegram_chat_id": message.chat.id,
+        "caption": message.caption or "",
+        "file_name": file_name,
+        "mime_type": mime_type,
+        "width": width,
+        "height": height,
+        "duration": duration,  # None for images
+        "source": "telegram",
+    }
+
+    # The post_save signal drives conversion for trusted / untrusted-image;
+    # AWAITING_REVIEW is held until an admin approves it.
+    temp_media = await TemporaryMedia.objects.acreate(
+        uploader_id=user.id,
+        file=file_obj,
+        upload_type=TemporaryMediaType.SPOTTING_EVENT,
+        metadata=metadata,
+        status=status,
+    )
+
+    if status == TemporaryMediaStatus.AWAITING_REVIEW:
+        sent = await retry_on_error(
+            message,
+            "reply_html",
+            text="Video received. Awaiting admin review before displaying in site.",
+        )
+        if sent is not None:
+            temp_media.metadata["review_message_id"] = sent.message_id
+            await temp_media.asave(update_fields=["metadata"])
+    else:
+        await retry_on_error(message, "set_reaction", ReactionEmoji.THUMBS_UP)
