@@ -19,6 +19,7 @@ from telegram.constants import ReactionEmoji
 
 from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
 from common.models import TemporaryMedia, User, UserVerificationCode
+from common.tasks import convert_temporary_media_to_media_task
 from common.utils import should_upload_media
 from incident import services
 from operation.enums import VehicleStatus
@@ -760,3 +761,52 @@ async def media(update: Update, context) -> None:
             await temp_media.asave(update_fields=["metadata"])
     else:
         await retry_on_error(message, "set_reaction", ReactionEmoji.THUMBS_UP)
+
+
+async def approve(update: Update, context) -> None:
+    message = update.message
+    if message is None:
+        return
+
+    # Check if user has verified account
+    user = await User.objects.filter(telegram_id=message.from_user.id).afirst()
+
+    # If no, send error and ask user to verify before proceeding
+    if user is None:
+        await message.reply_html(
+            text=f'Please use the <code>/verify [code]</code> command to verify your telegram account before proceeding. You may obtain the code from the <a href="{env_url_dict.get(settings.ENVIRONMENT)}">TranSPOT</a> site, or visit <a href="https://github.com/kwongtn/rosak_firebase/wiki/Linking-to-Telegram">our wiki</a> for a detailed tutorial.'
+        )
+        return
+
+    from rosak.permissions import has_admin_claim
+
+    if not await has_admin_claim(user):
+        await message.reply_html(text="You are not authorised to approve media.")
+        return
+
+    source = message.reply_to_message
+    if source is None:
+        await message.reply_html(
+            text="Please reply to a media message awaiting review."
+        )
+        return
+
+    temp_media = await TemporaryMedia.objects.filter(
+        Q(metadata__telegram_message_id=source.message_id)
+        | Q(metadata__review_message_id=source.message_id),
+        metadata__telegram_chat_id=source.chat.id,
+        status=TemporaryMediaStatus.AWAITING_REVIEW,
+    ).afirst()
+
+    if temp_media is None:
+        await message.reply_html(
+            text="No media awaiting review found for this message."
+        )
+        return
+
+    temp_media.status = TemporaryMediaStatus.OVERRIDE_CLEARED
+    await temp_media.asave(update_fields=["status"])
+    convert_temporary_media_to_media_task.apply_async(
+        kwargs={"temporary_media_id": temp_media.id}
+    )
+    await message.reply_html(text="Approved. Media will be published.")
