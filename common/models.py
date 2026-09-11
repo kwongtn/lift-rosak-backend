@@ -53,7 +53,9 @@ class Media(TimeStampedModel, UUIDModel, MediaMixin):
     message_id = models.CharField(max_length=32, null=True, blank=True, default=None)
     file_id = models.CharField(max_length=32, null=True, blank=True, default=None)
     file_name = models.CharField(max_length=128, null=True, blank=True, default=None)
-    content_type = models.CharField(max_length=16, null=True, blank=True, default=None)
+    content_type = models.CharField(max_length=64, null=True, blank=True, default=None)
+    caption = models.TextField(blank=True, default="")
+    duration = models.PositiveIntegerField(null=True, blank=True, default=None)
 
     @property
     def discord_suffix(self) -> str:
