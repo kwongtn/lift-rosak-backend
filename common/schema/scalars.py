@@ -31,6 +31,10 @@ class MediaScalar:
     height: int
     url: Optional[str]
     discord_suffix: str
+    caption: str
+    duration: Optional[int]
+    content_type: Optional[str]
+    file_name: Optional[str]
 
 
 @strawberry.type
