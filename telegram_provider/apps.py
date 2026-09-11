@@ -5,7 +5,7 @@ import httpx
 from django.apps import AppConfig
 from django.conf import settings
 from telegram import Update
-from telegram.ext import Application, CommandHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 ptb_application = None
 logger = logging.getLogger(__name__)
@@ -50,6 +50,9 @@ handlers_dict = {
     "deletelink": {
         "description": "Delete a link you submitted (reply to it)",
     },
+    "approve": {
+        "description": "Approve media awaiting admin review (reply to the media message)"
+    },
 }
 
 
@@ -90,6 +93,7 @@ class ASGILifespanSignalHandler:
         )
 
         from telegram_provider.handlers import (
+            approve,
             dad_joke,
             delete,
             delete_link,
@@ -97,6 +101,7 @@ class ASGILifespanSignalHandler:
             favourite_vehicle,
             help,
             help_spotting,
+            media,
             ping,
             spot,
             spotting_today,
@@ -117,6 +122,7 @@ class ASGILifespanSignalHandler:
             "delete": delete,
             "link": submit_link,
             "deletelink": delete_link,
+            "approve": approve,
         }
 
         for k, v in handlers_mapping.items():
@@ -150,6 +156,20 @@ class ASGILifespanSignalHandler:
                 for command, elem in handlers_dict.items()
             ]
         )
+
+        ptb_application.add_handler(
+            MessageHandler(
+                (
+                    filters.PHOTO
+                    | filters.VIDEO
+                    | filters.ANIMATION
+                    | filters.Document.ALL
+                )
+                & ~filters.COMMAND,
+                media,
+            )
+        )
+
         ptb_application.add_error_handler(error_handler)
 
     async def shutdown(self, **_):
