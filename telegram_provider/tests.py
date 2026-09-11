@@ -9,12 +9,15 @@ from django.test import TestCase, override_settings
 from telegram.constants import ReactionEmoji
 from telegram.error import BadRequest
 
+from common.enums import TemporaryMediaStatus, TemporaryMediaType
 from incident.services import IncidentServiceError, SocialMediaLinkWrite
 from operation.models import Line
 from telegram_provider.enums import MessageDirection
 from telegram_provider.handlers import (
+    approve,
     delete_link,
     error_handler,
+    media,
     spotting_today,
     submit_link,
 )
@@ -849,3 +852,416 @@ class LinkHandlerTests(TestCase):
     def test_link_parser_invalid_incident_id_raises_argument_error(self):
         with self.assertRaises(ArgumentError):
             link_parser().parse_args(["https://example.com", "-id", "notanint"])
+
+
+class MediaHandlerTests(TestCase):
+    """Coverage for the unrestricted photo/video handler (handlers.media).
+
+    Plain TestCase + asyncio.run(), mirroring LinkHandlerTests: the handler's
+    async-ORM lookups would use a connection invisible to the TestCase
+    transaction, so every model class it touches is patched with stubs. No
+    migration-seeded Clearance/FeatureFlag rows are read, so the suite stays
+    green on a --keepdb database whose seeds were truncated.
+    """
+
+    def setUp(self):
+        self.line = MagicMock(name="line")
+        self.line.id = 42
+        self.vehicle = MagicMock(name="vehicle")
+        self.vehicle.id = 7
+        self.user = MagicMock(name="user")
+        self.user.id = 99
+        self.event = MagicMock(name="event")
+        self.event.id = 555
+        self.temp_media = MagicMock(name="temporary_media")
+        self.temp_media.metadata = {}
+        self.temp_media.asave = AsyncMock()
+        self.tg_file = MagicMock(name="tg_file")
+        self.tg_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"data"))
+        self.user.clearances.filter.return_value.exists.return_value = False
+
+    @contextmanager
+    def _mock_handlers(self):
+        with ExitStack() as stack:
+            mocks = {}
+            mocks["user"] = stack.enter_context(
+                patch("telegram_provider.handlers.User")
+            )
+            mocks["line"] = stack.enter_context(
+                patch("telegram_provider.handlers.Line")
+            )
+            mocks["vehicle"] = stack.enter_context(
+                patch("telegram_provider.handlers.Vehicle")
+            )
+            mocks["event"] = stack.enter_context(
+                patch("telegram_provider.handlers.Event")
+            )
+            mocks["temp_media"] = stack.enter_context(
+                patch("telegram_provider.handlers.TemporaryMedia")
+            )
+            mocks["flag"] = stack.enter_context(
+                patch(
+                    "telegram_provider.handlers.should_upload_media",
+                    return_value=True,
+                )
+            )
+            mocks["retry"] = stack.enter_context(
+                patch(
+                    "telegram_provider.handlers.retry_on_error",
+                    new_callable=AsyncMock,
+                )
+            )
+            mocks["temp_media"].objects.acreate = AsyncMock(
+                return_value=self.temp_media
+            )
+            yield mocks
+
+    def _make_update(self, *, photo=False, video=False, document=None, caption=None):
+        message = MagicMock(name="message")
+        # Explicit None so `elif message.video:` cannot be fooled by auto-mocks.
+        message.photo = None
+        message.video = None
+        message.animation = None
+        message.document = None
+        message.caption = caption
+        message.from_user = MagicMock()
+        message.from_user.id = 12345
+        message.message_id = 777
+        message.chat = MagicMock()
+        message.chat.id = 123456
+        message.reply_to_message = None
+        message.reply_html = AsyncMock()
+        message.set_reaction = AsyncMock()
+
+        if photo:
+            largest = MagicMock(name="photo_size")
+            largest.file_id = "photo-file-id"
+            largest.width = 1280
+            largest.height = 720
+            largest.file_size = 1234
+            message.photo = [MagicMock(name="thumbnail"), largest]
+        elif video:
+            video_obj = MagicMock(name="video")
+            video_obj.file_id = "video-file-id"
+            video_obj.width = 1920
+            video_obj.height = 1080
+            video_obj.duration = 12
+            video_obj.file_name = "clip.mp4"
+            video_obj.mime_type = "video/mp4"
+            video_obj.file_size = 5678
+            message.video = video_obj
+        elif document is not None:
+            message.document = document
+
+        update = MagicMock(name="update")
+        update.message = message
+        update.effective_chat = MagicMock()
+        update.effective_chat.id = 123456
+        return update
+
+    def _context(self):
+        context = MagicMock(name="context")
+        context.bot.get_file = AsyncMock(return_value=self.tg_file)
+        return context
+
+    def _stub_user(self, mocks, user):
+        mocks["user"].objects.filter.return_value.afirst = AsyncMock(return_value=user)
+
+    def _stub_line(self, mocks, line):
+        mocks["line"].objects.filter.return_value.afirst = AsyncMock(return_value=line)
+
+    def _stub_event(self, mocks, event):
+        mocks[
+            "event"
+        ].objects.filter.return_value.order_by.return_value.afirst = AsyncMock(
+            return_value=event
+        )
+
+    def _stub_ready(self, mocks):
+        self._stub_user(mocks, self.user)
+        self._stub_line(mocks, self.line)
+        self._stub_event(mocks, self.event)
+
+    def test_not_verified_prompts_verify_and_creates_nothing(self):
+        update = self._make_update(photo=True, caption="hi")
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, None)
+            asyncio.run(media(update, context))
+
+        update.message.reply_html.assert_awaited_once()
+        self.assertIn("/verify", update.message.reply_html.await_args.kwargs["text"])
+        mocks["temp_media"].objects.acreate.assert_not_awaited()
+        mocks["retry"].assert_not_awaited()
+
+    def test_no_line_replies_and_creates_nothing(self):
+        update = self._make_update(photo=True)
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks, None)
+            asyncio.run(media(update, context))
+
+        update.message.reply_html.assert_awaited_once_with(
+            text="No line assigned for this channel."
+        )
+        mocks["temp_media"].objects.acreate.assert_not_awaited()
+        mocks["retry"].assert_not_awaited()
+
+    def test_no_recent_event_replies_and_creates_nothing(self):
+        update = self._make_update(photo=True)
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks, self.line)
+            self._stub_event(mocks, None)
+            asyncio.run(media(update, context))
+
+        update.message.reply_html.assert_awaited_once_with(
+            text=(
+                "Please create a spotting entry first (e.g. /spot) "
+                "before uploading media."
+            )
+        )
+        mocks["temp_media"].objects.acreate.assert_not_awaited()
+        mocks["retry"].assert_not_awaited()
+
+    def test_feature_flag_off_replies_and_creates_nothing(self):
+        update = self._make_update(photo=True)
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            mocks["flag"].return_value = False
+            asyncio.run(media(update, context))
+
+        update.message.reply_html.assert_awaited_once_with(
+            text="Media uploads are currently disabled."
+        )
+        mocks["temp_media"].objects.acreate.assert_not_awaited()
+        mocks["retry"].assert_not_awaited()
+
+    def test_untrusted_photo_creates_pending_temp_media_and_reacts_up(self):
+        update = self._make_update(photo=True, caption="A sighting")
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            self._stub_ready(mocks)
+            asyncio.run(media(update, context))
+
+        acreate = mocks["temp_media"].objects.acreate
+        acreate.assert_awaited_once()
+        kwargs = acreate.await_args.kwargs
+        self.assertEqual(kwargs["status"], TemporaryMediaStatus.PENDING)
+        self.assertEqual(kwargs["upload_type"], TemporaryMediaType.SPOTTING_EVENT)
+        self.assertEqual(kwargs["uploader_id"], self.user.id)
+        self.assertEqual(kwargs["metadata"]["spotting_event_id"], self.event.id)
+        self.assertEqual(kwargs["metadata"]["caption"], "A sighting")
+        self.assertEqual(kwargs["metadata"]["mime_type"], "image/jpeg")
+        self.assertEqual(kwargs["metadata"]["telegram_message_id"], 777)
+        self.assertEqual(kwargs["metadata"]["telegram_chat_id"], 123456)
+        self.assertEqual(kwargs["metadata"]["source"], "telegram")
+        context.bot.get_file.assert_awaited_once_with("photo-file-id")
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
+        )
+
+    def test_untrusted_video_awaits_review_and_persists_review_message_id(self):
+        update = self._make_update(video=True)
+        context = self._context()
+        sent = MagicMock(name="sent_review_message")
+        sent.message_id = 4242
+
+        with self._mock_handlers() as mocks:
+            self._stub_ready(mocks)
+            mocks["retry"].return_value = sent
+            asyncio.run(media(update, context))
+
+        kwargs = mocks["temp_media"].objects.acreate.await_args.kwargs
+        self.assertEqual(kwargs["status"], TemporaryMediaStatus.AWAITING_REVIEW)
+        self.assertEqual(kwargs["metadata"]["duration"], 12)
+        self.assertEqual(kwargs["metadata"]["mime_type"], "video/mp4")
+        mocks["retry"].assert_awaited_once_with(
+            update.message,
+            "reply_html",
+            text="Video received. Awaiting admin review before displaying in site.",
+        )
+        self.assertEqual(self.temp_media.metadata["review_message_id"], 4242)
+        self.temp_media.asave.assert_awaited_once_with(update_fields=["metadata"])
+
+    def test_trusted_video_is_published_immediately_and_reacts_up(self):
+        update = self._make_update(video=True)
+        context = self._context()
+        self.user.clearances.filter.return_value.exists.return_value = True
+
+        with self._mock_handlers() as mocks:
+            self._stub_ready(mocks)
+            asyncio.run(media(update, context))
+
+        kwargs = mocks["temp_media"].objects.acreate.await_args.kwargs
+        self.assertEqual(kwargs["status"], TemporaryMediaStatus.TRUSTED_CLEARED)
+        self.temp_media.asave.assert_not_awaited()
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
+        )
+
+    def test_unsupported_document_is_rejected_before_any_lookup(self):
+        document = MagicMock(name="document")
+        document.mime_type = "application/pdf"
+        document.file_id = "doc-file-id"
+        document.file_name = "report.pdf"
+        document.file_size = 10
+        update = self._make_update(document=document)
+        context = self._context()
+
+        with self._mock_handlers() as mocks:
+            asyncio.run(media(update, context))
+
+        update.message.reply_html.assert_awaited_once_with(
+            text="Unsupported attachment type."
+        )
+        mocks["temp_media"].objects.acreate.assert_not_awaited()
+        mocks["user"].objects.filter.assert_not_called()
+        mocks["retry"].assert_not_awaited()
+
+
+class ApproveHandlerTests(TestCase):
+    """Coverage for /approve (handlers.approve).
+
+    Same plain-TestCase + asyncio.run() shape as LinkHandlerTests. approve()
+    imports has_admin_claim function-locally, so it is patched on
+    rosak.permissions rather than on telegram_provider.handlers.
+    """
+
+    def setUp(self):
+        self.user = MagicMock(name="user")
+        self.user.id = 99
+        self.temp_media = MagicMock(name="temporary_media")
+        self.temp_media.id = 321
+        self.temp_media.metadata = {}
+        self.temp_media.asave = AsyncMock()
+        self.source = MagicMock(name="reply_to_message")
+        self.source.message_id = 777
+        self.source.chat = MagicMock()
+        self.source.chat.id = 123456
+
+    @contextmanager
+    def _mock_handlers(self):
+        with ExitStack() as stack:
+            mocks = {}
+            mocks["user"] = stack.enter_context(
+                patch("telegram_provider.handlers.User")
+            )
+            mocks["temp_media"] = stack.enter_context(
+                patch("telegram_provider.handlers.TemporaryMedia")
+            )
+            mocks["admin"] = stack.enter_context(
+                patch("rosak.permissions.has_admin_claim", new_callable=AsyncMock)
+            )
+            mocks["convert"] = stack.enter_context(
+                patch(
+                    "telegram_provider.handlers.convert_temporary_media_to_media_task"
+                )
+            )
+            mocks["user"].objects.filter.return_value.afirst = AsyncMock(
+                return_value=self.user
+            )
+            mocks["temp_media"].objects.filter.return_value.afirst = AsyncMock(
+                return_value=self.temp_media
+            )
+            mocks["admin"].return_value = True
+            yield mocks
+
+    def _make_update(self, reply_to_message):
+        update = MagicMock(name="update")
+        update.message = MagicMock(name="message")
+        update.message.from_user = MagicMock()
+        update.message.from_user.id = 12345
+        update.message.reply_to_message = reply_to_message
+        update.message.reply_html = AsyncMock()
+        return update
+
+    def _assert_released(self, mocks, update, expected_message_id):
+        self.assertEqual(self.temp_media.status, TemporaryMediaStatus.OVERRIDE_CLEARED)
+        self.temp_media.asave.assert_awaited_once_with(update_fields=["status"])
+        mocks["admin"].assert_awaited_once_with(self.user)
+        filter_args = mocks["temp_media"].objects.filter.call_args
+        branches = dict(filter_args.args[0].children)
+        self.assertEqual(branches["metadata__telegram_message_id"], expected_message_id)
+        self.assertEqual(branches["metadata__review_message_id"], expected_message_id)
+        self.assertEqual(
+            filter_args.kwargs["metadata__telegram_chat_id"], self.source.chat.id
+        )
+        self.assertEqual(
+            filter_args.kwargs["status"], TemporaryMediaStatus.AWAITING_REVIEW
+        )
+        mocks["convert"].apply_async.assert_called_once_with(
+            kwargs={"temporary_media_id": self.temp_media.id}
+        )
+        update.message.reply_html.assert_awaited_once_with(
+            text="Approved. Media will be published."
+        )
+
+    def test_non_admin_is_rejected_without_status_change(self):
+        update = self._make_update(self.source)
+
+        with self._mock_handlers() as mocks:
+            mocks["admin"].return_value = False
+            asyncio.run(approve(update, MagicMock()))
+
+        update.message.reply_html.assert_awaited_once_with(
+            text="You are not authorised to approve media."
+        )
+        self.temp_media.asave.assert_not_awaited()
+        mocks["convert"].apply_async.assert_not_called()
+        mocks["temp_media"].objects.filter.assert_not_called()
+
+    def test_admin_reply_to_video_message_releases_media(self):
+        update = self._make_update(self.source)
+
+        with self._mock_handlers() as mocks:
+            asyncio.run(approve(update, MagicMock()))
+
+        self._assert_released(mocks, update, expected_message_id=777)
+
+    def test_admin_reply_to_review_message_releases_media(self):
+        review_source = MagicMock(name="review_message")
+        review_source.message_id = 4242
+        review_source.chat = self.source.chat
+        update = self._make_update(review_source)
+
+        with self._mock_handlers() as mocks:
+            asyncio.run(approve(update, MagicMock()))
+
+        self._assert_released(mocks, update, expected_message_id=4242)
+
+    def test_admin_without_reply_target_prompts(self):
+        update = self._make_update(None)
+
+        with self._mock_handlers() as mocks:
+            asyncio.run(approve(update, MagicMock()))
+
+        update.message.reply_html.assert_awaited_once_with(
+            text="Please reply to a media message awaiting review."
+        )
+        mocks["temp_media"].objects.filter.assert_not_called()
+        self.temp_media.asave.assert_not_awaited()
+        mocks["convert"].apply_async.assert_not_called()
+
+    def test_admin_reply_with_no_awaiting_review_media_prompts(self):
+        update = self._make_update(self.source)
+
+        with self._mock_handlers() as mocks:
+            mocks["temp_media"].objects.filter.return_value.afirst = AsyncMock(
+                return_value=None
+            )
+            asyncio.run(approve(update, MagicMock()))
+
+        update.message.reply_html.assert_awaited_once_with(
+            text="No media awaiting review found for this message."
+        )
+        self.temp_media.asave.assert_not_awaited()
+        mocks["convert"].apply_async.assert_not_called()
