@@ -2,7 +2,7 @@
 
 ## 📌 Purpose & Scope
 
-- **Core Responsibility:** The Telegram bridge. It is the sole ingress/egress adapter between Telegram chats and the domain apps: it accepts Telegram webhook updates, persists every raw payload for audit/replay, dispatches slash-commands to handlers, converts free-form command text into structured spotting submissions (writing `spotting.Event` rows), links Telegram identities to `common.User`, and pushes daily digest messages back to line channels.
+- **Core Responsibility:** The Telegram bridge. It is the sole ingress/egress adapter between Telegram chats and the domain apps: it accepts Telegram webhook updates, persists every raw payload for audit/replay, dispatches slash-commands to handlers, converts free-form command text into structured spotting submissions (writing `spotting.Event` rows), links Telegram identities to `common.User`, and pushes daily digest messages back to line channels. It also ingests plain photo/video messages, auto-attaching them to the sender's latest spotting on the channel's line, and exposes an admin-only `/approve` command for media held for review.
 - **Domain/Layer:** Django integration / adapter layer — ASGI-async views + `python-telegram-bot` (PTB) `Application`, a thin persistence layer (2 models), and Celery maintenance tasks. It owns no transport domain concepts of its own; it borrows them from `operation` and `spotting`.
 
 ## 🔌 Interface & Data Flow
@@ -45,6 +45,8 @@
 | `/spot`, `/s` | `spot` | The main ingestion path (below). |
 | `/delete` | `delete` | Reply-to-message deletion of a spotting entry. |
 | `/spotting_today` | `spotting_today` | Renders `utils.get_daily_updates(line_id)` for the channel's line. |
+| `/approve` | `approve` | Admin-only approval of a held `AWAITING_REVIEW` media row (reply to the media or its review message); re-stamps it `OVERRIDE_CLEARED` and dispatches conversion. |
+| — (plain message) | `media` | Non-command photo/video/animation/video-document messages; downloads the file and stages a `TemporaryMedia` attached to the sender's latest `spotting.Event` on the channel's line. Registered as a separate `MessageHandler` (not in `handlers_dict`) and explicitly excludes commands. |
 | — | `error_handler` | Formats update + `chat_data`/`user_data` + traceback into an HTML report; **currently only `print`s it** (the developer-DM `send_message` is commented out, and `TELEGRAM_ADMIN_CHAT_ID` is unused).
 
 **Channel→line binding:** most handlers resolve context via `operation.Line.objects.filter(telegram_channel_id=update.effective_chat.id)`. A chat with no bound line cannot spot ("No line assigned for this channel").
@@ -87,7 +89,7 @@ Verified user lookup by `telegram_id` → argparse → channel's `Line` → `Veh
   - `TelegramLogs(TimeStampedModel)` — `direction` (`MessageDirection` IntegerChoices: INBOUND=0, OUTBOUND=1) + `payload` JSONField. Comment notes only inbound is recorded today, so OUTBOUND is currently unused.
   - `TelegramSpottingEventLog` — join table: FK `spotting.Event` (`SET_NULL`, related_name `telegram_logs`) + FK `TelegramLogs` (`CASCADE`, related_name also `telegram_logs`).
 - **No conversation/session state.** Every command is stateless and re-derives context from the message (chat id → line, `from_user.id` → user). PTB's `chat_data`/`user_data` are only touched in `error_handler` reporting.
-- **Resilience:** `utils.infinite_retry_on_error(obj, fn_name, *args)` retries any bot call in an unbounded loop with 10s sleeps, treating `BadRequest("Message to react not found")` as terminal-success. Used for all reaction calls; note it is genuinely unbounded and can pin a task indefinitely.
+- **Resilience:** `utils.retry_on_error(obj, fn_name, *args, max_retries=3, backoff_base=2.0)` retries any bot call with bounded exponential backoff, treating `BadRequest("Message to react not found")` as terminal-success. The old unbounded `infinite_retry_on_error` no longer exists (replaced in `0d1c3a4`), though `AGENTS.md` still references the old name.
 - **Reporting logic:** `utils.get_daily_updates(line_id, spotting_date)` is sync ORM code (wrapped in `sync_to_async` by callers) that buckets a line's `VehicleLine` roster into "Not Spotted" / "Spotted Today" / "Spotted Today, to review" and renders Telegram HTML. Its `spotting_date` argument is immediately overwritten with `date.today()` inside the function — so `report_spotting_today`'s "yesterday" intent is silently ignored.
 
 ### Cross-app coupling
@@ -99,7 +101,7 @@ Verified user lookup by `telegram_id` → argparse → channel's `Line` → `Veh
 
 - **`handlers_dict` (apps.py)** is the primary extension seam: add a key + `description`, add the callable to `handlers_mapping`, and registration, `/help` text, and Telegram menu sync all follow automatically.
 - **`spotting_parser()`** — new flags extend both grammar and help text in one place; the commented `--location` argument is the pre-designed next step.
-- **`ptb_application.add_handlers`** currently only receives `CommandHandler`s. `MessageHandler`, `CallbackQueryHandler`, and inline-query handlers can be added at the same point with zero schema change — and `dataclasses.WebhookUpdate` plus `MessageDirection.OUTBOUND` are pre-built for custom updates and outbound logging respectively.
+- **`ptb_application.add_handlers`** receives the `CommandHandler`s built from `handlers_dict`. **REALISED:** the plain-message `MessageHandler` (`media`) is now registered right after them (still `& ~filters.COMMAND`). `CallbackQueryHandler` and inline-query handlers can be added at the same point with zero schema change. `dataclasses.WebhookUpdate` plus `MessageDirection.OUTBOUND` remain pre-built for custom updates and outbound logging respectively.
 - **`app_config.httpx_client`** is an already-managed shared async client awaiting a first consumer (e.g. replacing the blocking `requests` call in `dad_joke`).
 - **`ASGILifespanSignalHandler`** — additional startup/shutdown work (health registration, warm caches) attaches to the same signals.
 - **`error_handler`** has a ready-made HTML report and an unused `TELEGRAM_ADMIN_CHAT_ID`; wiring the commented `send_message` turns it into real alerting.
