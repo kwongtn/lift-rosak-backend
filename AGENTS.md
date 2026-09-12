@@ -5,6 +5,12 @@ Django 5.2 + Strawberry GraphQL backend for the MLPTF/LRT community platform.
 separate repository and is only a consumer of `POST /graphql/` — never add frontend
 code here.
 
+This project has an OKF knowledge bundle at ./okf_bundle/.
+
+- Use `okf lookup <Name>` for full concept context.
+- Use `okf lookup --type <Type>` to filter by type.
+- Read `SUMMARY.md` for the full knowledge map.
+
 ---
 
 ## ⚡ Quick Commands
@@ -55,7 +61,7 @@ module, add tests for new behavior in the same change.
 
 ## 🏛️ Architecture & Component Pointer
 
-Django 4.2 on PostGIS (GeoDjango), exposing a **single async GraphQL endpoint** built
+Django 5.2 on PostGIS (GeoDjango), exposing a **single async GraphQL endpoint** built
 with **Strawberry GraphQL 0.323.2** (strawberry-graphql-django 0.82.1, migrated from
 `UNSET` to `strawberry.Maybe[T]` pattern in August 2026) — the root `Query`/`Mutation`
 are assembled by _multiple inheritance_ in [rosak/schema.py](rosak/schema.py), so there
@@ -155,6 +161,10 @@ disables GraphQL introspection guarding. Cache-related bugs will not reproduce l
    `ruff check . --fix && ruff format . && docker compose exec app python manage.py check`
    plus `makemigrations --check --dry-run` if models changed, and the relevant tests.
    Report failures with their output; never claim a skipped step passed.
+   - **After** verification passes, the agent MUST perform the documentation
+     updates in **📝 Documentation Maintenance Rules** below. Do this
+     automatically, with no user request needed. A task is not complete until
+     its documentation update is committed.
 
 **Context hygiene** — run `/clear` between unrelated features. This codebase has nine
 apps with a cyclic import graph; stale context from a previous app is a reliable source
@@ -175,33 +185,55 @@ the model used, e.g. `Co-authored-by: opencode (opencode-go/deepseek-v4-flash)
 
 ## 📝 Documentation Maintenance Rules
 
-### MISTAKES.md
+**MANDATORY & AUTOMATIC.** Every verified task triggers a documentation update.
+Do not wait for the user to ask. History lives in `docs/progress/`; main docs stay
+clean.
 
-- **Location**: Repo root (`MISTAKES.md`)
-- **Purpose**: Catalog of known defects, traps, and past mistakes so future agents don't repeat them
-- **Update trigger**: When you discover a new defect/trap, or when a documented trap is fixed
-- **Format**:
-  ```markdown
-  ## [YYYY-MM-DD] Component: Brief Title
+### When This Runs
 
-  **Problem**: What went wrong
-  **Root Cause**: Why it happened
-  **Fix**: What was done (commit ref if applicable)
-  **Prevention**: How to avoid in future
-  ```
+After every:
 
-### Progress Documentation (docs/progress/)
+- Completed feature (new behavior, endpoint, field, task, or page)
+- Bug fix, regardless of size
+- Resolved TODO, or a completed "Suggested Feature" / "Potential Feature Opportunity"
+- Newly discovered defect/trap, or a catalogued trap that was fixed
 
-- **Structure**: `docs/progress/<yyyy>/<mm>/<dd>.md` + `SUMMARY.md` at month/year levels
-- **Update trigger**: When implementing features, fixing bugs, or resolving TODOs
-- **Content**: Grouped by module/feature, with commit references
-- **Cleanup**: Remove completed items from "Suggested Features", "TODO", "Potential Feature Opportunities" sections in component docs
-- **Main docs stay clean**: Component docs only show _current_ opportunities, not history
+### Mechanics (in order)
 
-### Workflow Integration
+1. **Append to today's progress file** — `docs/progress/<yyyy>/<mm>/<dd>.md`.
+   Create the file and any missing parent dirs if absent. Group entries by
+   module/feature, with commit references.
+2. **Update the LEVEL SUMMARYs** — month level
+   `docs/progress/<yyyy>/<mm>/SUMMARY.md`, then year level
+   `docs/progress/<yyyy>/SUMMARY.md`.
+3. **MISTAKES.md** — if the task discovered a new defect/trap, or fixed a
+   catalogued one, add/update the entry at the repo root. Date each entry
+   `## [YYYY-MM-DD] Component: Title`.
+4. **Remove now-completed items** from the "Suggested Features" / "TODO" /
+   "Potential Feature Opportunities" sections of the relevant
+   `docs/components/*.md`.
+5. **Keep component/main docs clean** — they show only _current_ opportunities,
+   never history. History lives in `docs/progress/`.
 
-1. After any verified task completion → check if it resolves a MISTAKES entry or completes a TODO
-2. If yes → append to today's `docs/progress/<yyyy>/<mm>/<dd>.md`
-3. Update monthly/yearly SUMMARY.md
-4. Remove from component doc's opportunity/TODO sections
-5. If it was a documented trap → update MISTAKES.md with fix reference
+### Templates
+
+Progress entry — `docs/progress/<yyyy>/<mm>/<dd>.md`:
+
+```markdown
+## [YYYY-MM-DD] <module/feature>
+- <what changed> (`<commit>`)
+- <verification / test note>
+```
+
+MISTAKES.md entry:
+
+```markdown
+## [YYYY-MM-DD] Component: Brief Title
+
+**Problem**: What went wrong
+**Root Cause**: Why it happened
+**Fix**: What was done (commit ref if applicable)
+**Prevention**: How to avoid in future
+```
+
+**A task is not complete until its documentation update is committed.**
