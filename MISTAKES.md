@@ -57,6 +57,27 @@
 **Fix**: _Not fixed._ Seed one row per `FeatureFlagType` via data migration; split GC flag from upload flag.
 **Prevention**: Data migration creating flag rows on deploy; separate `IMAGE_UPLOAD` vs `STORAGE_GC_ENABLED` flags.
 
+### [2026-09-12] common: PIL Image.open crashed temporary-media conversion for video uploads — FIXED (2026-09-12) `82addcc`
+
+**Problem**: `convert_temporary_media_to_media_task` called `Image.open()` unconditionally. For a video this raised `UnidentifiedImageError`, which the generic `except Exception` swallowed into `fail_count++`, so the file was never converted and the video never appeared.
+**Root Cause**: The pipeline assumed every `TemporaryMedia` was a Pillow-readable image and never consulted `metadata["mime_type"]` before the PIL/EXIF block.
+**Fix**: Branch on `metadata["mime_type"].startswith("video/")`; for video skip `Image.open`/`verify`/EXIF and default `exif`/`image_get_exif` to `{}`. Commit `82addcc` `feat(common): support video in temporary media pipeline` (2026-09-12).
+**Prevention**: Keep conversion content-type aware, and add video fixtures to the pipeline tests so the non-image path is exercised.
+
+### [2026-09-12] common: --keepdb test DB lost migration-seeded rows after TransactionTestCase — WORKAROUND
+
+**Problem**: The shared `test_postgres` database was missing the migration-seeded `Clearance`/`FeatureFlag` rows and incident categories, so tests failed with `Clearance.DoesNotExist` and seed assertions.
+**Root Cause**: `TransactionTestCase` truncates tables, including rows written by data migrations, and `--keepdb` does not re-run those data migrations afterwards.
+**Fix**: _Workaround._ Tests must `get_or_create` the rows they need; recreate the test database if it degrades.
+**Prevention**: Do not rely on migration-seeded rows in tests sharing a `--keepdb` database; seed explicitly in `setUp`.
+
+### [2026-09-12] common/telegram: JSONField metadata lookups must match stored types — GOTCHA
+
+**Problem**: `TemporaryMedia.metadata` stores Telegram `message_id`/`chat_id` as ints, so `Q(metadata__telegram_message_id=source.message_id)` only matches on int-vs-int equality. A stringified id silently matches nothing and `approve()` reports no media awaiting review.
+**Root Cause**: JSON number/string typing survives into the JSONB lookup; the Python value's type is preserved as stored.
+**Fix**: _By design._ Store native ints in `metadata` and compare against the native `message_id`; do not stringify ids.
+**Prevention**: Add a round-trip test asserting the stored `metadata["telegram_message_id"]` type matches the lookup argument type.
+
 ---
 
 ## incident
@@ -178,12 +199,19 @@
 **Fix**: _Not fixed._ Add `payload__message__chat__id` filter; add `UniqueConstraint(spotting_event, telegram_log)` and GIN/expression index on `payload`.
 **Prevention**: Always qualify Telegram `message_id` with `chat_id`; index JSONB lookups used in prod queries.
 
-### [2026-08-24] telegram_provider: Unbounded retry + silent error reporting + blocking I/O
+### [2026-08-24] telegram_provider: Unbounded retry + silent error reporting + blocking I/O — retry FIXED (2026-08-25) `0d1c3a4`
 
-**Problem**: `utils.infinite_retry_on_error` is `while True` with 10s `sleep` — can pin worker forever; `error_handler` only `print`s while `TELEGRAM_ADMIN_CHAT_ID` is unused; `/dadjoke` does blocking `requests.get` inside async handler, blocking event loop (`docs/components/telegram_provider.md:48,90,91`).
-**Root Cause**: Ad-hoc resilience plus commented-out admin alert path.
-**Fix**: _Not fixed._ Bound retry with backoff + dead-letter `TelegramLogs(direction=OUTBOUND)` row; wire `error_handler` to send to `TELEGRAM_ADMIN_CHAT_ID`; replace `requests` with shared `app_config.httpx_client`.
-**Prevention**: Bounded retry policy; centralised `send_message` helper that logs `OUTBOUND` and handles 4096-char split in one place.
+**Problem**: `utils.infinite_retry_on_error` was `while True` with 10s `sleep` — could pin a worker forever; `error_handler` only `print`s while `TELEGRAM_ADMIN_CHAT_ID` is unused; `/dadjoke` does blocking `requests.get` inside an async handler, blocking the event loop (`docs/components/telegram_provider.md:48,90,91`).
+**Root Cause**: Ad-hoc resilience plus a commented-out admin alert path.
+**Fix**: Retry portion fixed. `infinite_retry_on_error` no longer exists; it was replaced by the bounded `telegram_provider.utils.retry_on_error` (`max_retries=3`, exponential backoff), landed with the governed egress path in commit `0d1c3a4` `feat(telegram_provider): single governed egress path for outbound messaging` (2026-08-25). Still open: `error_handler` only prints, and `/dadjoke` still blocks. `AGENTS.md` still references the old `infinite_retry_on_error` name.
+**Prevention**: Bounded retry policy (now in place); centralised `send_message` helper that logs `OUTBOUND` and handles 4096-char split in one place.
+
+### [2026-09-12] telegram_provider: /approve admin identity needs a linked user + Firebase claim — GOTCHA
+
+**Problem**: `approve()` resolves `common.User` by `telegram_id`, then checks `has_admin_claim`. An admin who has never run `/verify` has no `User` row and is rejected before the claim is ever consulted.
+**Root Cause**: The handler reuses the same "verified Telegram user" precondition as the other commands and layers the admin claim on top.
+**Fix**: _By design._ Resolve the user first, then call `has_admin_claim`; the import is function-local to avoid an app-loading cycle.
+**Prevention**: Document that admin bot commands require a linked `User` (`/verify`) in addition to the Firebase admin claim.
 
 ---
 
@@ -270,6 +298,27 @@
 **Root Cause**: Task needs cross-app models but sits in `common`.
 **Fix**: _Not fixed._ Lazify imports or move task ownership to leaf apps; `tach.yml` already documents allowed edges.
 **Prevention**: Enforce `tach check` in CI; prefer lazy string refs and function-local imports for cross-app models.
+
+### [2026-09-12] rosak: GraphQL schema snapshot must be regenerated when scalars change — FIXED (2026-09-12) `0ff57ec`
+
+**Problem**: `rosak/tests/test_schema_snapshot.py` compares `str(schema)` against `rosak/tests/snapshots/schema.graphql`. Adding the `MediaScalar` fields broke the snapshot test even though the schema change was intended.
+**Root Cause**: The checked-in SDL snapshot was not part of the change that altered the schema.
+**Fix**: Regenerate `rosak/tests/snapshots/schema.graphql` from `str(rosak.schema.schema)`. Commit `0ff57ec` `chore(rosak): refresh GraphQL schema snapshot for media fields` (2026-09-12).
+**Prevention**: Regenerate the snapshot in the same change whenever GraphQL fields or types change.
+
+### [2026-09-12] rosak: container-created migrations are root-owned and unwritable by the host user — WORKAROUND
+
+**Problem**: `makemigrations` run inside the container creates root-owned files. `./dev_permissioner.sh`'s `chown` fails for a non-root host user (it needs sudo), and pre-commit's `end-of-file-fixer`/`ruff-format` then fail with `PermissionError`.
+**Root Cause**: The container runs as root while the host user owns the checkout; there is no in-band ownership handoff.
+**Fix**: _Workaround._ Chown through the container from the repo root: `docker compose exec app chown -R $(id -u):$(id -g) .`.
+**Prevention**: Re-own container-generated files immediately after `makemigrations`, before running any hook or `ruff format`.
+
+### [2026-09-12] rosak: manage.py test --parallel crashes with "cannot pickle 'traceback' object" — KNOWN
+
+**Problem**: The parallel test runner fails while collecting results with `TypeError: cannot pickle 'traceback' object` whenever a test outcome carries a traceback (the pre-existing suite failures reproduce it). The serial runner is the only reliable gate.
+**Root Cause**: The multiprocessing result path cannot serialise a traceback object, so any failing test poisons the run.
+**Fix**: _Not fixed._ Run `python manage.py test --keepdb` (serial) as the working gate.
+**Prevention**: Keep the documented test gate serial until the parallel runner is fixed.
 
 ---
 
