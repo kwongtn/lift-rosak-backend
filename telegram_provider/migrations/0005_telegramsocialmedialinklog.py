@@ -5,19 +5,46 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('incident', '0021_remove_stationincident_incident_stationincident_unique_is_last_station_and_more'),
-        ('telegram_provider', '0004_telegramlogs_last_error_telegramlogs_retry_count_and_more'),
+        (
+            "incident",
+            "0021_remove_stationincident_incident_stationincident_unique_is_last_station_and_more",
+        ),
+        (
+            "telegram_provider",
+            "0004_telegramlogs_last_error_telegramlogs_retry_count_and_more",
+        ),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='TelegramSocialMediaLinkLog',
+            name="TelegramSocialMediaLinkLog",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('social_media_link', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='telegram_social_media_link_logs', to='incident.socialmedialink')),
-                ('telegram_log', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='social_media_link_logs', to='telegram_provider.telegramlogs')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "social_media_link",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="telegram_social_media_link_logs",
+                        to="incident.socialmedialink",
+                    ),
+                ),
+                (
+                    "telegram_log",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="social_media_link_logs",
+                        to="telegram_provider.telegramlogs",
+                    ),
+                ),
             ],
         ),
     ]
