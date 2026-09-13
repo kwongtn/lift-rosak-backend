@@ -34,10 +34,10 @@ docker compose exec app python manage.py createsuperuser
 docker compose exec app python manage.py makemigrations
 docker compose exec app python manage.py migrate
 docker compose exec app python manage.py makemigrations --check --dry-run  # CI-style gate
-./dev_permissioner.sh              # ALWAYS after makemigrations — files are root-owned
+./dev_permissioner.sh              # ALWAYS after makemigrations — self-elevates into the container (works as non-root)
 
 # Tests — single-run, no watch mode
-docker compose exec app python manage.py test --parallel --keepdb
+docker compose exec app python manage.py test --keepdb   # serial; --parallel crashes with TypeError: cannot pickle 'traceback' object (see MISTAKES.md)
 docker compose exec app python manage.py test spotting.tests --keepdb   # one app
 
 # Lint & format (ruff is the enforced gate; run before every handoff)
