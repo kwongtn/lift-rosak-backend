@@ -9,6 +9,21 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def backfill_existing_incidents_live(apps, schema_editor):
+    """Every incident that predates the status field is already published.
+
+    Backfill them to LIVE so the newly-introduced DRAFT default only applies to
+    incidents created after this migration.
+    """
+    CalendarIncident = apps.get_model("incident", "CalendarIncident")
+    CalendarIncident.objects.filter(status="draft").update(status="live")
+
+
+def revert_existing_incidents_draft(apps, schema_editor):
+    CalendarIncident = apps.get_model("incident", "CalendarIncident")
+    CalendarIncident.objects.filter(status="live").update(status="draft")
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("incident", "0014_socialmedialink"),
@@ -50,6 +65,9 @@ class Migration(migrations.Migration):
                 default="draft",
                 max_length=16,
             ),
+        ),
+        migrations.RunPython(
+            backfill_existing_incidents_live, revert_existing_incidents_draft
         ),
         migrations.AddField(
             model_name="calendarincident",

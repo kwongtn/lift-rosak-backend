@@ -9,6 +9,24 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def backfill_existing_chronologies_live(apps, schema_editor):
+    """Legacy chronologies belong to already-published incidents, so mark LIVE.
+
+    New chronologies keep the model's DRAFT default.
+    """
+    CalendarIncidentChronology = apps.get_model(
+        "incident", "CalendarIncidentChronology"
+    )
+    CalendarIncidentChronology.objects.filter(status="draft").update(status="live")
+
+
+def revert_existing_chronologies_draft(apps, schema_editor):
+    CalendarIncidentChronology = apps.get_model(
+        "incident", "CalendarIncidentChronology"
+    )
+    CalendarIncidentChronology.objects.filter(status="live").update(status="draft")
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("incident", "0015_calendarincident_deleted_and_more"),
@@ -39,6 +57,9 @@ class Migration(migrations.Migration):
                 default="draft",
                 max_length=16,
             ),
+        ),
+        migrations.RunPython(
+            backfill_existing_chronologies_live, revert_existing_chronologies_draft
         ),
         migrations.AddField(
             model_name="calendarincidentchronology",
