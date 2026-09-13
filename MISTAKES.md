@@ -117,6 +117,13 @@
 **Fix**: _Not fixed._ Return `list` preserving through-table ordering.
 **Prevention**: Type-check loader return shapes; test that media order matches admin inline order.
 
+### [2026-09-13] incident: new `status` field's `DRAFT` default silently reclassified every legacy row — FIXED (2026-09-13) (uncommitted)
+
+**Problem**: Migrations `0015`/`0016` added `CalendarIncident.status` / `CalendarIncidentChronology.status` with `default="draft"`. Because `AddField`'s default also backfills existing rows, all 280 existing incidents and 417 chronologies would have become `DRAFT` on deploy — mislabelling real published history for any status-aware flow (console queue, future `status=LIVE` filters).
+**Root Cause**: The default was chosen for *future* rows but applied to *existing* rows; no data migration corrected the backfill.
+**Fix**: Added a reversible `RunPython` to `0015`/`0016` — at the instant `status` is introduced, every pre-existing row is legacy, so backfill `LIVE`; the model's `DRAFT` default still governs rows created afterwards. Regression test `tests/incident/test_legacy_status_backfill.py`.
+**Prevention**: When introducing a state/status field, always pair the schema change with a data migration whose backfill reflects the field's *historical* semantics, never the new creation default.
+
 ---
 
 ## spotting
