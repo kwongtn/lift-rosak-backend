@@ -22,19 +22,15 @@
 **Fix**: Already uses `today.replace(month=..., day=...)`. Commit `bb1e519` `refactor(graphql): Migrate Phase 1 leaf inputs and utils from UNSET to Maybe[T]` (2026-08-19), catalogued FIXED 2026-08-24. Unlocks monthly/weekly/yearly analytics across `common` + `operation` + `chartography`.
 **Prevention**: Add unit test exercising each `DateGroupings` branch; exhaustive switch already raises `RuntimeError` on unknown member — keep it.
 
-### [2026-08-24] common: `ImgurStorage` still on the hot path for every upload
+### [2026-08-24] common: `ImgurStorage` — write path hot on every upload + silent credential failure
 
-**Problem**: `common/tasks.py:202` creates `Media` with `file=ContentFile(temp_media.file.url, ...)` which routes through `ImgurStorage._save` and makes a live Imgur API call for every upload, despite `Media.file` being marked `# TODO: Deprecate` and Discord CDN being the real host (`docs/APPS.md:293`, `docs/components/common.md:72,95`).
-**Root Cause**: Migration from Imgur → Discord left `Media.file` wired as write path; no one removed the five call sites (`STORAGE = ImgurStorage()`, `MediaMixin.__str__`, `add_width_height_to_media_task` filter, `medias_group_by_period ~Q(file="")`, `MediaAdmin.fields`).
-**Fix**: _Not fixed._ Requires re-host backfill for pre-`0013` rows (fetch `i.imgur.com/<file>` → Discord webhook → fill `file_id`/`file_name`), then drop `Media.file` column and delete `imgur_field.py`, `imgur_storage.py`, `management/commands/get_imgur_token.py`.
-**Prevention**: Feature-flag the storage backend; block new `Media.file` writes behind flag and alert on `ImgurStorage._save` calls after cutoff.
+**Problem**: Two coupled defects left over from the Imgur → Discord migration:
+- **Hot path**: `common/tasks.py:202` creates `Media` with `file=ContentFile(temp_media.file.url, ...)`, routing every upload through `ImgurStorage._save` and a live Imgur API call, despite `Media.file` being marked `# TODO: Deprecate` and Discord CDN being the real host (`docs/APPS.md:293`, `docs/components/common.md:72,95`).
+- **Silent degrade**: `ImgurStorage.__init__` and module-level `ImgurClient` swallow all exceptions and print `functionality disabled`; eight `IMGUR_*` settings default to `""` (`rosak/settings.py:357-364`), so a deployment without Imgur credentials dies with `AttributeError` inside `convert_temporary_media_to_media_task`'s broad `except Exception` and only increments `fail_count` — no upload can succeed despite Discord being the host (`docs/components/common.md:72`).
 
-### [2026-08-24] common: `ImgurStorage` silently degrades on bad credentials
-
-**Problem**: `ImgurStorage.__init__` and module-level `ImgurClient` swallow all exceptions and print `functionality disabled`; eight `IMGUR_*` settings default to `""` (`rosak/settings.py:357-364`), so a deployment without Imgur credentials dies with `AttributeError` inside `convert_temporary_media_to_media_task`'s broad `except Exception` and only increments `fail_count` — no upload can succeed despite Discord being the host (`docs/components/common.md:72`).
-**Root Cause**: Fail-open init plus broad exception that hides the root error.
-**Fix**: _Not fixed._ Make init fail loudly if `Media.file` is still required; otherwise remove Imgur path entirely (see previous entry).
-**Prevention**: Validate required credentials at `check` time; never swallow storage init errors; replace broad `except Exception` with typed handling plus explicit dead-letter.
+**Root Cause**: Migration left `Media.file` wired as write path; no one removed the five call sites (`STORAGE = ImgurStorage()`, `MediaMixin.__str__`, `add_width_height_to_media_task` filter, `medias_group_by_period ~Q(file="")`, `MediaAdmin.fields`). Fail-open init plus a broad exception hides the root error.
+**Fix**: _Not fixed._ Requires re-host backfill for pre-`0013` rows (fetch `i.imgur.com/<file>` → Discord webhook → fill `file_id`/`file_name`), then drop `Media.file` column and delete `imgur_field.py`, `imgur_storage.py`, `management/commands/get_imgur_token.py`. Meanwhile, make init fail loudly if `Media.file` is still required.
+**Prevention**: Feature-flag the storage backend; block new `Media.file` writes behind flag and alert on `ImgurStorage._save` calls after cutoff. Validate required credentials at `check` time; never swallow storage init errors; replace broad `except Exception` with typed handling plus explicit dead-letter.
 
 ### [2026-08-24] common: `TemporaryMediaAdmin.prettified_metadata` crashes + `RETRY_ELAPSED` never assigned
 
@@ -331,13 +327,6 @@
 
 ### Sources
 
-- `docs/APPS.md` — Known Defects & Traps table (19 entries, 5 FIXED 2026-08-24) and Beat schedule / Dependency graph sections.
-- `docs/components/operation.md` — DataLoader rough edges, `StationLine` ordinal, write-API stub defects.
-- `docs/components/common.md` — Imgur hot path, admin mixin, `RETRY_ELAPSED`, cache and flag coupling.
-- `docs/components/spotting.md` — `eventsCount`, `CheckConstraint`, `LocationEvent` FK, deletion policy, digest date.
-- `docs/components/incident.md` — Dual join tables, `UniqueConstraint`, filter asserts, N+1 batching.
-- `docs/components/chartography.md` — Through-table admin, hardcoded PK map, `force` dead param.
-- `docs/components/reporting.md` — Missing enums, filter field name, vote constraints.
-- `docs/components/generic.md` — `GeometricForm` Meta mutation, `GeoMultiPoint` copy-paste, `WebLocationInput` UNSET.
-- `docs/components/telegram_provider.md` — Provenance chat filter, unbounded retry, blocked event loop.
-- Git history: `1e2a421` (2026-08-24, 3 fixes), `bb1e519` (2026-08-19, DateGroupings), `c318fd4` (2026-08-18, GeoMultiPoint), `2af0092` (2026-08-24, docs cataloguing).
+- `docs/APPS.md` — Known Defects & Traps table and Beat schedule / Dependency graph sections.
+- `docs/components/*.md` — common, operation, spotting, incident, chartography, reporting, generic, telegram_provider.
+- Git history — `1e2a421` (2026-08-24, 3 fixes), `bb1e519` (2026-08-19, DateGroupings), `c318fd4` (2026-08-18, GeoMultiPoint), `2af0092` (2026-08-24, docs cataloguing).
