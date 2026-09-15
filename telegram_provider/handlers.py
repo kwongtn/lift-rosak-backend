@@ -429,13 +429,18 @@ async def submit_link(update: Update, context) -> None:
             station_ids=(station_id,) if station_id is not None else (),
         )
 
+        from rosak.permissions import has_admin_claim
+
+        is_admin = await has_admin_claim(user)
         telegram_log, link = await asyncio.gather(
             TelegramLogs.objects.filter(
                 payload__message__message_id=update.message.message_id
             )
             .order_by("-id")
             .afirst(),
-            services.submit_social_media_link(user=user, write=write),
+            services.submit_social_media_link(
+                user=user, is_admin=is_admin, write=write
+            ),
         )
 
         await TelegramSocialMediaLinkLog.objects.acreate(
