@@ -118,16 +118,18 @@ class SocialMediaLinkMutations:
         )
         return GenericMutationReturn(ok=True)
 
-    @strawberry.mutation(permission_classes=[IsAdmin])
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def update_social_media_link(
         self,
         info: Info,
         social_media_link_id: strawberry.ID,
         input: SocialMediaLinkInput,
     ) -> GenericMutationReturn:
+        is_admin = await has_admin_claim(info.context.user)
         try:
             await services.update_social_media_link(
                 info.context.user,
+                is_admin=is_admin,
                 link_id=int(social_media_link_id),
                 write=services.SocialMediaLinkWrite(
                     url=input.url,

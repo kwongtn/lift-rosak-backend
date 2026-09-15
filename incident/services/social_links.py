@@ -85,9 +85,14 @@ async def mark_social_media_link_completed(
 
 
 async def update_social_media_link(
-    admin_user: User, *, link_id: int, write: SocialMediaLinkWrite
+    user: User, *, is_admin: bool, link_id: int, write: SocialMediaLinkWrite
 ) -> SocialMediaLink:
     link = await SocialMediaLink.objects.aget(pk=link_id)
+
+    if not is_admin and link.user_id != user.id:
+        raise IncidentServiceError(
+            f"SocialMediaLink {link_id} is not owned by this user."
+        )
 
     def _sync() -> None:
         link.url = write.url
@@ -100,9 +105,14 @@ async def update_social_media_link(
             content_type = ContentType.objects.get_for_model(CalendarIncident)
             link.content_type = content_type
             link.object_id = write.incident_id
-        else:
-            link.content_type = None
-            link.object_id = None
+        # incident_id is submit-only; None leaves the association untouched.
+        if not is_admin:
+            # Non-admin edits go back into the approval queue (mirrors
+            # incident edits) instead of landing live.
+            link.status = SocialMediaLinkStatus.PENDING_APPROVAL
+            link.completed = False
+            link.completed_at = None
+            link.completed_by = None
         link.save()
         link.categories.set(write.category_ids)
         link.lines.set(write.line_ids)

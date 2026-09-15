@@ -135,6 +135,7 @@ Total commits: 91
 
 - **2026-09-12** (a82de20) [feat](telegram): auto-attach incoming photo/video to latest spotting
 - **2026-09-12** (82addcc) [feat](common): support video in temporary media pipeline
+- **2026-09-16** (uncommitted) [feat](incident): submitter SocialMediaLink edit — admin lands LIVE, submitter forced back to PENDING_APPROVAL; omitted `incident_id` preserves association (Task 24)
 - **2026-08-25** (8284a8d) [test](common): use TestCase for spotting_data_public migration test
 - **2026-08-25** (0d1c3a4) [feat](telegram_provider): single governed egress path for outbound messaging
 - **2026-08-24** (1e2a421) [fix](common): re-enable NSFW moderation in upload pipeline

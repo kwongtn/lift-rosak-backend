@@ -85,6 +85,35 @@
 
 ## incident
 
+### [2026-09-16] incident: `update_social_media_link` silently detached links when `incident_id` omitted — FIXED (2026-09-16) (uncommitted)
+
+**Problem**: Editing a `SocialMediaLink` through `update_social_media_link` severed its incident
+association — the resolver wrote `incident_id=None` whenever the input omitted `incident_id`, so
+any non-incident-scoped edit (e.g. the public submitter edit flow) could drop a link off its
+incident card. The submit-only path had the same footgun but was never hit (submission of a link
+never passes an existing `incident_id` context... it does for card-hosted links).
+**Root Cause**: The write path treated absent input as "clear the field" for `incident_id`,
+matching how scalar fields are cleared, without distinguishing tri-state unset from explicit null.
+**Fix**: In `update_social_media_link`, omit `incident_id` from the write when the input omits it —
+the association is preserved — while an explicit `incident_id: null` still detaches.
+**Prevention**: For any nullable FK accepted through `strawberry.Maybe[T]` updatable inputs, absent
+≠ null. Follow the tri-state semantics in `docs/STRAWBERRY_MIGRATION.md` — only write the field
+when the caller sent a value.
+
+### [2026-09-16] incident: public link edit — admin lands LIVE, submitter forced back to PENDING_APPROVAL (Task 24)
+
+**Problem**: `update_social_media_link` was admin-only (`IsAdmin`), so there was no backend rule
+for a submitter editing their own link: admin edits should land live, non-admin edits must go back
+into the approval queue (a submitter must not relabel their own link as approved-completed).
+**Root Cause**: None — the capability simply didn't exist; the mutation predated the public edit flow.
+**Fix**: Mutation switched to `IsLoggedIn`; `update_social_media_link(user, *, is_admin, link_id,
+write)` enforces: non-admin can edit only own links (`IncidentServiceError` otherwise) and forces
+`status=PENDING_APPROVAL, completed=False, completed_at=None, completed_by=None`; admin keeps
+status/completed.
+**Prevention**: Role rules for shared mutations live in the service layer with `is_admin` resolved
+from `rosak.permissions` at the schema boundary — the frontend `canEditLink` gate is UI-only;
+backend is authoritative.
+
 ### [2026-08-24] incident: `StationIncident` UniqueConstraint missing condition — FIXED (2026-08-24) `1e2a421`
 
 **Problem**: `VehicleIncident` guards `UniqueConstraint(fields=["is_last","vehicle"], condition=Q(is_last=True))` but `StationIncident` declared `UniqueConstraint(fields=["is_last","station"])` without `condition` — a station could hold at most one historical (`is_last=False`) incident before `IntegrityError` (`docs/APPS.md:289`, `docs/components/incident.md:72`).

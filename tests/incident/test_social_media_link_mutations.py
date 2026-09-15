@@ -224,6 +224,7 @@ async def test_update_social_media_link_description_and_status():
 
     updated = await services.update_social_media_link(
         user,
+        is_admin=True,
         link_id=link.id,
         write=services.SocialMediaLinkWrite(
             url="https://x.com/lrt/status/update-me",
@@ -257,6 +258,7 @@ async def test_update_social_media_link_tri_state_omitted_unchanged():
 
     updated = await services.update_social_media_link(
         user,
+        is_admin=True,
         link_id=link.id,
         write=services.SocialMediaLinkWrite(
             url="https://x.com/lrt/status/tri",
@@ -267,6 +269,97 @@ async def test_update_social_media_link_tri_state_omitted_unchanged():
     await sync_to_async(updated.refresh_from_db)()
     assert updated.description == "My desc"
     assert updated.status == SocialMediaLinkStatus.LIVE
+
+
+@pytest.mark.django_db
+async def test_update_social_media_link_non_admin_own_edit_reverts_to_pending():
+    submitter = await _make_user(45)
+    admin = await _make_user(46)
+    link = await services.submit_social_media_link(
+        submitter,
+        is_admin=False,
+        write=services.SocialMediaLinkWrite(
+            url="https://x.com/lrt/status/own-edit",
+            title="Original title",
+        ),
+    )
+    await sync_to_async(link.refresh_from_db)()
+    assert link.status == SocialMediaLinkStatus.PENDING_APPROVAL
+
+    completed = await services.mark_social_media_link_completed(admin, link_id=link.id)
+    assert completed.completed
+
+    updated = await services.update_social_media_link(
+        submitter,
+        is_admin=False,
+        link_id=link.id,
+        write=services.SocialMediaLinkWrite(
+            url="https://x.com/lrt/status/own-edit",
+            title="Edited title",
+        ),
+    )
+    await sync_to_async(updated.refresh_from_db)()
+    assert updated.title == "Edited title"
+    assert updated.status == SocialMediaLinkStatus.PENDING_APPROVAL
+    assert not updated.completed
+    assert updated.completed_at is None
+    assert updated.completed_by_id is None
+
+
+@pytest.mark.django_db
+async def test_update_social_media_link_non_admin_cannot_edit_others():
+    owner = await _make_user(50)
+    other = await _make_user(51)
+    link = await services.submit_social_media_link(
+        owner,
+        is_admin=False,
+        write=services.SocialMediaLinkWrite(
+            url="https://x.com/lrt/status/foreign-edit",
+            title="Original title",
+        ),
+    )
+    await sync_to_async(link.refresh_from_db)()
+
+    with pytest.raises(services.IncidentServiceError):
+        await services.update_social_media_link(
+            other,
+            is_admin=False,
+            link_id=link.id,
+            write=services.SocialMediaLinkWrite(
+                url="https://x.com/lrt/status/foreign-edit",
+                title="Tampered title",
+            ),
+        )
+
+
+@pytest.mark.django_db
+async def test_update_social_media_link_omitted_incident_preserves_association():
+    user = await _make_user(55)
+    incident = await _make_incident()
+    link = await services.submit_social_media_link(
+        user,
+        is_admin=False,
+        write=services.SocialMediaLinkWrite(
+            url="https://x.com/lrt/status/keep-incident",
+            title="Tagged title",
+            incident_id=incident.id,
+        ),
+    )
+    await sync_to_async(link.refresh_from_db)()
+    assert link.object_id == incident.id
+
+    updated = await services.update_social_media_link(
+        user,
+        is_admin=True,
+        link_id=link.id,
+        write=services.SocialMediaLinkWrite(
+            url="https://x.com/lrt/status/keep-incident",
+            title="Edited title",
+        ),
+    )
+    await sync_to_async(updated.refresh_from_db)()
+    assert updated.object_id == incident.id
+    assert updated.title == "Edited title"
 
 
 @pytest.mark.django_db

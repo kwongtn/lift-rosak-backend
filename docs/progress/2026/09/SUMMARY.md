@@ -20,6 +20,7 @@ Total commits: 18
 - **f1b89ec** [fix](incident): coerce null details/title/brief to empty string for CalendarIncident
 - **799ea77** [fix](incident): coerce null title to empty string for SocialMediaLink
 - (uncommitted) [fix](incident): backfill legacy incident/chronology rows to LIVE in migrations 0015/0016
+- (uncommitted) [feat](incident): submitter SocialMediaLink edit — admin lands live, submitter forced back to PENDING_APPROVAL (Task 24)
 
 ### Common (6 commits)
 
