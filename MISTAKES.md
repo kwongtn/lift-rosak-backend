@@ -8,6 +8,13 @@
 
 ## common
 
+### [2026-09-15] common: S3 uploads fail on OCI Object Storage — "AWS chunked encoding not supported"
+
+**Problem**: Every `TemporaryMedia` save (incl. Telegram image attaches via `POST /upload/`) raised `botocore.exceptions.ClientError: An error occurred (NotImplemented) when calling the PutObject operation: AWS chunked encoding not supported.` Uploads reached OCI but were rejected with 501.
+**Root Cause**: botocore >= 1.35 defaults `request_checksum_calculation` to `when_supported`, which adds a CRC32 trailer checksum to streaming `PutObject` (`Transfer-Encoding: chunked` + `Content-Encoding: aws-chunked` + `X-Amz-Trailer`). OCI's S3-compat endpoint rejects aws-chunked. `AWS_S3_SIGNATURE_VERSION="s3v4"` does NOT help — the default is already `s3v4`; this is a checksum-trailer issue, not a signature issue.
+**Fix**: `os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")` in `rosak/settings.py` — disables the default checksum so `PutObject` goes out as a plain body. Verified botocore honors the env var on the django-storages client; `signature_version`/`addressing_style` unchanged.
+**Prevention**: Any bump of botocore/boto3 must re-check this — newer SDKs may flip behavior again. If uploads regress with this error, re-apply `when_required`. The alternative `AWS_S3_CLIENT_CONFIG={"request_checksum_calculation": ...}` (plain dict) crashes botocore in django-storages 1.14.6 — only an env var or a `botocore.config.Config` instance works.
+
 ### [2026-08-24] common: NSFW moderation bypassed — all uploads convert unchecked — FIXED (2026-08-24) `1e2a421`
 
 **Problem**: `common/signals.py` had the `check_temporary_media_nsfw` import and `apply_async` call commented out. Every `TemporaryMedia(PENDING)` went straight to `convert_temporary_media_to_media_task` with no moderation check (`docs/APPS.md:288`, `docs/components/common.md:24,73`).

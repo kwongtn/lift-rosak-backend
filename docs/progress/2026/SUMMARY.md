@@ -24,6 +24,7 @@ Total commits: 91
 - **511afaa** [feat](common): expose media caption/duration/type on MediaScalar
 - **9ba0763** [feat](common): add caption/duration to Media and widen content_type
 - **a531e51** [feat](common): add AWAITING_REVIEW temporary media status
+- (uncommitted) [fix](common): disable boto3 trailer checksums for OCI S3-compat (aws-chunked 501)
 
 #### Telegram (4 commits)
 

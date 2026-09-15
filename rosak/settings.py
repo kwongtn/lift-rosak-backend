@@ -482,6 +482,11 @@ AWS_S3_REGION_NAME = os.environ.get("AWS_S3_REGION_NAME", "")
 ORACLE_NAMESPACE = os.environ.get("ORACLE_NAMESPACE", "")
 
 AWS_S3_ENDPOINT_URL = f"https://{ORACLE_NAMESPACE}.compat.objectstorage.{AWS_S3_REGION_NAME}.oraclecloud.com"
+# OCI S3-compat rejects aws-chunked encoding (trailer checksums).
+# Botocore >= 1.35 defaults request_checksum_calculation to "when_supported",
+# which adds a CRC32 trailer via Transfer-Encoding: chunked — OCI throws
+# NotImplemented. Setting "when_required" skips the default checksum entirely.
+os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")
 AWS_S3_OBJECT_PARAMETERS = {
     "CacheControl": "max-age=86400",
 }
