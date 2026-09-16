@@ -252,6 +252,13 @@ backend is authoritative.
 **Fix**: _By design._ Resolve the user first, then call `has_admin_claim`; the import is function-local to avoid an app-loading cycle.
 **Prevention**: Document that admin bot commands require a linked `User` (`/verify`) in addition to the Firebase admin claim.
 
+### [2026-09-16] telegram_provider: media uploads silently dropped while uploads disabled
+
+**Problem**: `handlers.media` returned "Media uploads are currently disabled" before creating anything, so a photo/video replied to a spotting entry was dropped entirely with no `TemporaryMedia` row for later recovery once uploads were re-enabled.
+**Root Cause**: The uploads feature flag was treated as a hard gate at the entry point instead of being enforced where publication happens (`convert_temporary_media_to_media_task`).
+**Fix**: The handler now always records the `TemporaryMedia` row (flagged `metadata["uploads_disabled"] = True`) and merely defers publication; the conversion task's existing `should_upload_media()` re-check keeps the row queued until re-enabled. Reply on the disabled path now says the media is queued.
+**Prevention**: Gate publication (task dispatch / feature on/off), not ingestion — always persist the user's submission so the flag flips without losing data.
+
 ---
 
 ## chartography

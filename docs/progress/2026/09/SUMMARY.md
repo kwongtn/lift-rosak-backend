@@ -38,6 +38,7 @@ Total commits: 18
 - **ed9c461** [feat](telegram): register media handler and /approve command
 - **ea49424** [feat](telegram): add /approve for reviewed media
 - **a82de20** [feat](telegram): auto-attach incoming photo/video to latest spotting
+- (uncommitted) [feat](telegram): /spotting_today excludes not-in-service by default with `--include-not-in-service`/`--inis` opt-in; media uploads always record a TemporaryMedia row while uploads disabled; /approve on a replied /link message approves the link
 
 ### Ci (1 commits)
 
