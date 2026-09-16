@@ -208,7 +208,11 @@ async def retry_on_error(
     return None
 
 
-def get_daily_updates(line_id: int, spotting_date: date | None = None) -> str:
+def get_daily_updates(
+    line_id: int,
+    spotting_date: date | None = None,
+    include_not_in_service: bool = False,
+) -> str:
     spotted_today_vehicle_ids = (
         Event.objects.filter(spotting_date=spotting_date or date.today())
         .distinct("vehicle")
@@ -228,6 +232,11 @@ def get_daily_updates(line_id: int, spotting_date: date | None = None) -> str:
         )
         .order_by("vehicle__identification_no")
     )
+
+    if not include_not_in_service:
+        query_prefix = query_prefix.exclude(
+            vehicle__status=VehicleStatus.NOT_IN_SERVICE
+        )
 
     base_criteria = Q(vehicle__id__in=spotted_today_vehicle_ids)
     no_review_criteria = Q(vehicle__status__in=[VehicleStatus.IN_SERVICE])
@@ -258,6 +267,9 @@ def get_daily_updates(line_id: int, spotting_date: date | None = None) -> str:
             *output_str_arr,
             "",
             "",
-            '<i>* Does not include vehicles marked "Decommissioned" or "Married"</i>',
+            '<i>* Does not include vehicles marked "Not in service", '
+            '"Decommissioned" or "Married"</i>'
+            if not include_not_in_service
+            else '<i>* Does not include vehicles marked "Decommissioned" or "Married"</i>',
         ]
     )

@@ -10,6 +10,7 @@ from telegram.constants import ReactionEmoji
 from telegram.error import BadRequest
 
 from common.enums import TemporaryMediaStatus, TemporaryMediaType
+from incident.enums import SocialMediaLinkStatus
 from incident.services import IncidentServiceError, SocialMediaLinkWrite
 from operation.models import Line
 from telegram_provider.enums import MessageDirection
@@ -22,7 +23,7 @@ from telegram_provider.handlers import (
     submit_link,
 )
 from telegram_provider.models import TelegramLogs
-from telegram_provider.parsers import link_parser
+from telegram_provider.parsers import link_parser, spotting_today_parser
 from telegram_provider.tasks import cleanup_telegram_logs
 from telegram_provider.utils import (
     PerChatRateLimiter,
@@ -123,7 +124,9 @@ class SpottingTodayHandlerTests(TestCase):
         asyncio.run(spotting_today(update, context))
 
         mock_get_daily_updates.assert_called_once_with(
-            line_id=self.line.id, spotting_date=date.today()
+            line_id=self.line.id,
+            spotting_date=date.today(),
+            include_not_in_service=False,
         )
         update.message.reply_html.assert_awaited_once_with(text="Stats for today")
 
@@ -150,9 +153,40 @@ class SpottingTodayHandlerTests(TestCase):
         asyncio.run(spotting_today(update, context))
 
         mock_get_daily_updates.assert_called_once_with(
-            line_id=self.line.id, spotting_date=date(2026, 8, 17)
+            line_id=self.line.id,
+            spotting_date=date(2026, 8, 17),
+            include_not_in_service=False,
         )
         update.message.reply_html.assert_awaited_once_with(text="Stats for 2026-08-17")
+
+    @patch("telegram_provider.handlers.get_daily_updates")
+    @patch("telegram_provider.handlers.Line")
+    def test_spotting_today_include_not_in_service_flag(
+        self, mock_line_model, mock_get_daily_updates
+    ):
+        mock_line_model.objects.filter.return_value.afirst = AsyncMock(
+            return_value=self.line
+        )
+        mock_get_daily_updates.return_value = "Stats incl. out-of-service"
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "/spotting_today --include-not-in-service 2026-08-17"
+        update.message.reply_html = AsyncMock()
+        update.effective_chat.id = 123456
+
+        context = MagicMock()
+        context.args = ["--include-not-in-service", "2026-08-17"]
+
+        asyncio.run(spotting_today(update, context))
+
+        mock_get_daily_updates.assert_called_once_with(
+            line_id=self.line.id,
+            spotting_date=date(2026, 8, 17),
+            include_not_in_service=True,
+        )
+        update.message.reply_html.assert_awaited_once_with(
+            text="Stats incl. out-of-service"
+        )
 
     @patch("telegram_provider.handlers.get_daily_updates")
     @patch("telegram_provider.handlers.Line")
@@ -853,6 +887,16 @@ class LinkHandlerTests(TestCase):
         with self.assertRaises(ArgumentError):
             link_parser().parse_args(["https://example.com", "-id", "notanint"])
 
+    def test_spotting_today_parser_inis_shorthand(self):
+        args = spotting_today_parser().parse_args(["--inis", "2026-08-17"])
+        self.assertTrue(args.include_not_in_service)
+        self.assertEqual(args.date, "2026-08-17")
+
+    def test_spotting_today_parser_default_excludes_not_in_service(self):
+        args = spotting_today_parser().parse_args([])
+        self.assertFalse(args.include_not_in_service)
+        self.assertIsNone(args.date)
+
 
 class MediaHandlerTests(TestCase):
     """Coverage for the unrestricted photo/video handler (handlers.media).
@@ -1029,20 +1073,26 @@ class MediaHandlerTests(TestCase):
         mocks["temp_media"].objects.acreate.assert_not_awaited()
         mocks["retry"].assert_not_awaited()
 
-    def test_feature_flag_off_replies_and_creates_nothing(self):
-        update = self._make_update(photo=True)
+    def test_feature_flag_off_queues_temp_media_and_replies(self):
+        update = self._make_update(photo=True, caption="A sighting")
         context = self._context()
 
         with self._mock_handlers() as mocks:
-            self._stub_user(mocks, self.user)
+            self._stub_ready(mocks)
             mocks["flag"].return_value = False
             asyncio.run(media(update, context))
 
-        update.message.reply_html.assert_awaited_once_with(
-            text="Media uploads are currently disabled."
+        kwargs = mocks["temp_media"].objects.acreate.await_args.kwargs
+        self.assertEqual(kwargs["status"], TemporaryMediaStatus.PENDING)
+        self.assertTrue(kwargs["metadata"]["uploads_disabled"])
+        mocks["retry"].assert_awaited_once_with(
+            update.message,
+            "reply_html",
+            text=(
+                "Media received, but uploads are currently disabled. "
+                "It will be published once uploads are re-enabled."
+            ),
         )
-        mocks["temp_media"].objects.acreate.assert_not_awaited()
-        mocks["retry"].assert_not_awaited()
 
     def test_untrusted_photo_creates_pending_temp_media_and_reacts_up(self):
         update = self._make_update(photo=True, caption="A sighting")
@@ -1143,6 +1193,12 @@ class ApproveHandlerTests(TestCase):
         self.temp_media.id = 321
         self.temp_media.metadata = {}
         self.temp_media.asave = AsyncMock()
+        self.link = MagicMock(name="social_media_link")
+        self.link.id = 555
+        self.link.status = SocialMediaLinkStatus.PENDING_APPROVAL
+        self.link.asave = AsyncMock()
+        self.link_log = MagicMock(name="telegram_social_media_link_log")
+        self.link_log.social_media_link = self.link
         self.source = MagicMock(name="reply_to_message")
         self.source.message_id = 777
         self.source.chat = MagicMock()
@@ -1166,6 +1222,12 @@ class ApproveHandlerTests(TestCase):
                     "telegram_provider.handlers.convert_temporary_media_to_media_task"
                 )
             )
+            mocks["link_log"] = stack.enter_context(
+                patch("telegram_provider.handlers.TelegramSocialMediaLinkLog")
+            )
+            link_qs = mocks["link_log"].objects.filter.return_value
+            link_qs.select_related.return_value = link_qs
+            link_qs.afirst = AsyncMock(return_value=None)
             mocks["user"].objects.filter.return_value.afirst = AsyncMock(
                 return_value=self.user
             )
@@ -1265,3 +1327,41 @@ class ApproveHandlerTests(TestCase):
         )
         self.temp_media.asave.assert_not_awaited()
         mocks["convert"].apply_async.assert_not_called()
+
+    def test_admin_reply_to_link_message_approves_link(self):
+        update = self._make_update(self.source)
+
+        with self._mock_handlers() as mocks:
+            mocks["temp_media"].objects.filter.return_value.afirst = AsyncMock(
+                return_value=None
+            )
+            link_qs = mocks["link_log"].objects.filter.return_value
+            link_qs.select_related.return_value = link_qs
+            link_qs.afirst = AsyncMock(return_value=self.link_log)
+            asyncio.run(approve(update, MagicMock()))
+
+        self.assertEqual(self.link.status, SocialMediaLinkStatus.LIVE)
+        self.link.asave.assert_awaited_once_with(update_fields=["status"])
+        update.message.reply_html.assert_awaited_once_with(
+            text="Approved. Link is now live."
+        )
+        self.temp_media.asave.assert_not_awaited()
+        mocks["convert"].apply_async.assert_not_called()
+
+    def test_admin_reply_to_live_link_prompts_not_awaiting_approval(self):
+        self.link.status = SocialMediaLinkStatus.LIVE
+        update = self._make_update(self.source)
+
+        with self._mock_handlers() as mocks:
+            mocks["temp_media"].objects.filter.return_value.afirst = AsyncMock(
+                return_value=None
+            )
+            link_qs = mocks["link_log"].objects.filter.return_value
+            link_qs.select_related.return_value = link_qs
+            link_qs.afirst = AsyncMock(return_value=self.link_log)
+            asyncio.run(approve(update, MagicMock()))
+
+        update.message.reply_html.assert_awaited_once_with(
+            text="Link is not awaiting approval."
+        )
+        self.link.asave.assert_not_awaited()

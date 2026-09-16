@@ -151,6 +151,31 @@ def spotting_parser():
     return parser
 
 
+def spotting_today_parser():
+    parser = ArgumentParser(
+        prog="/spotting_today",
+        description="Displays spotting stats for a date (default: today).",
+        formatter_class=Formatter,
+        add_help=False,
+    )
+
+    parser.add_argument(
+        "date",
+        nargs="?",
+        help="Date in yyyy-mm-dd format (default: today)",
+    )
+
+    parser.add_argument(
+        "--include-not-in-service",
+        "--inis",
+        action="store_true",
+        dest="include_not_in_service",
+        help="Include vehicles that are not in service",
+    )
+
+    return parser
+
+
 def link_parser():
     parser = ArgumentParser(
         prog="/link",

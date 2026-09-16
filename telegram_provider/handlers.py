@@ -22,6 +22,7 @@ from common.models import TemporaryMedia, User, UserVerificationCode
 from common.tasks import convert_temporary_media_to_media_task
 from common.utils import should_upload_media
 from incident import services
+from incident.enums import SocialMediaLinkStatus
 from operation.enums import VehicleStatus
 from operation.models import Line, StationLine, Vehicle
 from spotting.enums import (
@@ -36,7 +37,11 @@ from telegram_provider.models import (
     TelegramSocialMediaLinkLog,
     TelegramSpottingEventLog,
 )
-from telegram_provider.parsers import link_parser, spotting_parser
+from telegram_provider.parsers import (
+    link_parser,
+    spotting_parser,
+    spotting_today_parser,
+)
 from telegram_provider.utils import get_daily_updates, retry_on_error, send_message
 
 if TYPE_CHECKING:
@@ -531,6 +536,7 @@ async def spotting_today(update: Update, context) -> None:
         return
 
     spotting_date = date.today()
+    include_not_in_service = False
     args = (
         context.args
         if context and hasattr(context, "args") and context.args is not None
@@ -540,22 +546,30 @@ async def spotting_today(update: Update, context) -> None:
         parts = update.message.text.strip().split()
         args = parts[1:]
 
-    if args:
-        date_str = args[0].strip()
-        try:
-            spotting_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        except ValueError:
-            await update.message.reply_html(
-                text="Invalid date format. Please use yyyy-mm-dd format (e.g., 2026-08-17)"
-            )
-            return
+    try:
+        parsed = spotting_today_parser().parse_args(args or [])
+        include_not_in_service = parsed.include_not_in_service
+        if parsed.date:
+            spotting_date = datetime.strptime(parsed.date, "%Y-%m-%d").date()
+    except ArgumentError as e:
+        await update.message.reply_html(text=str(e))
+        return
+    except ValueError:
+        await update.message.reply_html(
+            text="Invalid date format. Please use yyyy-mm-dd format (e.g., 2026-08-17)"
+        )
+        return
 
     @sync_to_async
     def aget_daily_updates(*args, **kwargs):
         return get_daily_updates(*args, **kwargs)
 
     await update.message.reply_html(
-        text=await aget_daily_updates(line_id=line.id, spotting_date=spotting_date),
+        text=await aget_daily_updates(
+            line_id=line.id,
+            spotting_date=spotting_date,
+            include_not_in_service=include_not_in_service,
+        ),
     )
 
 
@@ -684,9 +698,7 @@ async def media(update: Update, context) -> None:
         )
         return
 
-    if not await sync_to_async(should_upload_media)():
-        await message.reply_html(text="Media uploads are currently disabled.")
-        return
+    uploads_disabled = not await sync_to_async(should_upload_media)()
 
     line = await Line.objects.filter(
         telegram_channel_id=update.effective_chat.id
@@ -743,10 +755,13 @@ async def media(update: Update, context) -> None:
         "height": height,
         "duration": duration,  # None for images
         "source": "telegram",
+        "uploads_disabled": uploads_disabled,
     }
 
     # The post_save signal drives conversion for trusted / untrusted-image;
-    # AWAITING_REVIEW is held until an admin approves it.
+    # AWAITING_REVIEW is held until an admin approves it. The conversion task
+    # re-checks should_upload_media() itself, so a disabled flag leaves the
+    # entry queued instead of publishing it.
     temp_media = await TemporaryMedia.objects.acreate(
         uploader_id=user.id,
         file=file_obj,
@@ -764,6 +779,15 @@ async def media(update: Update, context) -> None:
         if sent is not None:
             temp_media.metadata["review_message_id"] = sent.message_id
             await temp_media.asave(update_fields=["metadata"])
+    elif uploads_disabled:
+        await retry_on_error(
+            message,
+            "reply_html",
+            text=(
+                "Media received, but uploads are currently disabled. "
+                "It will be published once uploads are re-enabled."
+            ),
+        )
     else:
         await retry_on_error(message, "set_reaction", ReactionEmoji.THUMBS_UP)
 
@@ -804,6 +828,24 @@ async def approve(update: Update, context) -> None:
     ).afirst()
 
     if temp_media is None:
+        link_log = (
+            await TelegramSocialMediaLinkLog.objects.filter(
+                telegram_log__payload__message__message_id=source.message_id,
+                telegram_log__payload__message__chat__id=source.chat.id,
+            )
+            .select_related("social_media_link")
+            .afirst()
+        )
+        if link_log is not None:
+            link = link_log.social_media_link
+            if link.status != SocialMediaLinkStatus.PENDING_APPROVAL:
+                await message.reply_html(text="Link is not awaiting approval.")
+                return
+            link.status = SocialMediaLinkStatus.LIVE
+            await link.asave(update_fields=["status"])
+            await message.reply_html(text="Approved. Link is now live.")
+            return
+
         await message.reply_html(
             text="No media awaiting review found for this message."
         )
