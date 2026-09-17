@@ -72,21 +72,9 @@ class CalendarIncidentFilter:
             if abs(end - start) > timedelta(days=60):
                 raise GraphQLError("date range cannot exceed 60 days")
 
-            if start == end:
-                root_q &= Q(start_datetime__date__lte=end) & Q(
-                    Q(end_datetime__date__gte=start) | Q(end_datetime__isnull=True)
-                )
-            else:
-                root_q &= Q(
-                    Q(start_datetime__date__lte=end)
-                    & Q(start_datetime__date__gte=start)
-                ) & Q(
-                    Q(end_datetime__isnull=True)
-                    | Q(
-                        Q(end_datetime__date__gte=start)
-                        & Q(end_datetime__date__lte=end)
-                    )
-                )
+            root_q &= Q(start_datetime__date__lte=end) & (
+                Q(end_datetime__date__gte=start) | Q(end_datetime__isnull=True)
+            )
 
         if value.exact is not None:
             exact = value.exact.value

@@ -569,6 +569,61 @@ class TestCalendarIncidentFilter(TestCase):
         self.assertIn(self.incident_ongoing_jan, results)
         self.assertNotIn(self.incident_jun, results)
 
+    def test_range_includes_incidents_overlapping_either_boundary(self) -> None:
+        from incident.schema.filters import CalendarIncidentDateFilter, DateRangeInput
+
+        # Given incidents ending in, starting in, and spanning the requested window.
+        spans = [
+            (datetime(2023, 12, 1), datetime(2024, 1, 1)),
+            (datetime(2024, 1, 31), datetime(2024, 2, 20)),
+            (datetime(2023, 12, 1), datetime(2024, 2, 20)),
+            (datetime(2023, 12, 1), None),
+        ]
+        incidents = [
+            CalendarIncident.objects.create(
+                title="Overlapping incident",
+                brief="Boundary coverage",
+                severity=CalendarIncidentSeverity.MINOR,
+                start_datetime=start,
+                end_datetime=end,
+            )
+            for start, end in spans
+        ]
+        # When filtering January, both boundaries are inclusive.
+        results = self._apply_date_filter(
+            CalendarIncidentDateFilter(
+                range=Some(
+                    DateRangeInput(
+                        start=Some(date(2024, 1, 1)), end=Some(date(2024, 1, 31))
+                    )
+                )
+            )
+        )
+        # Then every overlapping incident survives, but unrelated history does not.
+        for incident in incidents:
+            self.assertIn(incident, results)
+        self.assertNotIn(self.incident_jun, results)
+
+    def test_graphql_range_with_ongoing_preserves_pinned_incidents(self) -> None:
+        result = execute_graphql(
+            """
+            query CalendarIncidents($filters: CalendarIncidentFilter) {
+                calendarIncidents(filters: $filters) { id }
+            }
+            """,
+            variables={
+                "filters": {
+                    "date": {"range": {"start": "2023-12-18", "end": "2024-01-14"}},
+                    "OR": {"ongoing": True},
+                }
+            },
+        )
+        self.assertIsNone(result.errors)
+        self.assertCountEqual(
+            [row["id"] for row in result.data["calendarIncidents"]],
+            [str(self.incident_jan.id), str(self.incident_ongoing_jan.id)],
+        )
+
     def test_filter_date_exact(self):
         from incident.schema.filters import CalendarIncidentDateFilter
 

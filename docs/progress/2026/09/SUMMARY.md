@@ -21,6 +21,7 @@ Total commits: 18
 - **799ea77** [fix](incident): coerce null title to empty string for SocialMediaLink
 - (uncommitted) [fix](incident): backfill legacy incident/chronology rows to LIVE in migrations 0015/0016
 - (uncommitted) [feat](incident): submitter SocialMediaLink edit — admin lands live, submitter forced back to PENDING_APPROVAL (Task 24)
+- (uncommitted) [fix](incident): date range filter returns inclusive interval overlap (was dropping incidents ending before / starting after the window); tests added
 
 ### Common (6 commits)
 

@@ -15,6 +15,7 @@ Total commits: 91
 - **f1b89ec** [fix](incident): coerce null details/title/brief to empty string for CalendarIncident
 - **799ea77** [fix](incident): coerce null title to empty string for SocialMediaLink
 - (uncommitted) [fix](incident): backfill legacy incident/chronology rows to LIVE in migrations 0015/0016
+- (uncommitted) [fix](incident): date range filter returns inclusive interval overlap (was dropping incidents ending before / starting after the window); tests added
 
 #### Common (6 commits)
 
