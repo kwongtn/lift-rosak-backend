@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
@@ -19,6 +19,7 @@ from incident.enums import (
     CalendarIncidentSeverity,
     CalendarIncidentStatus,
     IncidentSeverity,
+    PassengerStatus,
     SocialMediaLinkStatus,
 )
 
@@ -374,3 +375,69 @@ class SocialMediaLink(TimeStampedModel):
         blank=True,
         related_name="completed_social_media_links",
     )
+
+    # Tracking-stripped form of ``url``, kept as a plain indexed column. NOT
+    # unique: legacy rows may already share a canonical URL, and a UNIQUE
+    # constraint would abort the backfill migration and raise IntegrityError on
+    # Telegram/admin ingestion. Cross-row dedup is enforced in a service later.
+    normalized_url = models.CharField(
+        max_length=2048,
+        null=True,
+        blank=True,
+        default=None,
+        db_index=True,
+    )
+
+    # Hard-deleting a link cascades to its generic votes; soft delete does not.
+    votes = GenericRelation(
+        "common.Vote",
+        related_query_name="social_media_link",
+    )
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if self.url:
+            # Local import breaks the incident.models <-> incident.services cycle.
+            from incident.services.urls import canonicalize_url
+
+            self.normalized_url = canonicalize_url(self.url) or None
+        super().save(*args, **kwargs)
+
+
+class LineStatusReport(TimeStampedModel):
+    line = models.ForeignKey(
+        to="operation.Line",
+        on_delete=models.PROTECT,
+        related_name="status_reports",
+    )
+    stations = models.ManyToManyField(
+        to="operation.Station",
+        blank=True,
+    )
+    status = TextChoicesField(
+        choices_enum=PassengerStatus,
+    )
+    delay_minutes = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        default=None,
+    )
+    notes = models.TextField(blank=True, default="")
+    user = models.ForeignKey(
+        "common.User",
+        on_delete=models.CASCADE,
+        related_name="line_status_reports",
+    )
+    link = models.ForeignKey(
+        "incident.SocialMediaLink",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
+        related_name="status_reports",
+    )
+
+    def __str__(self) -> str:
+        return f"{self.line} - {self.status}"
+
+    class Meta:
+        ordering = ["-created"]

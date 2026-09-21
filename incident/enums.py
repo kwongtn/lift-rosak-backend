@@ -37,3 +37,13 @@ class CalendarIncidentStatus(models.TextChoices):
 class SocialMediaLinkStatus(models.TextChoices):
     LIVE = "live"
     PENDING_APPROVAL = "pending_approval"
+
+
+class PassengerStatus(models.TextChoices):
+    NORMAL = "NORMAL"
+    BUSY = "BUSY"
+    CROWDED = "CROWDED"
+    EXTREMELY_CROWDED = "EXTREMELY_CROWDED"
+    BACKLOGGED = "BACKLOGGED"
+    DELAYED = "DELAYED"
+    DISRUPTED = "DISRUPTED"
