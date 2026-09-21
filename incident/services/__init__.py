@@ -27,6 +27,7 @@ from .errors import (
 from .feed_links import (
     FeedLinkResult,
     submit_feed_link,
+    submit_line_status_report,
 )
 from .incidents import (
     ChronologyWrite,
@@ -92,6 +93,7 @@ __all__ = [
     "set_social_media_link_vote",
     "submit_feed_link",
     "submit_incident",
+    "submit_line_status_report",
     "submit_social_media_link",
     "update_chronology",
     "update_social_media_link",

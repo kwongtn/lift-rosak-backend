@@ -14,8 +14,9 @@ from django.db import IntegrityError, transaction
 from common.models import User
 from incident.enums import SocialMediaLinkStatus
 from incident.models import LineStatusReport, SocialMediaLink
+from operation.models import Line
 
-from .errors import FeedLinkValidationError
+from .errors import FeedLinkValidationError, IncidentServiceError
 from .page_title import fetch_page_title
 from .urls import canonicalize_url
 from .votes import set_social_media_link_vote
@@ -199,3 +200,25 @@ async def submit_feed_link(
         # helper is async.
         await set_social_media_link_vote(user, link_id=result.link.id, value=1)
     return result
+
+
+async def submit_line_status_report(
+    user: User,
+    *,
+    line_id: int,
+    status: str,
+    station_ids: list[int],
+    delay_minutes: int | None,
+    notes: str,
+) -> LineStatusReport:
+    if not await Line.objects.filter(pk=line_id).aexists():
+        raise IncidentServiceError(f"Line {line_id} does not exist.")
+
+    return await sync_to_async(_create_line_status_report)(
+        user,
+        line_id=line_id,
+        status=status,
+        station_ids=station_ids,
+        delay_minutes=delay_minutes,
+        notes=notes,
+    )
