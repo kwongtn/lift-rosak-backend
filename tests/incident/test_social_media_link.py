@@ -10,6 +10,7 @@ from django.utils import timezone
 from dotmap import DotMap
 
 from common.models import User
+from incident.enums import SocialMediaLinkStatus
 from incident.models import CalendarIncident, CalendarIncidentCategory, SocialMediaLink
 from incident.schema.keyset import decode_keyset_cursor, encode_keyset_cursor
 from incident.schema.loaders import IncidentContextLoaders
@@ -391,6 +392,27 @@ class PublicSocialMediaLinkTests(TransactionTestCase):
         ids_b = _ids(results_b)
         self.assertIn(link_on_b.id, ids_b)
         self.assertNotIn(link_on_a.id, ids_b)
+
+    def test_public_social_media_links_status_filter(self):
+        live = _make_link(100)
+        live.status = SocialMediaLinkStatus.LIVE
+        live.save()
+
+        pending = _make_link(101)
+        pending.status = SocialMediaLinkStatus.PENDING_APPROVAL
+        pending.save()
+
+        results = asyncio.run(
+            get_public_social_media_links(
+                None,
+                _FakeInfo(),
+                status=strawberry.Some(SocialMediaLinkStatus.LIVE),
+            )
+        )
+        ids = _ids(results)
+
+        self.assertIn(live.id, ids)
+        self.assertNotIn(pending.id, ids)
 
     def test_public_social_media_links_ordered_newest_first(self):
         oldest = _make_link(30)

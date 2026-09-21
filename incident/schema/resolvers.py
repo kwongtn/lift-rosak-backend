@@ -12,6 +12,7 @@ from strawberry.types import Info
 
 from incident.enums import CalendarIncidentSeverity, CalendarIncidentStatus
 from incident.models import CalendarIncident, CalendarIncidentCategory, SocialMediaLink
+from incident.schema.inputs import SocialMediaLinkStatusInput
 from incident.schema.keyset import decode_keyset_cursor, encode_keyset_cursor
 from incident.schema.scalars import (
     CalendarIncidentGroupByDateSeverityScalar,
@@ -253,13 +254,15 @@ async def get_public_social_media_links(
     first: int = 20,
     after: Optional[str] = None,
     mine: strawberry.Maybe[bool] = None,
+    status: strawberry.Maybe[SocialMediaLinkStatusInput] = None,
 ) -> SocialMediaLinkConnection:
     """Public social-media-link feed, cursor-paginated.
 
     Cursor is base64("<created_iso>|<id>"); ordering is created DESC, id DESC
     (id as tiebreaker) so keyset cursors never skip/duplicate. ``mine`` returns
     only the caller's own links (status-independent); anonymous ``mine`` returns
-    an empty page.
+    an empty page. ``status`` optionally narrows the feed to one approval status;
+    omitted, both LIVE and PENDING_APPROVAL are returned (unchanged default).
     """
 
     if mine is not None and mine.value:
@@ -283,6 +286,9 @@ async def get_public_social_media_links(
 
     if line_id is not None:
         queryset = queryset.filter(lines__id=int(line_id.value))
+
+    if status is not None:
+        queryset = queryset.filter(status=status.value)
 
     queryset = queryset.order_by("-created", "-id")
 

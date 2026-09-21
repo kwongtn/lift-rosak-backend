@@ -73,12 +73,30 @@ class CalendarIncidentCategoryScalar:
 class SocialMediaLinkScalar:
     id: strawberry.auto
     url: str
+    normalized_url: Optional[str]
     title: str
     description: str
     status: strawberry.auto
     created: datetime
     completed: bool
     completed_at: Optional[datetime]
+
+    @strawberry_django.field
+    async def vote_score(self, info: Info) -> int:
+        ct_id = await _content_type_id(models.SocialMediaLink)
+        return await info.context.loaders["incident"]["vote_scores"].load(
+            (ct_id, self.id)
+        )
+
+    @strawberry_django.field
+    async def user_vote(self, info: Info) -> int:
+        user = info.context.user
+        if not user:
+            return 0
+        ct_id = await _content_type_id(models.SocialMediaLink)
+        return await info.context.loaders["incident"]["user_vote_value"].load(
+            (user.id, ct_id, self.id)
+        )
 
     @strawberry.field
     @sync_to_async

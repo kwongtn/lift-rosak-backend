@@ -680,7 +680,7 @@ type Query {
   calendarIncidentsBySeverityCount(startDate: Date, endDate: Date, groupBy: GroupByEnum! = DAY): [CalendarIncidentGroupByDateSeverityScalar!]!
   pendingCalendarIncidents(search: String): [CalendarIncidentScalar!]!
   socialMediaLinks(search: String, categoryId: ID, completed: Boolean, lineId: ID, vehicleId: ID, stationId: ID, createdAfter: DateTime, createdBefore: DateTime): [SocialMediaLinkScalar!]!
-  publicSocialMediaLinks(incidentId: ID, lineId: ID, first: Int! = 20, after: String = null, mine: Boolean): SocialMediaLinkConnection!
+  publicSocialMediaLinks(incidentId: ID, lineId: ID, first: Int! = 20, after: String = null, mine: Boolean, status: SocialMediaLinkStatus): SocialMediaLinkConnection!
   calendarIncidentCategories: [CalendarIncidentCategoryScalar!]!
   calendarIncidentHistory(id: ID!, limit: Int! = 50): [CalendarIncidentHistoryEntryScalar!]!
   locations(filters: LocationFilter, order: LocationOrder, pagination: OffsetPaginationInput): [Location!]!
@@ -718,6 +718,7 @@ type SocialMediaLinkPageInfo {
 type SocialMediaLinkScalar {
   id: ID!
   url: String!
+  normalizedUrl: String
   title: String!
   description: String!
   status: SocialMediaLinkStatus!
@@ -729,6 +730,8 @@ type SocialMediaLinkScalar {
   lines: [Line!]!
   vehicles: [Vehicle!]!
   stations: [Station!]!
+  voteScore: Int!
+  userVote: Int!
   completedBy: String
 }
 
