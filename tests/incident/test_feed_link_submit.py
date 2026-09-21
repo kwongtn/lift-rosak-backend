@@ -11,8 +11,10 @@ scoped to each test's own canonical URL.
 """
 
 import pytest
-from asgiref.sync import sync_to_async
+from asgiref.sync import async_to_sync, sync_to_async
 from django.contrib.contenttypes.models import ContentType
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from common.models import User, Vote
 from incident import services
@@ -309,3 +311,54 @@ async def test_duplicate_with_status_attaches_report_to_existing():
     report = await LineStatusReport.objects.aget(link=first.link)
     assert report.status == PassengerStatus.CROWDED
     assert report.user_id == user.id
+
+
+@pytest.mark.django_db(transaction=True)
+def test_submit_takes_advisory_lock():
+    user = async_to_sync(_make_user)(10)
+
+    with CaptureQueriesContext(connection) as captured:
+        async_to_sync(services.submit_feed_link)(
+            user,
+            url="https://example.com/feedlock",
+            title="Locked",
+            line_ids=[],
+            station_ids=[],
+            status=None,
+            delay_minutes=None,
+            notes="",
+        )
+
+    assert any(
+        "pg_advisory_xact_lock" in query["sql"] for query in captured.captured_queries
+    )
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_www_subdomain_duplicate_detected():
+    user = await _make_user(11)
+
+    first = await services.submit_feed_link(
+        user,
+        url="https://facebook.com/photo?fbid=123",
+        title="First",
+        line_ids=[],
+        station_ids=[],
+        status=None,
+        delay_minutes=None,
+        notes="",
+    )
+    second = await services.submit_feed_link(
+        user,
+        url="https://www.facebook.com/photo?fbid=123",
+        title="Second",
+        line_ids=[],
+        station_ids=[],
+        status=None,
+        delay_minutes=None,
+        notes="",
+    )
+
+    assert second.is_duplicate is True
+    assert second.duplicate_of_id == first.link.id
+    assert await _link_count_for("https://facebook.com/photo?fbid=123") == 1

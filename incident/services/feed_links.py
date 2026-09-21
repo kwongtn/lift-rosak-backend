@@ -6,10 +6,11 @@ an existing row is never inserted twice — the existing row is returned with a
 duplicate indicator and the submitter is upvoted instead.
 """
 
+import hashlib
 from dataclasses import dataclass
 
 from asgiref.sync import sync_to_async
-from django.db import IntegrityError, transaction
+from django.db import connection, transaction
 
 from common.models import User
 from incident.enums import SocialMediaLinkStatus
@@ -30,8 +31,40 @@ class FeedLinkResult:
     user_vote: int
 
 
+def _advisory_lock_key(canonical: str) -> int:
+    """Stable signed 64-bit lock key for ``canonical`` (blake2b, not hash())."""
+    digest = hashlib.blake2b(canonical.encode(), digest_size=8).digest()
+    return int.from_bytes(digest, "big", signed=True)
+
+
+def _acquire_canonical_lock(canonical: str) -> None:
+    """Take a transaction-scoped Postgres advisory lock for ``canonical``.
+
+    Sync, and must run inside the caller's ``transaction.atomic()`` — the lock
+    is released when that transaction ends. Serializes concurrent first-submits
+    of the same URL so the second observes the first's row and takes the dedup
+    path instead of inserting a twin.
+
+    ponytail: the lock only guards code paths that take it, and is
+    Postgres-specific. A partial unique index on ``normalized_url`` is the
+    structural fix, but requires cleaning pre-existing duplicate rows first (a
+    UNIQUE constraint would abort the backfill and raise IntegrityError on
+    legacy/admin ingestion).
+    """
+    if not canonical:
+        return
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(%s)", [_advisory_lock_key(canonical)]
+        )
+
+
 def _find_existing(canonical: str) -> SocialMediaLink | None:
-    """Newest row sharing ``canonical``, locked for update. Sync (needs atomic)."""
+    """Newest row sharing ``canonical``, locked for update. Sync (needs atomic).
+
+    ``select_for_update()`` does not protect against a *missing* row; concurrent
+    first-submits are serialized by the caller's advisory lock instead.
+    """
     return (
         SocialMediaLink.objects.select_for_update()
         .filter(normalized_url=canonical)
@@ -118,6 +151,7 @@ async def submit_feed_link(
 
     def _sync() -> FeedLinkResult:
         with transaction.atomic():
+            _acquire_canonical_lock(canonical)
             existing = _find_existing(canonical) if canonical else None
             if existing is not None:
                 if status is not None:
@@ -137,39 +171,13 @@ async def submit_feed_link(
                     user_vote=1,
                 )
 
-            try:
-                link = SocialMediaLink.objects.create(
-                    url=url,
-                    normalized_url=canonical or None,
-                    title=final_title[:256],
-                    user=user,
-                    status=SocialMediaLinkStatus.LIVE,
-                )
-            except IntegrityError:
-                # ponytail: normalized_url has no unique constraint (deliberate —
-                # legacy rows may already share a canonical URL), so this branch
-                # is unreachable today. It is kept so that when the duplicates
-                # are cleaned and a partial unique index is added, a first-submit
-                # race degrades to dedup instead of a 500.
-                raced = _find_existing(canonical)
-                if raced is None:
-                    raise
-                if status is not None:
-                    _attach_line_reports(
-                        user,
-                        link=raced,
-                        line_ids=line_ids,
-                        status=status,
-                        station_ids=station_ids,
-                        delay_minutes=delay_minutes,
-                        notes=notes,
-                    )
-                return FeedLinkResult(
-                    link=raced,
-                    is_duplicate=True,
-                    duplicate_of_id=raced.id,
-                    user_vote=1,
-                )
+            link = SocialMediaLink.objects.create(
+                url=url,
+                normalized_url=canonical or None,
+                title=final_title[:256],
+                user=user,
+                status=SocialMediaLinkStatus.LIVE,
+            )
 
             if line_ids:
                 link.lines.set(line_ids)
