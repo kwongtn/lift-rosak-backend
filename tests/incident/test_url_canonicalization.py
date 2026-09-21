@@ -79,13 +79,58 @@ def test_missing_scheme_assumed_https():
     assert canonicalize_url("example.com/post") == "https://example.com/post"
 
 
-def test_query_order_preserved_for_survivors():
+def test_query_survivors_are_sorted_deterministically():
     assert (
         canonicalize_url("https://example.com/post?b=2&a=1&utm_source=x")
-        == "https://example.com/post?b=2&a=1"
+        == "https://example.com/post?a=1&b=2"
     )
 
 
 def test_malformed_string_returned_unchanged():
     raw = "https://example.com:notaport/path"
     assert canonicalize_url(raw) == raw
+
+
+def test_www_subdomain_stripped():
+    assert (
+        canonicalize_url("https://www.facebook.com/photo?fbid=123")
+        == "https://facebook.com/photo?fbid=123"
+    )
+
+
+def test_www_subdomain_matches_bare_host():
+    assert canonicalize_url(
+        "https://www.facebook.com/photo?fbid=123"
+    ) == canonicalize_url("https://facebook.com/photo?fbid=123")
+
+
+def test_m_subdomain_stripped():
+    assert canonicalize_url("https://m.example.com/a") == "https://example.com/a"
+
+
+def test_mobile_and_amp_subdomains_stripped():
+    assert canonicalize_url("https://mobile.example.com/a") == "https://example.com/a"
+    assert canonicalize_url("https://amp.example.com/a") == "https://example.com/a"
+
+
+def test_two_label_host_not_stripped():
+    assert canonicalize_url("https://www.com/a") == "https://www.com/a"
+    assert canonicalize_url("https://example.com/a") == "https://example.com/a"
+
+
+def test_alias_subdomain_strip_is_case_insensitive():
+    assert canonicalize_url("https://WWW.Example.COM/a") == "https://example.com/a"
+
+
+def test_query_param_order_independent_and_both_params_kept():
+    ordered = canonicalize_url("https://x.com/p?a=1&b=2")
+    reordered = canonicalize_url("https://x.com/p?b=2&a=1")
+    assert ordered == reordered
+    assert ordered == "https://x.com/p?a=1&b=2"
+
+
+def test_tracking_strip_still_holds_with_subdomain_and_sort():
+    assert (
+        canonicalize_url("https://www.example.com/post?utm_source=x&b=2&a=1")
+        == "https://example.com/post?a=1&b=2"
+    )
