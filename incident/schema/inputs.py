@@ -10,6 +10,7 @@ from strawberry.types.maybe import Maybe
 from incident.enums import (
     CalendarIncidentChronologyIndicator,
     CalendarIncidentSeverity,
+    PassengerStatus,
     SocialMediaLinkStatus,
 )
 
@@ -21,6 +22,7 @@ CalendarIncidentChronologyIndicatorInput = strawberry.enum(
     CalendarIncidentChronologyIndicator
 )
 SocialMediaLinkStatusInput = strawberry.enum(SocialMediaLinkStatus)
+PassengerStatusInput = strawberry.enum(PassengerStatus)
 
 
 @strawberry.input
@@ -70,3 +72,24 @@ class SocialMediaLinkInput:
     station_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
     # Tri-state: omit to leave unchanged on update; set explicitly to change.
     status: Maybe[SocialMediaLinkStatusInput | None] = strawberry.UNSET
+
+
+@strawberry.input
+class FeedLinkInput:
+    url: str
+    title: Maybe[str | None] = strawberry.UNSET
+    line_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
+    station_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
+    # Optional line-status report; requires at least one line_id (service rule).
+    status: Maybe[PassengerStatusInput | None] = strawberry.UNSET
+    delay_minutes: Maybe[int | None] = strawberry.UNSET
+    notes: Maybe[str | None] = strawberry.UNSET
+
+
+@strawberry.input
+class LineStatusReportInput:
+    line_id: strawberry.ID
+    status: PassengerStatusInput
+    station_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
+    delay_minutes: Maybe[int | None] = strawberry.UNSET
+    notes: Maybe[str | None] = strawberry.UNSET

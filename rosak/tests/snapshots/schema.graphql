@@ -364,6 +364,24 @@ type FavouriteVehicleData {
   count: Int!
 }
 
+input FeedLinkInput {
+  url: String!
+  title: String
+  lineIds: [ID!]
+  stationIds: [ID!]
+  status: PassengerStatus
+  delayMinutes: Int
+  notes: String
+}
+
+type FeedLinkPayload {
+  ok: Boolean!
+  link: SocialMediaLinkScalar!
+  isDuplicate: Boolean!
+  duplicateOfId: Int
+  userVote: Int!
+}
+
 type GenericMutationReturn {
   ok: Boolean!
   id: Int
@@ -458,6 +476,14 @@ enum LineStatus {
   PARTIAL_ACTIVE
   PARTIAL_DISRUPTION
   TOTAL_DISRUPTION
+}
+
+input LineStatusReportInput {
+  lineId: ID!
+  status: PassengerStatus!
+  stationIds: [ID!]
+  delayMinutes: Int
+  notes: String
 }
 
 type LineVehicleSpottingTrend {
@@ -608,6 +634,11 @@ type Mutation {
   submitSocialMediaLink(input: SocialMediaLinkInput!): GenericMutationReturn!
   markSocialMediaLinkCompleted(socialMediaLinkId: ID!): GenericMutationReturn!
   updateSocialMediaLink(socialMediaLinkId: ID!, input: SocialMediaLinkInput!): GenericMutationReturn!
+  submitFeedLink(input: FeedLinkInput!): FeedLinkPayload!
+  submitLineStatusReport(input: LineStatusReportInput!): GenericMutationReturn!
+  upvoteSocialMediaLink(socialMediaLinkId: ID!): GenericMutationReturn!
+  downvoteSocialMediaLink(socialMediaLinkId: ID!): GenericMutationReturn!
+  removeSocialMediaLinkVote(socialMediaLinkId: ID!): GenericMutationReturn!
   extractDataFromUrl(input: ExtractDataInput!): ExtractedIncidentDataScalar!
   triggerLineVehicleStatusSnapshot(input: TriggerInput!): GenericMutationReturn!
 }

@@ -113,6 +113,15 @@ class SocialMediaLinkScalar:
 
 
 @strawberry.type
+class FeedLinkPayload:
+    ok: bool
+    link: SocialMediaLinkScalar
+    is_duplicate: bool
+    duplicate_of_id: Optional[int]
+    user_vote: int
+
+
+@strawberry.type
 class SocialMediaLinkEdge:
     node: SocialMediaLinkScalar
     cursor: str
