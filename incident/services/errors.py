@@ -11,3 +11,7 @@ class ConcurrencyConflictError(IncidentServiceError):
 
 class IncidentNotEditableError(IncidentServiceError):
     """The actor may not modify this incident in its current state."""
+
+
+class FeedLinkValidationError(IncidentServiceError):
+    """The feed submission is missing a required association (e.g. status)."""
