@@ -44,8 +44,10 @@ from .social_links import (
 from .votes import (
     remove_chronology_vote,
     remove_incident_vote,
+    remove_social_media_link_vote,
     set_chronology_vote,
     set_incident_vote,
+    set_social_media_link_vote,
 )
 
 __all__ = [
@@ -74,9 +76,11 @@ __all__ = [
     "remove_chronology_vote",
     "reorder_chronology",
     "remove_incident_vote",
+    "remove_social_media_link_vote",
     "request_chronology_deletion",
     "set_chronology_vote",
     "set_incident_vote",
+    "set_social_media_link_vote",
     "submit_incident",
     "submit_social_media_link",
     "update_chronology",

@@ -9,7 +9,7 @@ from asgiref.sync import sync_to_async
 from django.contrib.contenttypes.models import ContentType
 
 from common.models import User, Vote
-from incident.models import CalendarIncidentChronology
+from incident.models import CalendarIncidentChronology, SocialMediaLink
 
 from .access import get_incident
 from .errors import IncidentServiceError
@@ -48,6 +48,15 @@ async def _get_chronology(chronology_id: int) -> CalendarIncidentChronology:
         ) from exc
 
 
+async def _get_social_media_link(link_id: int) -> SocialMediaLink:
+    try:
+        return await SocialMediaLink.objects.aget(pk=link_id)
+    except SocialMediaLink.DoesNotExist as exc:
+        raise IncidentServiceError(
+            f"SocialMediaLink {link_id} does not exist."
+        ) from exc
+
+
 # --- Incident-scoped wrappers (backward compatible) ---
 
 
@@ -72,3 +81,16 @@ async def set_chronology_vote(user: User, *, chronology_id: int, value: int) -> 
 async def remove_chronology_vote(user: User, *, chronology_id: int) -> bool:
     chronology = await _get_chronology(chronology_id)
     return await _remove_vote(user, target=chronology)
+
+
+# --- Social-media-link-scoped wrappers ---
+
+
+async def set_social_media_link_vote(user: User, *, link_id: int, value: int) -> None:
+    link = await _get_social_media_link(link_id)
+    await _apply_vote(user, target=link, value=value)
+
+
+async def remove_social_media_link_vote(user: User, *, link_id: int) -> bool:
+    link = await _get_social_media_link(link_id)
+    return await _remove_vote(user, target=link)
