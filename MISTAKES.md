@@ -156,6 +156,13 @@ backend is authoritative.
 **Fix**: Added a reversible `RunPython` to `0015`/`0016` — at the instant `status` is introduced, every pre-existing row is legacy, so backfill `LIVE`; the model's `DRAFT` default still governs rows created afterwards. Regression test `tests/incident/test_legacy_status_backfill.py`.
 **Prevention**: When introducing a state/status field, always pair the schema change with a data migration whose backfill reflects the field's *historical* semantics, never the new creation default.
 
+### [2026-09-22] incident: `test_chronology_upvote_changes_downvote` is order-dependent — PRE-EXISTING FLAKE
+
+**Problem**: `tests/incident/test_chronology_mutations.py::test_chronology_upvote_changes_downvote` asserts on `Vote.objects.filter(object_id=...)` without filtering by `content_type`, so a leaked `Vote` row from an earlier test in the same module (same `object_id`, different content type) can make it fail. Observed failing in some runs and passing in others with byte-identical code.
+**Root Cause**: The assertion scopes only by `object_id`; `Vote` is keyed by `(user, content_type, object_id)` and object ids are only unique within a content type, so the filter can match another model's vote.
+**Fix**: _Not fixed (pre-existing)._ Scope the assertion by `content_type` (and ideally `user`).
+**Prevention**: Always filter `Vote` assertions by `content_type`; never treat `object_id` alone as identifying a vote.
+
 ---
 
 ## spotting
@@ -365,6 +372,20 @@ backend is authoritative.
 **Root Cause**: The multiprocessing result path cannot serialise a traceback object, so any failing test poisons the run.
 **Fix**: _Not fixed._ Run `python manage.py test --keepdb` (serial) as the working gate.
 **Prevention**: Keep the documented test gate serial until the parallel runner is fixed.
+
+### [2026-09-22] rosak: concurrent test runs share the single `test_postgres` database — COLLISION
+
+**Problem**: Two `python manage.py test` runs started at the same time share the one `test_postgres` database and truncate/recreate each other's tables mid-run. The wreckage looks like real failures: a storm of `common_vote.content_type_id` ForeignKeyViolation errors and dozens of `DuplicateDatabase` setup errors.
+**Root Cause**: Django's test runner uses a single test database per connection and nothing serialises concurrent runs, so both processes create and destroy the same database name.
+**Fix**: _No code change._ Run only one test process at a time; check for a running test process before starting another.
+**Prevention**: Before starting a suite, confirm no other run is active. If dozens of setup errors or an FK-violation storm (especially on `common_vote.content_type_id`) appear, suspect a database collision before hunting a code bug.
+
+### [2026-09-22] rosak: nginx keeps a stale `app` upstream after a container restart — 502 from :8000
+
+**Problem**: After `docker compose restart app` the container gets a new IP, but nginx (started earlier) keeps the old one, so `http://localhost:8000/` returns 502 while granian inside `app` is healthy.
+**Root Cause**: nginx resolves the upstream hostname once at startup and caches the IP; restarting only `app` does not make nginx re-resolve it.
+**Fix**: `docker compose restart web` — restart nginx so it re-resolves the `app` upstream.
+**Prevention**: Restart `web` alongside `app` whenever `app`'s IP changes, and don't debug the app when the failure is only visible through :8000.
 
 ---
 

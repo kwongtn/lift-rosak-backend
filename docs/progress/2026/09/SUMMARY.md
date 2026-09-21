@@ -1,17 +1,17 @@
 # Monthly Summary - September 2026
 
-Total commits: 18
+Total commits: 27
 
 ## Commit Type Distribution
 
-- feat: 12
+- feat: 21
 - fix: 3
 - test: 2
 - chore: 1
 
 ## By Module/Feature
 
-### Incident (6 commits)
+### Incident (14 commits)
 
 - **67a830c** [feat](incident): complete insiden reporting backend
 - **b9bd6fd** [feat](incident): add public publicSocialMediaLinks GraphQL query with line filter
@@ -22,6 +22,18 @@ Total commits: 18
 - (uncommitted) [fix](incident): backfill legacy incident/chronology rows to LIVE in migrations 0015/0016
 - (uncommitted) [feat](incident): submitter SocialMediaLink edit — admin lands live, submitter forced back to PENDING_APPROVAL (Task 24)
 - (uncommitted) [fix](incident): date range filter returns inclusive interval overlap (was dropping incidents ending before / starting after the window); tests added
+- **f3fb273** [feat](incident): add PassengerStatus enum, LineStatusReport, normalized_url
+- **e0884ae** [feat](incident): canonicalize social link URLs
+- **ab7af0e** [feat](incident): deterministic line-status consolidation
+- **1a9737e** [feat](incident): social link vote service wrappers
+- **145778b** [feat](incident): expose link vote state and add feed status filter
+- **f0ded00** [feat](incident): feed link submit with dedup and auto-upvote
+- **a62ed6d** [feat](incident): line status report and page title services
+- **a9418c5** [feat](incident): feed submit and line status report mutations
+
+### Operation (1 commits)
+
+- **7c813fe** [feat](operation): per-line pulse fields and DataLoaders
 
 ### Common (6 commits)
 

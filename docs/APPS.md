@@ -45,7 +45,7 @@ graph TD
     end
 
     subgraph async["Async — Celery + Redis"]
-        BEAT["beat: 6 jobs<br/>rosak/celery.py"]
+        BEAT["beat: 8 jobs<br/>rosak/celery.py"]
     end
 
     subgraph ext["External Services"]
@@ -102,6 +102,7 @@ graph TD
     BEAT --> SP
     BEAT --> CH
     BEAT --> TP
+    BEAT --> INC
     SP -->|daily digest 03:00| TG
     CM --> PG
     OP --> PG
@@ -113,7 +114,7 @@ graph TD
 
 **Ingress surface** — GraphQL `POST /graphql/` (introspection disabled when `DEBUG=False`); `POST /upload/` (multipart, authenticated by the `Firebase-Auth-Key` header rather than GraphQL context); three DRF chart feeds under `/operation/` (one returns CSV built with `polars`); `POST /telegram_provider/` (self-registering webhook, polling disabled); `/admin/`, `/hijack/`, `/advanced_filters/`, `/mdeditor/`, `/health-check/`; a Sentry tunnel at `/sentry/` and `/version/`. In production, every unmatched path is caught by `custom_view.redirect_view` — a rickroll.
 
-**Celery beat — 6 jobs, all declared centrally in [rosak/celery.py](../rosak/celery.py#L22-L47), none locally:**
+**Celery beat — 8 jobs, all declared centrally in [rosak/celery.py](../rosak/celery.py#L22-L64), none locally:**
 
 | Schedule     | Task                                                                         | Owner               |
 | ------------ | ---------------------------------------------------------------------------- | ------------------- |
@@ -121,7 +122,9 @@ graph TD
 | every 10 min | `cleanup_expired_verification_codes`                                         | `common`            |
 | 01:00        | `aggregate_line_vehicle_status_mtrec_task` — external scrape                 | `chartography`      |
 | 03:00        | `cleanup_telegram_logs` — 30-day retention                                   | `telegram_provider` |
+| 03:00        | `purge_soft_deleted_incidents` — hard-delete soft-deleted incidents past 90 days | `incident`      |
 | 03:00        | `report_spotting_today` — per-line Telegram digest                           | `spotting`          |
+| 03:30        | `purge_rejected_incidents` — hard-delete `REJECTED` incidents unchanged for 30 days | `incident`   |
 | 05:00        | `aggregate_line_vehicle_status_mlptf_task` — internal aggregation            | `chartography`      |
 
 **Dependency graph shape.** The app graph is heavily cyclic and only two nodes are clean: `generic` is the sole pure _provider_ (imports nothing first-party) and `reporting` is the sole pure _consumer_ (nothing imports it but `rosak/schema.py`). Real cycles exist between `common`↔`spotting`, `common`↔`incident`, `common`↔`mlptf`, `operation`↔`incident`, `operation`↔`spotting`, `operation`↔`chartography`, and `spotting`↔`telegram_provider`. Most are tolerated via lazy string model references or function-local imports; the one genuine hazard is `common/tasks.py`, which imports `spotting` and `incident` at module top level.
@@ -296,7 +299,7 @@ Surfaced by the component audits — the first block by the Phase 1 pass, the re
 | `incident`                       | `CalendarIncidentFilter.date` guards range width with a bare `assert` (500, not a validation error; stripped under `-O`) and has a `month__lte = value + 1` off-by-one assuming 0-indexed JS months                                                                                                                                     |
 | `incident`                       | `CalendarIncidentScalar.last_updated` re-fetches its row plus two chronology queries **per node**, invisible to the optimizer — the app's N+1 hotspot                                                                                                                                                                                   |
 | `mlptf`                          | No `UniqueConstraint` on `UserBadge(user, badge)`; no `__str__` on either model                                                                                                                                                                                                                                                         |
-| repo                             | `jejak/` and `rosak/routers/` contain **only stale `__pycache__`** — a decommissioned GPS-trace app (with provider models and a full schema package) and a TimescaleDB router whose sources were deleted. `jejak` is absent from `INSTALLED_APPS`. Worth deleting to stop the `.pyc` files misleading readers and tooling               |
+| repo                             | `jejak/` is **not** stale `__pycache__` — it is a live optional GPS-trace app (provider models, admin, full schema package) wired into the root schema behind `JEJAK_ENABLED` (`rosak/settings.py`, `rosak/schema.py`). `rosak/routers/timescale.py` is likewise live source, appended to `DATABASE_ROUTERS` when `JEJAK_ENABLED`. Both are conditionally enabled, not decommissioned                                                                                  |
 
 ---
 

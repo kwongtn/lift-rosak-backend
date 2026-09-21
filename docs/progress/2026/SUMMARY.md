@@ -1,12 +1,12 @@
 # Yearly Summary - 2026
 
-Total commits: 91
+Total commits: 100
 
 ## Monthly Breakdown
 
-### 2026-09 (18 commits)
+### 2026-09 (27 commits)
 
-#### Incident (6 commits)
+#### Incident (14 commits)
 
 - **67a830c** [feat](incident): complete insiden reporting backend
 - **b9bd6fd** [feat](incident): add public publicSocialMediaLinks GraphQL query with line filter
@@ -16,6 +16,18 @@ Total commits: 91
 - **799ea77** [fix](incident): coerce null title to empty string for SocialMediaLink
 - (uncommitted) [fix](incident): backfill legacy incident/chronology rows to LIVE in migrations 0015/0016
 - (uncommitted) [fix](incident): date range filter returns inclusive interval overlap (was dropping incidents ending before / starting after the window); tests added
+- **f3fb273** [feat](incident): add PassengerStatus enum, LineStatusReport, normalized_url
+- **e0884ae** [feat](incident): canonicalize social link URLs
+- **ab7af0e** [feat](incident): deterministic line-status consolidation
+- **1a9737e** [feat](incident): social link vote service wrappers
+- **145778b** [feat](incident): expose link vote state and add feed status filter
+- **f0ded00** [feat](incident): feed link submit with dedup and auto-upvote
+- **a62ed6d** [feat](incident): line status report and page title services
+- **a9418c5** [feat](incident): feed submit and line status report mutations
+
+#### Operation (1 commits)
+
+- **7c813fe** [feat](operation): per-line pulse fields and DataLoaders
 
 #### Common (6 commits)
 
@@ -134,6 +146,7 @@ Total commits: 91
 
 ### Major Features & Refactors
 
+- **2026-09-22** (a9418c5) [feat](incident): community front page backend — feed link submit with canonical-URL dedup + auto-upvote, line status reports, deterministic per-line passenger-status pulse (`operation.Line.passengerStatus`/`pulseLinks`) and social-link votes
 - **2026-09-12** (a82de20) [feat](telegram): auto-attach incoming photo/video to latest spotting
 - **2026-09-16** (uncommitted) [feat](telegram): /spotting_today not-in-service exclusion flag; media uploads queued as TemporaryMedia even while uploads disabled; /approve approves replied /link
 - **2026-09-12** (82addcc) [feat](common): support video in temporary media pipeline
