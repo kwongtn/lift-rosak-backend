@@ -428,6 +428,12 @@ type Line {
   stations: [Station!]!
   stationLines: [StationLine!]!
   calendarIncidents: [CalendarIncidentScalar!]!
+  inServiceVehicleCount: Int!
+  totalVehicleCount: Int!
+  passengerStatus: PassengerStatus
+  passengerStatusMessage: String
+  statusReportCount: Int!
+  pulseLinks: [SocialMediaLinkScalar!]!
   vehicleTypes: [VehicleType!]!
   vehicles(spottedToday: Boolean = null): [Vehicle!]!
   vehicleSpottingTrends(start: Date, end: Date, dateGroup: DateGroupings = DAY, typeGroup: Boolean = false, freeRange: Boolean = false, addZero: Boolean = true): [LineVehicleSpottingTrend!]!
@@ -639,6 +645,16 @@ type PageInfo {
 
   """When paginating forwards, the cursor to continue."""
   endCursor: String
+}
+
+enum PassengerStatus {
+  NORMAL
+  BUSY
+  CROWDED
+  EXTREMELY_CROWDED
+  BACKLOGGED
+  DELAYED
+  DISRUPTED
 }
 
 """Represents a point as `(x, y, z)` or `(x, y)`."""

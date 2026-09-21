@@ -11,12 +11,19 @@ from chartography.schema.scalars import Source
 from common.utils import get_default_start_time, get_trends
 from generic.schema.enums import DateGroupings
 from generic.schema.scalars import GeoPoint
+from incident.enums import PassengerStatus
 from operation import models
 from operation import models as operation_models
 from operation.enums import VehicleStatus
 from operation.schema.types import LineVehicleSpottingTrend, VehicleSpottingTrend
 from spotting import models as spotting_models
 from spotting.enums import SpottingEventType
+
+# incident.schema imports this module, so its types are lazily referenced;
+# incident.enums has no such cycle and is imported directly.
+SocialMediaLinkScalar = Annotated[
+    "SocialMediaLinkScalar", strawberry.lazy("incident.schema.scalars")
+]
 
 
 @strawberry_django.type(models.Station)
@@ -54,6 +61,48 @@ class Line:
     calendar_incidents: List[
         Annotated["CalendarIncidentScalar", strawberry.lazy("incident.schema.scalars")]
     ]
+
+    @strawberry.field
+    async def in_service_vehicle_count(self, info: Info) -> int:
+        counts = await info.context.loaders["operation"][
+            "line_vehicle_counts_loader"
+        ].load(self.id)
+        return counts["in_service"]
+
+    @strawberry.field
+    async def total_vehicle_count(self, info: Info) -> int:
+        counts = await info.context.loaders["operation"][
+            "line_vehicle_counts_loader"
+        ].load(self.id)
+        return counts["total"]
+
+    @strawberry.field
+    async def passenger_status(self, info: Info) -> Optional[PassengerStatus]:
+        pulse = await info.context.loaders["operation"]["line_pulse_loader"].load(
+            self.id
+        )
+        return PassengerStatus(pulse.status) if pulse.status else None
+
+    @strawberry.field
+    async def passenger_status_message(self, info: Info) -> Optional[str]:
+        pulse = await info.context.loaders["operation"]["line_pulse_loader"].load(
+            self.id
+        )
+        return pulse.message
+
+    @strawberry.field
+    async def status_report_count(self, info: Info) -> int:
+        pulse = await info.context.loaders["operation"]["line_pulse_loader"].load(
+            self.id
+        )
+        return pulse.count
+
+    @strawberry.field
+    async def pulse_links(self, info: Info) -> List[SocialMediaLinkScalar]:
+        pulse = await info.context.loaders["operation"]["line_pulse_loader"].load(
+            self.id
+        )
+        return pulse.links
 
     @strawberry_django.field
     async def vehicle_types(self, info: Info) -> List["VehicleType"]:

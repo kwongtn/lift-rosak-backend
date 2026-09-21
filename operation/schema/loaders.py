@@ -7,6 +7,7 @@ from django.db.models import Count, Max, Q
 from strawberry.dataloader import DataLoader
 
 from incident.models import VehicleIncident
+from operation.enums import VehicleStatus
 from operation.models import Vehicle, VehicleLine
 from spotting.enums import SpottingVehicleStatus
 from spotting.models import Event
@@ -147,7 +148,42 @@ async def batch_load_vehicle_from_line(keys: List[Tuple[int, Optional[bool]]]):
     return [list(line_dict.get(key[0], {})) for key in keys]
 
 
+async def batch_load_line_vehicle_counts(keys: List[int]) -> List[dict]:
+    # One aggregate for every requested line. A line's "total" is its VehicleLine
+    # row count (one row per vehicle assigned to the line); "in_service" narrows
+    # that to vehicles whose status is IN_SERVICE.
+    empty = {"in_service": 0, "total": 0}
+    counts: dict[int, dict] = {}
+    rows = (
+        VehicleLine.objects.filter(line_id__in=keys)
+        .values("line_id")
+        .annotate(
+            total=Count("id"),
+            in_service=Count("id", filter=Q(vehicle__status=VehicleStatus.IN_SERVICE)),
+        )
+    )
+    async for row in rows:
+        counts[row["line_id"]] = {
+            "in_service": row["in_service"],
+            "total": row["total"],
+        }
+
+    return [counts.get(key, empty) for key in keys]
+
+
+async def batch_load_line_pulse(keys: List[int]) -> List:
+    # Local import keeps the operation -> incident.services edge out of module
+    # import time (incident.services.line_status imports incident.models).
+    from incident.services.line_status import LinePulseData, load_line_pulses
+
+    pulses = await load_line_pulses(list(keys))
+    empty = LinePulseData(status=None, message=None, count=0, links=[])
+    return [pulses.get(key, empty) for key in keys]
+
+
 OperationContextLoaders = {
+    "line_vehicle_counts_loader": DataLoader(load_fn=batch_load_line_vehicle_counts),
+    "line_pulse_loader": DataLoader(load_fn=batch_load_line_pulse),
     "vehicle_from_vehicle_type_loader": DataLoader(
         load_fn=batch_load_vehicle_from_vehicle_type
     ),
