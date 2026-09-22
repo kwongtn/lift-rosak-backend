@@ -131,3 +131,6 @@ dmypy.json
 static/
 @data
 graphify-out/cache
+
+# Firebase service-account keys
+.firebase/
