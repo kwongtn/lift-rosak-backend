@@ -44,6 +44,7 @@ Total commits: 32
 
 ### Common (7 commits)
 
+- (this commit) [chore](common): seed same-hour status variety and more station-tagged reports
 - (this commit) [chore](common): seed hundreds of varied reports across lines
 - **010428c** [test](common): cover video pipeline and bounded cleanup
 - **82addcc** [feat](common): support video in temporary media pipeline

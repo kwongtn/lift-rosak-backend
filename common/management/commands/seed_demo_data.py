@@ -23,7 +23,7 @@ counts) and spread across the service day (so the hourly chart has shape).
 from __future__ import annotations
 
 import random
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from django.contrib.contenttypes.models import ContentType
@@ -59,10 +59,19 @@ DEFAULT_LINKS = 40
 # Guarantee: this many lines get >= 2 distinct statuses inside the pulse window
 # so the line-card hover breakdown ("Normal 3 / Busy 2") is never invisible.
 HOT_LINE_COUNT = 3
+# Same-hour variety: this many lines get 2-4 distinct statuses packed into a
+# single clock hour, repeated over a few recent hours, so the hourly chart
+# shows mixed statuses within one hour rather than one status per hour.
+SAME_HOUR_LINE_COUNT = 4
+SAME_HOUR_HOURS = 3
 # Fraction of the bulk reports that land inside the rolling window.
 INSIDE_WINDOW_CHANCE = 0.25
 # Fraction of reports that carry a note (the rest are blank).
 NOTE_CHANCE = 0.5
+# Probability a report is tagged with one of its line's stations. A clear
+# majority carry a station (the frontend only renders one when it exists) while
+# a meaningful minority stay station-less for variety.
+STATION_BIAS = 0.8
 
 _STATUS_WEIGHTS: dict[str, int] = {
     PassengerStatus.NORMAL: 6,
@@ -424,11 +433,18 @@ class Command(BaseCommand):
 
         plans: list[dict[str, Any]] = []
 
-        def add(line: Line, status: str, inside: bool, station_bias: float) -> None:
-            if inside:
-                minutes_ago = rng.randint(1, max(WINDOW_MINUTES - 2, 1))
-            else:
-                minutes_ago = rng.randint(WINDOW_MINUTES, span)
+        def add(
+            line: Line,
+            status: str,
+            inside: bool,
+            station_bias: float,
+            minutes_ago: int | None = None,
+        ) -> None:
+            if minutes_ago is None:
+                if inside:
+                    minutes_ago = rng.randint(1, max(WINDOW_MINUTES - 2, 1))
+                else:
+                    minutes_ago = rng.randint(WINDOW_MINUTES, span)
             delay = (
                 rng.choice(_DELAY_CHOICES)
                 if status in (PassengerStatus.DELAYED, PassengerStatus.BACKLOGGED)
@@ -454,19 +470,45 @@ class Command(BaseCommand):
         if total >= HOT_LINE_COUNT * 2:
             for line in lines[:HOT_LINE_COUNT]:
                 for status in rng.sample(statuses, 2):
-                    add(line, status, inside=True, station_bias=0.6)
+                    add(line, status, inside=True, station_bias=STATION_BIAS)
+
+        # 1b) Same-hour variety: 2-4 distinct statuses for a line inside ONE
+        # clock hour, repeated over a few recent hours, so the hourly chart
+        # shows mixed statuses per hour. Only whole past clock hours are used,
+        # so every report in a group really shares the same hour.
+        coverage_budget = min(len(lines), total)
+        same_hour_budget = max(total - coverage_budget - HOT_LINE_COUNT * 2, 0)
+        hour_floor = now.replace(minute=0, second=0, microsecond=0)
+        for line, status, offset in self._same_hour_slots(
+            lines, statuses, now, span, same_hour_budget
+        ):
+            minute = rng.randint(0, now.minute if offset == 0 else 59)
+            report_time = (
+                hour_floor - timedelta(hours=offset) + timedelta(minutes=minute)
+            )
+            add(
+                line,
+                status,
+                inside=False,
+                station_bias=STATION_BIAS,
+                minutes_ago=int((now - report_time).total_seconds() // 60),
+            )
 
         # 2) Coverage: at least one report per configured line.
         for line in lines:
             if len(plans) >= total:
                 break
-            add(line, random_status(), rng.random() < INSIDE_WINDOW_CHANCE, 0.45)
+            add(
+                line, random_status(), rng.random() < INSIDE_WINDOW_CHANCE, STATION_BIAS
+            )
 
         # 3) Fill the rest round-robin so every line stays represented.
         index = 0
         while len(plans) < total:
             line = lines[index % len(lines)]
-            add(line, random_status(), rng.random() < INSIDE_WINDOW_CHANCE, 0.45)
+            add(
+                line, random_status(), rng.random() < INSIDE_WINDOW_CHANCE, STATION_BIAS
+            )
             index += 1
 
         for plan in plans:
@@ -487,6 +529,31 @@ class Command(BaseCommand):
 
         inside_count = sum(1 for p in plans if p["minutes_ago"] < WINDOW_MINUTES)
         return len(plans), inside_count
+
+    def _same_hour_slots(
+        self,
+        lines: list[Line],
+        statuses: list[str],
+        now: datetime,
+        span: int,
+        budget: int,
+    ) -> list[tuple[Line, str, int]]:
+        """(line, status, hour_offset) slots grouping distinct statuses per hour.
+
+        The current hour is always partly elapsed, so it is always usable; older
+        hours only if the service day has run that long. Truncated to ``budget``
+        so the caller's report total stays exact.
+        """
+        if budget <= 0:
+            return []
+        hours_available = span // 60
+        offsets = [0, *range(1, min(hours_available, SAME_HOUR_HOURS) + 1)]
+        slots: list[tuple[Line, str, int]] = []
+        for offset in offsets:
+            for line in lines[:SAME_HOUR_LINE_COUNT]:
+                sample = self.rng.sample(statuses, self.rng.randint(2, 4))
+                slots.extend((line, status, offset) for status in sample)
+        return slots[:budget]
 
     def _note(self, station: Station | None, line: Line) -> str:
         if self.rng.random() >= NOTE_CHANCE:

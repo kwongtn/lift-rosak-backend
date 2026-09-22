@@ -19,6 +19,7 @@ import pytest
 from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
 from django.db.models import Count
+from django.db.models.functions import TruncHour
 from django.utils import timezone
 
 from common.models import User, Vote
@@ -94,6 +95,19 @@ def test_seed_generates_varied_volume_and_is_idempotent(reference):
     )
     assert multi_status.count() >= 3
 
+    same_hour_multi = (
+        reports.annotate(hour=TruncHour("created"))
+        .values("line_id", "hour")
+        .annotate(distinct_statuses=Count("status", distinct=True))
+        .filter(distinct_statuses__gte=2)
+    )
+    assert same_hour_multi.count() >= 1
+
+    total_reports = reports.count()
+    with_station = reports.filter(stations__isnull=False).distinct().count()
+    assert with_station >= total_reports // 2
+    assert reports.filter(stations__isnull=True).exists()
+
     assert reports.filter(notes="").exists()
     assert reports.exclude(notes="").exists()
     assert reports.values("status").distinct().count() >= 2
@@ -125,6 +139,36 @@ def test_seed_generates_varied_volume_and_is_idempotent(reference):
         Event.objects.filter(reporter__firebase_id__startswith=SEED_PREFIX).count(),
     )
     assert before == after
+
+
+@pytest.mark.django_db
+def test_same_hour_slots_guarantee_distinct_statuses(reference):
+    import random
+
+    from common.management.commands.seed_demo_data import (
+        SAME_HOUR_HOURS,
+        SAME_HOUR_LINE_COUNT,
+        SEED,
+        Command,
+    )
+
+    command = Command()
+    command.rng = random.Random(SEED)
+    slots = command._same_hour_slots(
+        list(Line.objects.all()),
+        [status.value for status in PassengerStatus],
+        timezone.now(),
+        24 * 60,
+        budget=10_000,
+    )
+
+    by_group: dict[tuple[int, int], set[str]] = {}
+    for line, status, offset in slots:
+        assert offset <= SAME_HOUR_HOURS
+        by_group.setdefault((line.id, offset), set()).add(status)
+
+    multi_status_groups = [g for g, s in by_group.items() if len(s) >= 2]
+    assert len(multi_status_groups) >= SAME_HOUR_LINE_COUNT
 
 
 @pytest.mark.django_db
