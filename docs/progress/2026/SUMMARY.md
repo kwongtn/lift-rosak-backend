@@ -156,6 +156,7 @@ Total commits: 104
 
 ### Major Features & Refactors
 
+- **2026-09-23** (this commit) [docs](incident): `LineStatusHourBucket.statusCounts` documented as reusing the existing `operation.schema.scalars.PassengerStatusCount` type (the feature itself landed in `22baa99`)
 - **2026-09-22** (this commit) [fix](incident): `lineStatusHistory` returns the full 24-bucket service day (03:00 → 02:00) instead of stopping at the current hour; a line with no report still returns `[]` for the "No data" state
 - **2026-09-22** (this commit) [chore](common): `seed_demo_data` generates hundreds of varied reports from a ~150-user pool (seeded RNG, delete-then-recreate idempotency, guaranteed multi-status lines inside the pulse window)
 - **2026-09-22** (this commit) [feat](incident): public feed service-day filter (`currentServiceDayOnly`) plus cursor-independent `totalCount` on `SocialMediaLinkConnection`, and `LineStatusReportScalar.stations`

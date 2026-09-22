@@ -34,6 +34,7 @@ Total commits: 32
 - (this commit) [fix](incident): return every hour of the service day in the status history
 - (this commit) [feat](incident): filter the public feed by service day and expose total counts
 - (this commit) [feat](incident): expose a per-status breakdown on each hourly history bucket
+- (this commit) [docs](incident): name the reused `operation.schema.scalars.PassengerStatusCount` in the hourly-bucket docs (docs-only follow-up to `22baa99`)
 
 ### Operation (1 commits)
 
