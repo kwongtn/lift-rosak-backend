@@ -30,6 +30,8 @@ MIN_REPORTS = 1
 # Service day starts at 03:00 local: the metro day rolls over in the small hours,
 # so a before-dawn report belongs to the service day that is still running.
 DAY_START_HOUR = 3
+# A service day is exactly 24 hourly buckets: 03:00 through 02:00 next morning.
+HOURS_IN_SERVICE_DAY = 24
 _MAX_PULSE_LINKS = 5
 
 # Ordinal = enum declaration order.
@@ -250,12 +252,15 @@ def service_day_start(now: datetime, day_start_hour: int = DAY_START_HOUR) -> da
 def bucket_hourly(
     entries: Iterable[ReportEntry], *, day_start: datetime, now: datetime
 ) -> list[HourBucket]:
-    """Bucket entries into hourly slots from ``day_start`` to ``now`` inclusive.
+    """Bucket entries into the 24 hourly slots of the service day.
 
-    Pure (no DB). ``day_start`` must be hour-aligned. Empty hours are emitted
-    with ``count=0`` and ``dominant_status=None`` so a chart gets a continuous
-    series. Entries outside ``[day_start, now]`` are ignored. ``dominant_status``
-    is the most frequent status in the hour; ties go to the most severe per
+    Pure (no DB). ``day_start`` must be hour-aligned. A line with no report in
+    ``[day_start, now]`` yields an empty list, which callers render as "no
+    data"; once it has one, all ``HOURS_IN_SERVICE_DAY`` hours from ``day_start``
+    through 02:00 are emitted — empty hours with ``count=0`` and
+    ``dominant_status=None`` so a chart always gets its full set of labels.
+    Entries outside ``[day_start, now]`` are ignored. ``dominant_status`` is the
+    most frequent status in the hour; ties go to the most severe per
     ``SEVERITY_RANK``.
     """
     per_hour: dict[datetime, dict[str, int]] = {}
@@ -266,10 +271,12 @@ def bucket_hourly(
         statuses = per_hour.setdefault(hour, {})
         statuses[entry.status] = statuses.get(entry.status, 0) + 1
 
-    last_hour = now.replace(minute=0, second=0, microsecond=0)
+    if not per_hour:
+        return []
+
     buckets: list[HourBucket] = []
-    hour = day_start
-    while hour <= last_hour:
+    for offset in range(HOURS_IN_SERVICE_DAY):
+        hour = day_start + timedelta(hours=offset)
         statuses = per_hour.get(hour, {})
         dominant = (
             max(statuses, key=lambda status: (statuses[status], SEVERITY_RANK[status]))
@@ -284,7 +291,6 @@ def bucket_hourly(
                 dominant_status=dominant,
             )
         )
-        hour += timedelta(hours=1)
     return buckets
 
 
@@ -294,7 +300,11 @@ async def load_line_status_history(
     day_start_hour: int = DAY_START_HOUR,
     now: datetime | None = None,
 ) -> list[HourBucket]:
-    """Hourly history for one line over its current service day (one query)."""
+    """Hourly history for one line over its current service day (one query).
+
+    Returns an empty list when the line has no report in the service day,
+    otherwise the full 24-bucket series (see ``bucket_hourly``).
+    """
     if not 0 <= day_start_hour <= 23:
         raise LineStatusValidationError(
             f"dayStartHour must be between 0 and 23, got {day_start_hour}."

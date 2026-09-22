@@ -163,6 +163,13 @@ backend is authoritative.
 **Fix**: _Not fixed (pre-existing)._ Scope the assertion by `content_type` (and ideally `user`).
 **Prevention**: Always filter `Vote` assertions by `content_type`; never treat `object_id` alone as identifying a vote.
 
+### [2026-09-22] incident: `lineStatusHistory` stopped at the current hour — the chart lost its later labels — FIXED (2026-09-22)
+
+**Problem**: `bucket_hourly` walked from the service-day start to `now.replace(minute=0, …)` inclusive, so the bucket count grew through the day. A browser measurement at ~17:00 found only 15 hour labels (`03`–`17`) on the front page's "Reports by hour — today" chart instead of the 24 the service day (03:00 → 02:00) should always show; the frontend was faithfully rendering what the API returned.
+**Root Cause**: The bucket range was derived from wall-clock `now` rather than the fixed 24-hour service-day contract, and the resolver docstring codified the wrong behaviour ("to the current hour inclusive"). The "no data" state (empty list) lived at the same layer, so naively emitting 24 zero-filled buckets would have broken it.
+**Fix**: `bucket_hourly` returns `[]` when the line has no report in the service day (preserving the frontend's "No data" placeholder), otherwise all `HOURS_IN_SERVICE_DAY` (24) buckets from the service-day start through 02:00, zero-filling hours without reports. Docstrings corrected; the pytest mirror updated and runnable coverage added in `incident/tests.py::LineStatusHistoryTests`.
+**Prevention**: Fixed-length domain ranges (a 24-hour service day) must come from the domain constant, never from `now`; keep the empty state distinguishable from "all-zero data" and assert both shapes at the service boundary.
+
 ---
 
 ## spotting

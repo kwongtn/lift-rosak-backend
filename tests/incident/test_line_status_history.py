@@ -62,13 +62,13 @@ async def test_history_buckets_include_empty_hours_and_counts():
 
     buckets = await load_line_status_history(line.id, now=NOW)
 
-    assert [b.hour_start.hour for b in buckets] == [3, 4, 5]
-    assert [b.count for b in buckets] == [1, 2, 0]
+    assert len(buckets) == 24
+    assert [b.hour_start.hour for b in buckets] == list(range(3, 24)) + [0, 1, 2]
+    assert [b.count for b in buckets] == [1, 2, 0] + [0] * 21
     assert [b.dominant_status for b in buckets] == [
         PassengerStatus.CROWDED,
         PassengerStatus.DELAYED,
-        None,
-    ]
+    ] + [None] * 22
 
 
 @pytest.mark.django_db
@@ -85,21 +85,31 @@ async def test_history_only_returns_the_requested_line():
 
     buckets = await load_line_status_history(line.id, now=NOW)
 
+    assert len(buckets) == 24
     assert sum(b.count for b in buckets) == 1
     assert buckets[0].dominant_status == PassengerStatus.NORMAL
 
 
 @pytest.mark.django_db
+async def test_line_without_reports_returns_empty_list():
+    line = await _make_line("H4")
+
+    buckets = await load_line_status_history(line.id, now=NOW)
+
+    assert buckets == []
+
+
+@pytest.mark.django_db
 async def test_report_before_service_day_start_is_excluded():
     user = await _make_user(3)
-    line = await _make_line("H4")
+    line = await _make_line("H9")
     await _make_report(
         line, user, PassengerStatus.DISRUPTED, DAY_START - timedelta(minutes=30)
     )
 
     buckets = await load_line_status_history(line.id, now=NOW)
 
-    assert sum(b.count for b in buckets) == 0
+    assert buckets == []
 
 
 @pytest.mark.django_db
@@ -128,6 +138,7 @@ def test_history_uses_one_query_regardless_of_row_count():
         buckets = async_to_sync(load_line_status_history)(line.id, now=timezone.now())
 
     assert len(captured.captured_queries) == 1
+    assert len(buckets) == 24
     assert sum(b.count for b in buckets) == 5
 
 
@@ -152,11 +163,11 @@ def _context():
 
 
 @pytest.mark.django_db
-async def test_schema_line_status_history_returns_current_hour_bucket():
+async def test_schema_line_status_history_returns_the_full_service_day():
     user = await _make_user(4)
     line = await _make_line("H6")
     await _make_report(line, user, PassengerStatus.CROWDED, timezone.now())
-    # dayStartHour = current hour -> exactly one in-progress bucket.
+    # dayStartHour = current hour -> 24 buckets starting at the current hour.
     current_hour = timezone.now().hour
 
     result = await _build_schema().execute(
@@ -176,7 +187,7 @@ async def test_schema_line_status_history_returns_current_hour_bucket():
 
     assert result.errors is None, result.errors
     buckets = result.data["lineStatusHistory"]
-    assert len(buckets) == 1
+    assert len(buckets) == 24
     assert buckets[0]["count"] == 1
     assert buckets[0]["dominantStatus"] == "CROWDED"
 

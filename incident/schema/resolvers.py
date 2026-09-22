@@ -429,8 +429,11 @@ async def get_line_status_history(
 ) -> List[LineStatusHourBucket]:
     """Hourly passenger-status history for one line over its current service day.
 
-    Buckets run from the service-day start (``dayStartHour``, default 03:00) to
-    the current hour inclusive, empty hours included. One query per call.
+    Buckets always cover the whole service day — all 24 hours from the
+    service-day start (``dayStartHour``, default 03:00) through 02:00, empty
+    hours included. A line with no report that service day returns an empty
+    list, which the frontend renders as its "No data" placeholder. One query
+    per call.
     """
     if day_start_hour is None:
         day_start_hour = 3

@@ -15,15 +15,18 @@ from incident.enums import (
     CalendarIncidentChronologyIndicator,
     CalendarIncidentSeverity,
     IncidentSeverity,
+    PassengerStatus,
 )
 from incident.models import (
     CalendarIncident,
     CalendarIncidentCategory,
     CalendarIncidentChronology,
     CalendarIncidentMedia,
+    LineStatusReport,
     StationIncident,
     VehicleIncident,
 )
+from incident.services.line_status import load_line_status_history
 from operation.models import Line, Station, Vehicle, VehicleType
 from rosak.context import ContextLoaders
 from rosak.schema import schema
@@ -979,3 +982,50 @@ class SocialMediaLinkTests(TestCase):
         self.assertIsNotNone(chrono)
         self.assertEqual(chrono.source_url, "")
         self.assertEqual(chrono.content, "")
+
+
+class LineStatusHistoryTests(TestCase):
+    """Runnable coverage for the service-day history contract."""
+
+    def setUp(self):
+        self.user = User.objects.create(firebase_id="history-test-user")
+        self.line = Line.objects.create(
+            code="HST", display_name="History Test Line", display_color="#008800"
+        )
+
+    def test_history_returns_all_24_hours_when_the_line_has_reports(self):
+        report = LineStatusReport.objects.create(
+            line=self.line, status=PassengerStatus.CROWDED, user=self.user
+        )
+
+        buckets = async_to_sync(load_line_status_history)(self.line.id)
+
+        self.assertEqual(len(buckets), 24)
+        hour_starts = [bucket.hour_start for bucket in buckets]
+        self.assertEqual(hour_starts, sorted(hour_starts))
+        # Service day starts at 03:00 and closes at 02:00 next morning.
+        self.assertEqual(buckets[0].hour_start.hour, 3)
+        self.assertEqual(buckets[-1].hour_start.hour, 2)
+        self.assertEqual(
+            buckets[-1].hour_end, buckets[-1].hour_start + timedelta(hours=1)
+        )
+        # Every other hour is zero-filled; the report lands in its own hour.
+        report_hour = report.created.replace(minute=0, second=0, microsecond=0)
+        self.assertEqual(
+            [bucket.count for bucket in buckets if bucket.hour_start == report_hour],
+            [1],
+        )
+        self.assertEqual(
+            [
+                bucket.dominant_status
+                for bucket in buckets
+                if bucket.hour_start == report_hour
+            ],
+            [PassengerStatus.CROWDED],
+        )
+        self.assertEqual(sum(bucket.count for bucket in buckets), 1)
+
+    def test_history_is_empty_when_the_line_has_no_reports(self):
+        buckets = async_to_sync(load_line_status_history)(self.line.id)
+
+        self.assertEqual(buckets, [])

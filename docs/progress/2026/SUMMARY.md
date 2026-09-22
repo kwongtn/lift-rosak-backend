@@ -1,12 +1,12 @@
 # Yearly Summary - 2026
 
-Total commits: 102
+Total commits: 103
 
 ## Monthly Breakdown
 
-### 2026-09 (30 commits)
+### 2026-09 (31 commits)
 
-#### Incident (15 commits)
+#### Incident (16 commits)
 
 - **67a830c** [feat](incident): complete insiden reporting backend
 - **b9bd6fd** [feat](incident): add public publicSocialMediaLinks GraphQL query with line filter
@@ -25,6 +25,7 @@ Total commits: 102
 - **a62ed6d** [feat](incident): line status report and page title services
 - **a9418c5** [feat](incident): feed submit and line status report mutations
 - (this commit) [feat](incident): expose per-status report counts on a line
+- (this commit) [fix](incident): return every hour of the service day in the status history
 
 #### Operation (1 commits)
 
@@ -152,6 +153,7 @@ Total commits: 102
 
 ### Major Features & Refactors
 
+- **2026-09-22** (this commit) [fix](incident): `lineStatusHistory` returns the full 24-bucket service day (03:00 → 02:00) instead of stopping at the current hour; a line with no report still returns `[]` for the "No data" state
 - **2026-09-22** (this commit) [chore](common): `seed_demo_data` generates hundreds of varied reports from a ~150-user pool (seeded RNG, delete-then-recreate idempotency, guaranteed multi-status lines inside the pulse window)
 - **2026-09-22** (this commit) [feat](incident): per-status report breakdown on a line — `Line.passengerStatusCounts` exposes how many reports fell into each `PassengerStatus`, batched through the existing `line_pulse_loader`
 - **2026-09-22** (a9418c5) [feat](incident): community front page backend — feed link submit with canonical-URL dedup + auto-upvote, line status reports, deterministic per-line passenger-status pulse (`operation.Line.passengerStatus`/`pulseLinks`) and social-link votes
