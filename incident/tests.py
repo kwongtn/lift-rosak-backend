@@ -1029,3 +1029,129 @@ class LineStatusHistoryTests(TestCase):
         buckets = async_to_sync(load_line_status_history)(self.line.id)
 
         self.assertEqual(buckets, [])
+
+
+class PublicFeedContractTests(TestCase):
+    """GraphQL contract for the public feed: ``totalCount`` is the whole
+    filtered set (cursor-independent) and ``currentServiceDayOnly`` keeps only
+    links inside the current service day (03:00 rollover)."""
+
+    query = """
+        query Feed($first: Int, $after: String, $currentServiceDayOnly: Boolean) {
+            publicSocialMediaLinks(
+                first: $first
+                after: $after
+                currentServiceDayOnly: $currentServiceDayOnly
+            ) {
+                totalCount
+                edges { node { id } cursor }
+                pageInfo { hasNextPage endCursor }
+            }
+        }
+    """
+
+    def setUp(self):
+        self.user = User.objects.create(firebase_id="feed-contract-user")
+
+    def _link(self, slug, *, created=None):
+        from incident.models import SocialMediaLink
+
+        link = SocialMediaLink.objects.create(
+            url=f"https://example.com/{slug}", title=slug, user=self.user
+        )
+        if created is not None:
+            SocialMediaLink.objects.filter(id=link.id).update(created=created)
+            link.refresh_from_db()
+        return link
+
+    def _feed(self, **variables):
+        result = execute_graphql(self.query, variables=variables)
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        return result.data["publicSocialMediaLinks"]
+
+    def test_total_count_is_the_full_filtered_set_not_the_page(self):
+        for index in range(3):
+            self._link(f"total-count-{index}")
+
+        page_one = self._feed(first=1)
+
+        self.assertEqual(page_one["totalCount"], 3)
+        self.assertEqual(len(page_one["edges"]), 1)
+        self.assertTrue(page_one["pageInfo"]["hasNextPage"])
+
+        page_two = self._feed(first=2, after=page_one["pageInfo"]["endCursor"])
+
+        self.assertEqual(page_two["totalCount"], 3)
+        self.assertEqual(len(page_two["edges"]), 2)
+        self.assertFalse(page_two["pageInfo"]["hasNextPage"])
+        first_id = page_one["edges"][0]["node"]["id"]
+        second_ids = [edge["node"]["id"] for edge in page_two["edges"]]
+        self.assertNotIn(first_id, second_ids)
+
+    def test_current_service_day_only_excludes_previous_day_and_counts_filtered_set(
+        self,
+    ):
+        from incident.services.line_status import service_day_start
+
+        now = timezone.now()
+        back_dated = self._link(
+            "previous-service-day",
+            created=service_day_start(now) - timedelta(minutes=1),
+        )
+        current = self._link("current-service-day", created=now)
+
+        filtered = self._feed(currentServiceDayOnly=True)
+
+        ids = [edge["node"]["id"] for edge in filtered["edges"]]
+        self.assertEqual(ids, [str(current.id)])
+        self.assertNotIn(str(back_dated.id), ids)
+        self.assertEqual(filtered["totalCount"], 1)
+
+        unfiltered = self._feed(currentServiceDayOnly=False)
+
+        all_ids = [edge["node"]["id"] for edge in unfiltered["edges"]]
+        self.assertIn(str(current.id), all_ids)
+        self.assertIn(str(back_dated.id), all_ids)
+        self.assertEqual(unfiltered["totalCount"], 2)
+
+
+class LineStatusReportStationsTests(TestCase):
+    """``LineStatusReportScalar.stations`` reads the report's station M2M."""
+
+    def setUp(self):
+        self.user = User.objects.create(firebase_id="report-stations-user")
+        self.line = Line.objects.create(
+            code="RST", display_name="Report Stations Line", display_color="#990000"
+        )
+        self.station = Station.objects.create(display_name="KLCC")
+
+    def test_stations_lists_attached_station_and_empty_list_when_none(self):
+        tagged = LineStatusReport.objects.create(
+            line=self.line, status=PassengerStatus.CROWDED, user=self.user
+        )
+        tagged.stations.add(self.station)
+        untagged = LineStatusReport.objects.create(
+            line=self.line, status=PassengerStatus.NORMAL, user=self.user
+        )
+
+        result = execute_graphql(
+            """
+            query Reports($lineId: ID!) {
+                lineStatusReports(lineId: $lineId) {
+                    edges { node { id stations { id displayName } } }
+                }
+            }
+            """,
+            variables={"lineId": str(self.line.id)},
+        )
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+
+        stations_by_report = {
+            edge["node"]["id"]: edge["node"]["stations"]
+            for edge in result.data["lineStatusReports"]["edges"]
+        }
+        self.assertEqual(
+            stations_by_report[str(tagged.id)],
+            [{"id": str(self.station.id), "displayName": "KLCC"}],
+        )
+        self.assertEqual(stations_by_report[str(untagged.id)], [])

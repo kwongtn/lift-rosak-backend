@@ -7,6 +7,7 @@ import strawberry
 from asgiref.sync import sync_to_async
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import Count, Min, Q
+from django.utils import timezone
 from strawberry.exceptions import GraphQLError
 from strawberry.types import Info
 
@@ -37,7 +38,7 @@ from incident.schema.scalars import (
 )
 from incident.services.access import get_incident
 from incident.services.errors import IncidentServiceError
-from incident.services.line_status import load_line_status_history
+from incident.services.line_status import load_line_status_history, service_day_start
 
 _HISTORY_TYPE_MAP = {"+": "created", "~": "updated", "-": "deleted"}
 
@@ -270,6 +271,7 @@ async def get_public_social_media_links(
     after: Optional[str] = None,
     mine: strawberry.Maybe[bool] = None,
     status: strawberry.Maybe[SocialMediaLinkStatusInput] = None,
+    current_service_day_only: bool = False,
 ) -> SocialMediaLinkConnection:
     """Public social-media-link feed, cursor-paginated.
 
@@ -278,6 +280,9 @@ async def get_public_social_media_links(
     only the caller's own links (status-independent); anonymous ``mine`` returns
     an empty page. ``status`` optionally narrows the feed to one approval status;
     omitted, both LIVE and PENDING_APPROVAL are returned (unchanged default).
+    ``current_service_day_only`` keeps only links created within the current
+    service day (03:00 rollover, see ``service_day_start``). ``totalCount`` is
+    the size of the whole filtered set, unaffected by the ``after`` cursor.
     """
 
     if mine is not None and mine.value:
@@ -286,6 +291,7 @@ async def get_public_social_media_links(
             return SocialMediaLinkConnection(
                 edges=[],
                 page_info=SocialMediaLinkPageInfo(has_next_page=False, end_cursor=None),
+                total_count=0,
             )
         queryset = SocialMediaLink.objects.filter(user=user)
     else:
@@ -304,6 +310,12 @@ async def get_public_social_media_links(
 
     if status is not None:
         queryset = queryset.filter(status=status.value)
+
+    if current_service_day_only:
+        queryset = queryset.filter(created__gte=service_day_start(timezone.now()))
+
+    # Count before the cursor filter: a cursor narrows the page, not the feed.
+    total_count = await queryset.acount()
 
     queryset = queryset.order_by("-created", "-id")
 
@@ -332,6 +344,7 @@ async def get_public_social_media_links(
         page_info=SocialMediaLinkPageInfo(
             has_next_page=has_next_page, end_cursor=end_cursor
         ),
+        total_count=total_count,
     )
 
 

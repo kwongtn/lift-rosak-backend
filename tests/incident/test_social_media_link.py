@@ -1,5 +1,6 @@
 import asyncio
 import copy
+from datetime import timedelta
 
 import pytest
 import strawberry
@@ -215,6 +216,7 @@ async def _links_for_incident(incident_id, *, first=10, after=None):
           calendarIncidents {
             id
             links(first: $first, after: $after) {
+              totalCount
               edges { node { id url title status } cursor }
               pageInfo { hasNextPage endCursor }
             }
@@ -261,6 +263,7 @@ class CalendarIncidentLinksTests(TransactionTestCase):
         self.assertEqual(
             connection["pageInfo"]["endCursor"], connection["edges"][-1]["cursor"]
         )
+        self.assertEqual(connection["totalCount"], 3)
 
     @pytest.mark.django_db
     async def test_links_excludes_other_incidents_and_untagged(self):
@@ -273,6 +276,7 @@ class CalendarIncidentLinksTests(TransactionTestCase):
         ids = [edge["node"]["id"] for edge in connection["edges"]]
         self.assertIn(str(tagged.id), ids)
         self.assertEqual(len(ids), 1)
+        self.assertEqual(connection["totalCount"], 1)
 
     @pytest.mark.django_db
     async def test_links_paginates_via_cursor_without_overlap(self):
@@ -488,6 +492,7 @@ class PublicSocialMediaLinkTests(TransactionTestCase):
         self.assertEqual(len(ids), 3)
         self.assertTrue(results.page_info.has_next_page)
         self.assertIsNotNone(results.page_info.end_cursor)
+        self.assertEqual(results.total_count, 5)
 
     def test_public_social_media_links_pagination_next_page_no_overlap(self):
         for i in range(5):
@@ -523,6 +528,48 @@ class PublicSocialMediaLinkTests(TransactionTestCase):
 
         self.assertEqual(len(ids), 3)
         self.assertFalse(results.page_info.has_next_page)
+
+    def test_public_social_media_links_total_count_ignores_cursor(self):
+        for i in range(5):
+            _make_link(95 + i)
+
+        first_page = asyncio.run(
+            get_public_social_media_links(None, _FakeInfo(), first=2)
+        )
+        self.assertEqual(first_page.total_count, 5)
+
+        second_page = asyncio.run(
+            get_public_social_media_links(
+                None,
+                _FakeInfo(),
+                first=2,
+                after=first_page.page_info.end_cursor,
+            )
+        )
+        self.assertEqual(second_page.total_count, 5)
+        self.assertEqual(len(_ids(second_page)), 2)
+
+    def test_public_social_media_links_current_service_day_only(self):
+        from incident.services.line_status import service_day_start
+
+        now = timezone.now()
+        back_dated = _make_link(120)
+        SocialMediaLink.objects.filter(id=back_dated.id).update(
+            created=service_day_start(now) - timedelta(minutes=1)
+        )
+        current = _make_link(121)
+
+        filtered = asyncio.run(
+            get_public_social_media_links(
+                None, _FakeInfo(), current_service_day_only=True
+            )
+        )
+        self.assertEqual(_ids(filtered), [current.id])
+        self.assertEqual(filtered.total_count, 1)
+
+        unfiltered = asyncio.run(get_public_social_media_links(None, _FakeInfo()))
+        self.assertEqual(unfiltered.total_count, 2)
+        self.assertIn(back_dated.id, _ids(unfiltered))
 
     def test_public_social_media_links_mine_logged_in(self):
         owner = User.objects.create(firebase_id="mine-owner")

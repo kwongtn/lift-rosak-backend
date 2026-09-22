@@ -1,17 +1,17 @@
 # Monthly Summary - September 2026
 
-Total commits: 31
+Total commits: 32
 
 ## Commit Type Distribution
 
-- feat: 22
+- feat: 23
 - fix: 5
 - test: 2
 - chore: 2
 
 ## By Module/Feature
 
-### Incident (16 commits)
+### Incident (17 commits)
 
 - **67a830c** [feat](incident): complete insiden reporting backend
 - **b9bd6fd** [feat](incident): add public publicSocialMediaLinks GraphQL query with line filter
@@ -32,6 +32,7 @@ Total commits: 31
 - **a9418c5** [feat](incident): feed submit and line status report mutations
 - (this commit) [feat](incident): expose per-status report counts on a line
 - (this commit) [fix](incident): return every hour of the service day in the status history
+- (this commit) [feat](incident): filter the public feed by service day and expose total counts
 
 ### Operation (1 commits)
 

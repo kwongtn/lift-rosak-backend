@@ -37,6 +37,7 @@ class LineStatusReportScalar:
     notes: str
     created: datetime
     user: UserScalar
+    stations: List[Station]
 
 
 @strawberry.type
@@ -182,6 +183,7 @@ class SocialMediaLinkPageInfo:
 class SocialMediaLinkConnection:
     edges: List[SocialMediaLinkEdge]
     page_info: SocialMediaLinkPageInfo
+    total_count: int
 
 
 @strawberry_django.type(models.CalendarIncident)
@@ -264,14 +266,19 @@ class CalendarIncidentScalar:
         carries its own per-parent keyset cursor, so per-parent windows cannot
         be batched into one shared loader query.
         """
+        content_type = await sync_to_async(ContentType.objects.get_for_model)(
+            models.CalendarIncident
+        )
+        # Cursor-independent count: the whole incident feed, not just this page.
+        total_count = await models.SocialMediaLink.objects.filter(
+            content_type=content_type, object_id=self.id
+        ).acount()
+
         if after is None:
             rows = await info.context.loaders["incident"]["incident_links"].load(
                 (self.id, first)
             )
         else:
-            content_type = await sync_to_async(ContentType.objects.get_for_model)(
-                models.CalendarIncident
-            )
             cursor_created, cursor_id = decode_keyset_cursor(after)
             rows = [
                 link
@@ -300,6 +307,7 @@ class CalendarIncidentScalar:
                 has_next_page=has_next_page,
                 end_cursor=edges[-1].cursor if edges else None,
             ),
+            total_count=total_count,
         )
 
     @strawberry.field
