@@ -20,6 +20,8 @@ from incident.schema.resolvers import (
     get_calendar_incident_categories,
     get_calendar_incident_history,
     get_calendar_incidents_by_severity_count,
+    get_line_status_history,
+    get_line_status_reports,
     get_pending_calendar_incidents,
     get_public_social_media_links,
     get_social_media_links,
@@ -29,6 +31,8 @@ from incident.schema.scalars import (
     CalendarIncidentGroupByDateSeverityScalar,
     CalendarIncidentHistoryEntryScalar,
     CalendarIncidentScalar,
+    LineStatusHourBucket,
+    LineStatusReportConnection,
     SocialMediaLinkConnection,
     SocialMediaLinkScalar,
     StationIncident,
@@ -78,6 +82,14 @@ class IncidentScalars:
             resolver=get_calendar_incident_history,
             permission_classes=[IsLoggedIn],
         )
+    )
+
+    line_status_history: List[LineStatusHourBucket] = strawberry.field(
+        resolver=get_line_status_history,
+    )
+
+    line_status_reports: LineStatusReportConnection = strawberry.field(
+        resolver=get_line_status_reports,
     )
 
 

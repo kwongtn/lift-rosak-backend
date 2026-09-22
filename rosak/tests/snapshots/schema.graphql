@@ -448,9 +448,12 @@ type Line {
   calendarIncidents: [CalendarIncidentScalar!]!
   inServiceVehicleCount: Int!
   totalVehicleCount: Int!
+  vehicleStatusCounts: [VehicleStatusCount!]!
   passengerStatus: PassengerStatus
   passengerStatusMessage: String
   statusReportCount: Int!
+  passengerStatusCount: Int!
+  statusWindowMinutes: Int!
   pulseLinks: [SocialMediaLinkScalar!]!
   vehicleTypes: [VehicleType!]!
   vehicles(spottedToday: Boolean = null): [Vehicle!]!
@@ -478,12 +481,43 @@ enum LineStatus {
   TOTAL_DISRUPTION
 }
 
+type LineStatusHourBucket {
+  hourStart: DateTime!
+  hourEnd: DateTime!
+  count: Int!
+  dominantStatus: PassengerStatus
+}
+
+type LineStatusReportConnection {
+  edges: [LineStatusReportEdge!]!
+  pageInfo: LineStatusReportPageInfo!
+}
+
+type LineStatusReportEdge {
+  node: LineStatusReportScalar!
+  cursor: String!
+}
+
 input LineStatusReportInput {
   lineId: ID!
   status: PassengerStatus!
   stationIds: [ID!]
   delayMinutes: Int
   notes: String
+}
+
+type LineStatusReportPageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+type LineStatusReportScalar {
+  id: ID!
+  status: PassengerStatus!
+  delayMinutes: Int
+  notes: String!
+  created: DateTime!
+  user: UserScalar!
 }
 
 type LineVehicleSpottingTrend {
@@ -730,6 +764,8 @@ type Query {
   publicSocialMediaLinks(incidentId: ID, lineId: ID, first: Int! = 20, after: String = null, mine: Boolean, status: SocialMediaLinkStatus): SocialMediaLinkConnection!
   calendarIncidentCategories: [CalendarIncidentCategoryScalar!]!
   calendarIncidentHistory(id: ID!, limit: Int! = 50): [CalendarIncidentHistoryEntryScalar!]!
+  lineStatusHistory(lineId: ID!, dayStartHour: Int = 3): [LineStatusHourBucket!]!
+  lineStatusReports(lineId: ID!, first: Int! = 20, after: String = null): LineStatusReportConnection!
   locations(filters: LocationFilter, order: LocationOrder, pagination: OffsetPaginationInput): [Location!]!
   buses(order: BusOrder, pagination: OffsetPaginationInput): [Bus!]!
   locationsCount(filters: LocationFilter): Int!
@@ -778,6 +814,7 @@ type SocialMediaLinkScalar {
   vehicles: [Vehicle!]!
   stations: [Station!]!
   voteScore: Int!
+  voteBreakdown: VoteBreakdown!
   userVote: Int!
   completedBy: String
 }
@@ -1052,6 +1089,21 @@ type VehicleSpottingTrend {
   isLastWeekOfMonth: Boolean
   count: Int!
   eventType: String
+}
+
+enum VehicleStatus {
+  IN_SERVICE
+  NOT_SPOTTED
+  OUT_OF_SERVICE
+  DECOMMISSIONED
+  MARRIED
+  TESTING
+  UNKNOWN
+}
+
+type VehicleStatusCount {
+  status: VehicleStatus!
+  count: Int!
 }
 
 type VehicleType {

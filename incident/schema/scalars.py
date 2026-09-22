@@ -10,6 +10,7 @@ from strawberry.types import Info
 
 from common.schema.scalars import UserScalar
 from incident import models
+from incident.enums import PassengerStatus
 from incident.schema.keyset import decode_keyset_cursor, encode_keyset_cursor
 from operation.schema.scalars import Line, Station, Vehicle
 
@@ -18,6 +19,42 @@ from operation.schema.scalars import Line, Station, Vehicle
 class VoteBreakdown:
     upvotes: int
     downvotes: int
+
+
+@strawberry.type
+class LineStatusHourBucket:
+    hour_start: datetime
+    hour_end: datetime
+    count: int
+    dominant_status: Optional[PassengerStatus]
+
+
+@strawberry_django.type(models.LineStatusReport)
+class LineStatusReportScalar:
+    id: strawberry.auto
+    status: strawberry.auto
+    delay_minutes: Optional[int]
+    notes: str
+    created: datetime
+    user: UserScalar
+
+
+@strawberry.type
+class LineStatusReportEdge:
+    node: LineStatusReportScalar
+    cursor: str
+
+
+@strawberry.type
+class LineStatusReportPageInfo:
+    has_next_page: bool
+    end_cursor: Optional[str]
+
+
+@strawberry.type
+class LineStatusReportConnection:
+    edges: List[LineStatusReportEdge]
+    page_info: LineStatusReportPageInfo
 
 
 async def _content_type_id(model) -> int:

@@ -10,19 +10,34 @@ from django.db.models import Count, Min, Q
 from strawberry.exceptions import GraphQLError
 from strawberry.types import Info
 
-from incident.enums import CalendarIncidentSeverity, CalendarIncidentStatus
-from incident.models import CalendarIncident, CalendarIncidentCategory, SocialMediaLink
+from incident.enums import (
+    CalendarIncidentSeverity,
+    CalendarIncidentStatus,
+    PassengerStatus,
+)
+from incident.models import (
+    CalendarIncident,
+    CalendarIncidentCategory,
+    LineStatusReport,
+    SocialMediaLink,
+)
 from incident.schema.inputs import SocialMediaLinkStatusInput
 from incident.schema.keyset import decode_keyset_cursor, encode_keyset_cursor
+from incident.schema.mutations.shared import raise_service_error
 from incident.schema.scalars import (
     CalendarIncidentGroupByDateSeverityScalar,
     CalendarIncidentHistoryEntryScalar,
+    LineStatusHourBucket,
+    LineStatusReportConnection,
+    LineStatusReportEdge,
+    LineStatusReportPageInfo,
     SocialMediaLinkConnection,
     SocialMediaLinkEdge,
     SocialMediaLinkPageInfo,
 )
 from incident.services.access import get_incident
 from incident.services.errors import IncidentServiceError
+from incident.services.line_status import load_line_status_history
 
 _HISTORY_TYPE_MAP = {"+": "created", "~": "updated", "-": "deleted"}
 
@@ -404,3 +419,83 @@ async def get_calendar_incident_history(
         )
 
     return entries
+
+
+async def get_line_status_history(
+    root,
+    info: Info,
+    line_id: strawberry.ID,
+    day_start_hour: Optional[int] = 3,
+) -> List[LineStatusHourBucket]:
+    """Hourly passenger-status history for one line over its current service day.
+
+    Buckets run from the service-day start (``dayStartHour``, default 03:00) to
+    the current hour inclusive, empty hours included. One query per call.
+    """
+    if day_start_hour is None:
+        day_start_hour = 3
+    try:
+        buckets = await load_line_status_history(
+            int(line_id), day_start_hour=day_start_hour
+        )
+    except IncidentServiceError as exc:
+        raise_service_error(exc)
+
+    return [
+        LineStatusHourBucket(
+            hour_start=bucket.hour_start,
+            hour_end=bucket.hour_end,
+            count=bucket.count,
+            dominant_status=PassengerStatus(bucket.dominant_status)
+            if bucket.dominant_status
+            else None,
+        )
+        for bucket in buckets
+    ]
+
+
+async def get_line_status_reports(
+    root,
+    info: Info,
+    line_id: strawberry.ID,
+    first: int = 20,
+    after: Optional[str] = None,
+) -> LineStatusReportConnection:
+    """Per-line status reports, newest first (``created DESC, id DESC``).
+
+    Keyset-paginated like ``publicSocialMediaLinks``: the cursor is
+    base64("<created iso>|<id>") and the predicate is ``created < cursor OR
+    (created = cursor AND id < cursor_id)``. ``first + 1`` rows are fetched to
+    derive ``has_next_page`` without a count query. Filters on the plain
+    ``line`` FK (not the report's station M2M).
+    """
+    queryset = (
+        LineStatusReport.objects.filter(line_id=int(line_id))
+        .select_related("user")
+        .order_by("-created", "-id")
+    )
+
+    if after is not None:
+        cursor_created, cursor_id = decode_keyset_cursor(after)
+        queryset = queryset.filter(
+            Q(created__lt=cursor_created) | Q(created=cursor_created, id__lt=cursor_id)
+        )
+
+    rows = [report async for report in queryset[: first + 1]]
+    has_next_page = len(rows) > first
+    rows = rows[:first]
+
+    edges = [
+        LineStatusReportEdge(
+            node=report, cursor=encode_keyset_cursor(report.created, report.id)
+        )
+        for report in rows
+    ]
+
+    return LineStatusReportConnection(
+        edges=edges,
+        page_info=LineStatusReportPageInfo(
+            has_next_page=has_next_page,
+            end_cursor=edges[-1].cursor if edges else None,
+        ),
+    )

@@ -15,3 +15,7 @@ class IncidentNotEditableError(IncidentServiceError):
 
 class FeedLinkValidationError(IncidentServiceError):
     """The feed submission is missing a required association (e.g. status)."""
+
+
+class LineStatusValidationError(IncidentServiceError):
+    """A line-status query parameter is out of range (e.g. dayStartHour)."""
