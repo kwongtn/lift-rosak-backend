@@ -89,6 +89,14 @@ class SocialMediaLinkScalar:
         )
 
     @strawberry_django.field
+    async def vote_breakdown(self, info: Info) -> VoteBreakdown:
+        ct_id = await _content_type_id(models.SocialMediaLink)
+        raw = await info.context.loaders["incident"]["vote_breakdown"].load(
+            (ct_id, self.id)
+        )
+        return VoteBreakdown(upvotes=raw["upvotes"], downvotes=raw["downvotes"])
+
+    @strawberry_django.field
     async def user_vote(self, info: Info) -> int:
         user = info.context.user
         if not user:
