@@ -39,6 +39,7 @@ from incident.schema.scalars import (
 from incident.services.access import get_incident
 from incident.services.errors import IncidentServiceError
 from incident.services.line_status import load_line_status_history, service_day_start
+from operation.schema.scalars import PassengerStatusCount
 
 _HISTORY_TYPE_MAP = {"+": "created", "~": "updated", "-": "deleted"}
 
@@ -465,6 +466,13 @@ async def get_line_status_history(
             dominant_status=PassengerStatus(bucket.dominant_status)
             if bucket.dominant_status
             else None,
+            status_counts=[
+                PassengerStatusCount(
+                    status=status, count=bucket.status_counts[status.value]
+                )
+                for status in PassengerStatus
+                if bucket.status_counts.get(status.value, 0) >= 1
+            ],
         )
         for bucket in buckets
     ]

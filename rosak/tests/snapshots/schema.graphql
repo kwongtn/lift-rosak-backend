@@ -487,6 +487,7 @@ type LineStatusHourBucket {
   hourEnd: DateTime!
   count: Int!
   dominantStatus: PassengerStatus
+  statusCounts: [PassengerStatusCount!]!
 }
 
 type LineStatusReportConnection {

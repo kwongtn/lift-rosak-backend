@@ -12,7 +12,7 @@ from common.schema.scalars import UserScalar
 from incident import models
 from incident.enums import PassengerStatus
 from incident.schema.keyset import decode_keyset_cursor, encode_keyset_cursor
-from operation.schema.scalars import Line, Station, Vehicle
+from operation.schema.scalars import Line, PassengerStatusCount, Station, Vehicle
 
 
 @strawberry.type
@@ -27,6 +27,7 @@ class LineStatusHourBucket:
     hour_end: datetime
     count: int
     dominant_status: Optional[PassengerStatus]
+    status_counts: List[PassengerStatusCount]
 
 
 @strawberry_django.type(models.LineStatusReport)

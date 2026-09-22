@@ -43,6 +43,11 @@ def test_reports_yield_all_24_hours_of_the_service_day():
         PassengerStatus.CROWDED,
         PassengerStatus.DELAYED,
     ] + [None] * 21
+    assert [b.status_counts for b in buckets] == [
+        {PassengerStatus.NORMAL: 1},
+        {PassengerStatus.CROWDED: 1},
+        {PassengerStatus.DELAYED: 1},
+    ] + [{}] * 21
     # The chart always gets its full 24 labels: 03:00 through 02:00 next morning.
     assert buckets[-1].hour_start == DAY_START + timedelta(hours=23)
     assert buckets[-1].hour_start.hour == 2
@@ -91,6 +96,11 @@ def test_dominant_status_is_the_most_frequent():
     assert len(buckets) == HOURS_IN_SERVICE_DAY
     assert buckets[0].count == 3
     assert buckets[0].dominant_status == PassengerStatus.NORMAL
+    assert buckets[0].status_counts == {
+        PassengerStatus.NORMAL: 2,
+        PassengerStatus.DELAYED: 1,
+    }
+    assert sum(buckets[0].status_counts.values()) == buckets[0].count
 
 
 def test_dominant_status_tie_breaks_on_severity_rank():
@@ -102,3 +112,9 @@ def test_dominant_status_tie_breaks_on_severity_rank():
     buckets = bucket_hourly(entries, day_start=DAY_START, now=NOW)
 
     assert buckets[0].dominant_status == PassengerStatus.DELAYED
+    assert buckets[0].status_counts == {
+        PassengerStatus.NORMAL: 1,
+        PassengerStatus.DELAYED: 1,
+    }
+    assert buckets[0].count == 2
+    assert sum(buckets[0].status_counts.values()) == buckets[0].count

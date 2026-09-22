@@ -1023,7 +1023,98 @@ class LineStatusHistoryTests(TestCase):
             ],
             [PassengerStatus.CROWDED],
         )
+        self.assertEqual(
+            [
+                bucket.status_counts
+                for bucket in buckets
+                if bucket.hour_start == report_hour
+            ],
+            [{PassengerStatus.CROWDED: 1}],
+        )
         self.assertEqual(sum(bucket.count for bucket in buckets), 1)
+        self.assertTrue(
+            all(
+                bucket.status_counts == {}
+                for bucket in buckets
+                if bucket.hour_start != report_hour
+            )
+        )
+
+    def test_history_status_counts_break_down_mixed_statuses_in_one_hour(self):
+        hour = timezone.now().replace(minute=0, second=0, microsecond=0)
+        reports = [
+            LineStatusReport.objects.create(
+                line=self.line, status=status, user=self.user
+            )
+            for status in [
+                PassengerStatus.DELAYED,
+                PassengerStatus.CROWDED,
+                PassengerStatus.CROWDED,
+            ]
+        ]
+        for report in reports:
+            LineStatusReport.objects.filter(pk=report.pk).update(created=hour)
+
+        buckets = async_to_sync(load_line_status_history)(
+            self.line.id, day_start_hour=hour.hour
+        )
+
+        self.assertEqual(len(buckets), 24)
+        hour_bucket = next(bucket for bucket in buckets if bucket.hour_start == hour)
+        # Enum declaration order, not insertion order.
+        self.assertEqual(
+            hour_bucket.status_counts,
+            {PassengerStatus.CROWDED: 2, PassengerStatus.DELAYED: 1},
+        )
+        self.assertEqual(hour_bucket.count, 3)
+        self.assertEqual(sum(hour_bucket.status_counts.values()), hour_bucket.count)
+        self.assertEqual(hour_bucket.dominant_status, PassengerStatus.CROWDED)
+
+    def test_graphql_history_exposes_status_counts_in_enum_order(self):
+        hour = timezone.now().replace(minute=0, second=0, microsecond=0)
+        reports = [
+            LineStatusReport.objects.create(
+                line=self.line, status=status, user=self.user
+            )
+            for status in [
+                PassengerStatus.DELAYED,
+                PassengerStatus.CROWDED,
+                PassengerStatus.CROWDED,
+            ]
+        ]
+        for report in reports:
+            LineStatusReport.objects.filter(pk=report.pk).update(created=hour)
+
+        result = execute_graphql(
+            """
+            query($id: ID!, $hour: Int!) {
+              lineStatusHistory(lineId: $id, dayStartHour: $hour) {
+                count
+                statusCounts { status count }
+              }
+            }
+            """,
+            variables={"id": str(self.line.id), "hour": hour.hour},
+        )
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        buckets = result.data["lineStatusHistory"]
+        self.assertEqual(len(buckets), 24)
+        self.assertEqual(
+            buckets[0]["statusCounts"],
+            [
+                {"status": "CROWDED", "count": 2},
+                {"status": "DELAYED", "count": 1},
+            ],
+        )
+        self.assertEqual(buckets[0]["count"], 3)
+        self.assertEqual(
+            sum(entry["count"] for entry in buckets[0]["statusCounts"]),
+            buckets[0]["count"],
+        )
+        # No-report hours carry count=0 and an empty breakdown.
+        self.assertEqual(buckets[1]["count"], 0)
+        self.assertEqual(buckets[1]["statusCounts"], [])
 
     def test_history_is_empty_when_the_line_has_no_reports(self):
         buckets = async_to_sync(load_line_status_history)(self.line.id)

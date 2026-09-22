@@ -79,6 +79,8 @@ class HourBucket:
     hour_end: datetime
     count: int
     dominant_status: str | None
+    # Per-status report counts; ``count`` is the sum of these values.
+    status_counts: dict[str, int]
 
 
 def consolidate(
@@ -261,7 +263,9 @@ def bucket_hourly(
     ``dominant_status=None`` so a chart always gets its full set of labels.
     Entries outside ``[day_start, now]`` are ignored. ``dominant_status`` is the
     most frequent status in the hour; ties go to the most severe per
-    ``SEVERITY_RANK``.
+    ``SEVERITY_RANK``. ``status_counts`` carries the hour's per-status tallies
+    (raw status values) so callers can render a segmented bar; it is ``{}`` for
+    an empty hour and always sums to ``count``.
     """
     per_hour: dict[datetime, dict[str, int]] = {}
     for entry in entries:
@@ -289,6 +293,7 @@ def bucket_hourly(
                 hour_end=hour + timedelta(hours=1),
                 count=sum(statuses.values()),
                 dominant_status=dominant,
+                status_counts=dict(statuses),
             )
         )
     return buckets

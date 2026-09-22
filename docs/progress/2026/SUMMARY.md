@@ -27,6 +27,7 @@ Total commits: 104
 - (this commit) [feat](incident): expose per-status report counts on a line
 - (this commit) [fix](incident): return every hour of the service day in the status history
 - (this commit) [feat](incident): filter the public feed by service day and expose total counts
+- (this commit) [feat](incident): expose a per-status breakdown on each hourly history bucket
 
 #### Operation (1 commits)
 

@@ -69,6 +69,13 @@ async def test_history_buckets_include_empty_hours_and_counts():
         PassengerStatus.CROWDED,
         PassengerStatus.DELAYED,
     ] + [None] * 22
+    assert buckets[0].status_counts == {PassengerStatus.CROWDED: 1}
+    assert buckets[1].status_counts == {
+        PassengerStatus.CROWDED: 1,
+        PassengerStatus.DELAYED: 1,
+    }
+    assert all(b.status_counts == {} for b in buckets[2:])
+    assert all(sum(b.status_counts.values()) == b.count for b in buckets)
 
 
 @pytest.mark.django_db
@@ -178,6 +185,7 @@ async def test_schema_line_status_history_returns_the_full_service_day():
             hourEnd
             count
             dominantStatus
+            statusCounts { status count }
           }
         }
         """,
@@ -190,6 +198,8 @@ async def test_schema_line_status_history_returns_the_full_service_day():
     assert len(buckets) == 24
     assert buckets[0]["count"] == 1
     assert buckets[0]["dominantStatus"] == "CROWDED"
+    assert buckets[0]["statusCounts"] == [{"status": "CROWDED", "count": 1}]
+    assert buckets[1]["statusCounts"] == []
 
 
 @pytest.mark.django_db
