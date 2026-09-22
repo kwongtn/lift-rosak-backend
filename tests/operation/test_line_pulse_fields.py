@@ -26,6 +26,10 @@ query {
     id
     inServiceVehicleCount
     totalVehicleCount
+    vehicleStatusCounts {
+      status
+      count
+    }
     passengerStatus
     passengerStatusMessage
     statusReportCount
@@ -130,6 +134,15 @@ async def test_line_fields_report_vehicle_counts_and_no_data_pulse():
     item = _line(data, line.id)
     assert item["inServiceVehicleCount"] == 2
     assert item["totalVehicleCount"] == 3
+    assert item["vehicleStatusCounts"] == [
+        {"status": "IN_SERVICE", "count": 2},
+        {"status": "NOT_SPOTTED", "count": 0},
+        {"status": "OUT_OF_SERVICE", "count": 1},
+        {"status": "DECOMMISSIONED", "count": 0},
+        {"status": "MARRIED", "count": 0},
+        {"status": "TESTING", "count": 0},
+        {"status": "UNKNOWN", "count": 0},
+    ]
     assert item["passengerStatus"] is None
     assert item["passengerStatusMessage"] is None
     assert item["statusReportCount"] == 0
@@ -148,6 +161,8 @@ async def test_line_fields_expose_consolidated_pulse_with_links():
     item = _line(data, line.id)
     assert item["passengerStatus"] == "CROWDED"
     assert item["statusReportCount"] == 1
+    assert item["passengerStatusCount"] == 1
+    assert item["statusWindowMinutes"] == 15
     assert item["passengerStatusMessage"] == (
         "According to 1 social media entry, this line is Crowded."
     )

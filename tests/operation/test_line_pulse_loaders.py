@@ -56,6 +56,13 @@ async def _make_report(line: Line, user: User, status: str) -> LineStatusReport:
     )
 
 
+def _counts(in_service: int, total: int, **statuses: int) -> dict:
+    """Loader result shape: totals plus a zero-filled per-status breakdown."""
+    breakdown = {status.value: 0 for status in VehicleStatus}
+    breakdown.update(statuses)
+    return {"in_service": in_service, "total": total, "status_counts": breakdown}
+
+
 @pytest.mark.django_db
 async def test_vehicle_counts_split_in_service_from_total():
     vehicle_type = await _make_vehicle_type("CountType")
@@ -72,7 +79,16 @@ async def test_vehicle_counts_split_in_service_from_total():
 
     counts = await batch_load_line_vehicle_counts([line.id])
 
-    assert counts == [{"in_service": 2, "total": 3}]
+    assert counts == [
+        _counts(
+            2,
+            3,
+            IN_SERVICE=2,
+            OUT_OF_SERVICE=1,
+        )
+    ]
+    # Every enum member is present so the UI chart always has a full series.
+    assert set(counts[0]["status_counts"]) == {s.value for s in VehicleStatus}
 
 
 @pytest.mark.django_db
@@ -81,7 +97,7 @@ async def test_vehicle_counts_zero_for_line_without_vehicles():
 
     counts = await batch_load_line_vehicle_counts([line.id])
 
-    assert counts == [{"in_service": 0, "total": 0}]
+    assert counts == [_counts(0, 0)]
 
 
 @pytest.mark.django_db
@@ -95,8 +111,8 @@ async def test_vehicle_counts_returned_in_key_order():
     counts = await batch_load_line_vehicle_counts([empty.id, populated.id])
 
     assert counts == [
-        {"in_service": 0, "total": 0},
-        {"in_service": 1, "total": 1},
+        _counts(0, 0),
+        _counts(1, 1, IN_SERVICE=1),
     ]
 
 
@@ -107,8 +123,8 @@ async def test_vehicle_counts_unknown_key_is_zero():
     counts = await batch_load_line_vehicle_counts([line.id, 999999999])
 
     assert counts == [
-        {"in_service": 0, "total": 0},
-        {"in_service": 0, "total": 0},
+        _counts(0, 0),
+        _counts(0, 0),
     ]
 
 
@@ -135,7 +151,7 @@ def test_vehicle_counts_batch_into_one_query_for_many_lines():
         counts = async_to_sync(batch_load_line_vehicle_counts)(ids)
 
     assert len(captured.captured_queries) == 1
-    assert counts == [{"in_service": 1, "total": 1} for _ in lines]
+    assert counts == [_counts(1, 1, IN_SERVICE=1) for _ in lines]
 
 
 @pytest.mark.django_db

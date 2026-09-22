@@ -150,22 +150,34 @@ async def batch_load_vehicle_from_line(keys: List[Tuple[int, Optional[bool]]]):
 
 async def batch_load_line_vehicle_counts(keys: List[int]) -> List[dict]:
     # One aggregate for every requested line. A line's "total" is its VehicleLine
-    # row count (one row per vehicle assigned to the line); "in_service" narrows
-    # that to vehicles whose status is IN_SERVICE.
-    empty = {"in_service": 0, "total": 0}
+    # row count (one row per vehicle assigned to the line); the per-status
+    # breakdown uses a filtered Count per VehicleStatus in the SAME annotate, so
+    # N lines still cost one query. Every status is always present (0-filled) so
+    # the UI series is continuous.
+    status_values = [status.value for status in VehicleStatus]
+    empty = {
+        "in_service": 0,
+        "total": 0,
+        "status_counts": dict.fromkeys(status_values, 0),
+    }
     counts: dict[int, dict] = {}
     rows = (
         VehicleLine.objects.filter(line_id__in=keys)
         .values("line_id")
         .annotate(
             total=Count("id"),
-            in_service=Count("id", filter=Q(vehicle__status=VehicleStatus.IN_SERVICE)),
+            **{
+                status: Count("id", filter=Q(vehicle__status=status))
+                for status in status_values
+            },
         )
     )
     async for row in rows:
+        status_counts = {status: row[status] for status in status_values}
         counts[row["line_id"]] = {
-            "in_service": row["in_service"],
+            "in_service": status_counts[VehicleStatus.IN_SERVICE],
             "total": row["total"],
+            "status_counts": status_counts,
         }
 
     return [counts.get(key, empty) for key in keys]

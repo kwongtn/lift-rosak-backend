@@ -26,6 +26,12 @@ SocialMediaLinkScalar = Annotated[
 ]
 
 
+@strawberry.type
+class VehicleStatusCount:
+    status: VehicleStatus
+    count: int
+
+
 @strawberry_django.type(models.Station)
 class Station:
     id: strawberry.ID
@@ -75,6 +81,18 @@ class Line:
             "line_vehicle_counts_loader"
         ].load(self.id)
         return counts["total"]
+
+    @strawberry.field
+    async def vehicle_status_counts(self, info: Info) -> List[VehicleStatusCount]:
+        counts = await info.context.loaders["operation"][
+            "line_vehicle_counts_loader"
+        ].load(self.id)
+        return [
+            VehicleStatusCount(
+                status=status, count=counts["status_counts"][status.value]
+            )
+            for status in VehicleStatus
+        ]
 
     @strawberry.field
     async def passenger_status(self, info: Info) -> Optional[PassengerStatus]:
