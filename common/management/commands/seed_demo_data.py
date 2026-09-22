@@ -41,21 +41,21 @@ REPORT_PLAN: list[tuple[str, list[tuple[Any, int, int | None, str, bool]]]] = [
         [
             (
                 PassengerStatus.EXTREMELY_CROWDED,
-                18,
+                13,
                 None,
                 "Train packed at Masjid Jamek, no space to board",
                 True,
             ),
             (
                 PassengerStatus.EXTREMELY_CROWDED,
-                47,
+                8,
                 None,
                 "Standing room only from KLCC to Gombak",
                 False,
             ),
             (
                 PassengerStatus.EXTREMELY_CROWDED,
-                96,
+                3,
                 None,
                 "Evening peak crush load at KL Sentral",
                 True,
@@ -74,14 +74,14 @@ REPORT_PLAN: list[tuple[str, list[tuple[Any, int, int | None, str, bool]]]] = [
             ),
             (
                 PassengerStatus.CROWDED,
-                53,
+                6,
                 None,
                 "Packed but trains arriving every four minutes",
                 False,
             ),
             (
                 PassengerStatus.BUSY,
-                104,
+                2,
                 None,
                 "Steady stream of commuters at Bukit Bintang",
                 False,
@@ -93,14 +93,14 @@ REPORT_PLAN: list[tuple[str, list[tuple[Any, int, int | None, str, bool]]]] = [
         [
             (
                 PassengerStatus.DELAYED,
-                22,
+                11,
                 12,
                 "Signal fault causing 10-15 minute delays",
                 True,
             ),
             (
                 PassengerStatus.DELAYED,
-                78,
+                5,
                 8,
                 "Trains held at Kwasa Damansara",
                 False,
@@ -112,7 +112,7 @@ REPORT_PLAN: list[tuple[str, list[tuple[Any, int, int | None, str, bool]]]] = [
         [
             (
                 PassengerStatus.BACKLOGGED,
-                33,
+                10,
                 20,
                 "Single-track section backing up at Tun Razak Exchange",
                 True,
@@ -124,7 +124,7 @@ REPORT_PLAN: list[tuple[str, list[tuple[Any, int, int | None, str, bool]]]] = [
         [
             (
                 PassengerStatus.NORMAL,
-                41,
+                9,
                 None,
                 "Buses running smoothly with plenty of seats",
                 False,
@@ -136,14 +136,14 @@ REPORT_PLAN: list[tuple[str, list[tuple[Any, int, int | None, str, bool]]]] = [
         [
             (
                 PassengerStatus.DISRUPTED,
-                9,
+                14,
                 None,
                 "Service suspended between Chan Sow Lin and Masjid Jamek",
                 True,
             ),
             (
                 PassengerStatus.DISRUPTED,
-                66,
+                4,
                 None,
                 "Replacement buses struggling to cope with demand",
                 False,
@@ -433,7 +433,7 @@ class Command(BaseCommand):
                     defaults={"delay_minutes": delay},
                 )
                 # `created` is auto_now_add; a queryset update bypasses it so the
-                # report lands inside the 6-hour consolidation window.
+                # report lands inside the 15-minute consolidation window.
                 LineStatusReport.objects.filter(pk=report.pk).update(
                     created=now - timedelta(minutes=minutes_ago)
                 )
