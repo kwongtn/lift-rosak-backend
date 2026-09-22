@@ -3,6 +3,9 @@ from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.conf import settings
+from django.contrib.contenttypes.models import ContentType
+from django.core.management import call_command
+from django.db.models import Count
 from django.test import TestCase
 from django.utils.timezone import now
 from PIL import Image
@@ -23,6 +26,7 @@ from common.models import (
     User,
     UserClearance,
     UserVerificationCode,
+    Vote,
 )
 from common.schema.inputs import UserInput
 from common.schema.scalars import UserScalar
@@ -33,7 +37,17 @@ from common.tasks import (
 )
 from common.utils import get_default_start_time
 from generic.schema.enums import DateGroupings
-from operation.models import Line, Vehicle, VehicleLine, VehicleType
+from incident.enums import PassengerStatus
+from incident.models import LineStatusReport, SocialMediaLink
+from operation.enums import VehicleStatus
+from operation.models import (
+    Line,
+    Station,
+    StationLine,
+    Vehicle,
+    VehicleLine,
+    VehicleType,
+)
 from rosak.tests import execute_graphql_async
 from spotting.enums import SpottingEventType, SpottingVehicleStatus
 from spotting.models import Event, EventMedia
@@ -1288,3 +1302,135 @@ class TemporaryMediaReviewHoldAndCleanupTests(TestCase):
         temp_media.refresh_from_db()
         self.assertEqual(temp_media.status, TemporaryMediaStatus.OVERRIDE_CLEARED)
         self.assertEqual(temp_media.fail_count, 5)
+
+
+class SeedDemoDataCommandTests(TestCase):
+    """Contract of the ``seed_demo_data`` management command."""
+
+    SEED_LINES = (
+        "BRT SBL",
+        "KTM ETS",
+        "KTMK-PKL",
+        "LRT AGL",
+        "LRT KJL",
+        "MRL",
+        "MRT KGL",
+        "MRT PYL",
+    )
+
+    @classmethod
+    def setUpTestData(cls):
+        from common.management.commands.seed_demo_data import SEED_USER_PREFIX
+
+        cls.prefix = SEED_USER_PREFIX
+        for index, code in enumerate(cls.SEED_LINES):
+            line = Line.objects.create(
+                code=code,
+                display_name=f"Seed Line {code}",
+                display_color="#336699",
+            )
+            station = Station.objects.create(display_name=f"{code} Station")
+            StationLine.objects.create(
+                station=station,
+                line=line,
+                display_name=f"{code} Station",
+                internal_representation=f"SD{index:03d}",
+            )
+        vehicle_type = VehicleType.objects.create(
+            internal_name="SEED-VT",
+            display_name="Seed Vehicle Type",
+        )
+        for n in range(3):
+            Vehicle.objects.create(
+                identification_no=f"SEED{n:03d}",
+                vehicle_type=vehicle_type,
+                status=VehicleStatus.IN_SERVICE,
+            )
+
+    def _seeded(self, model, field="user"):
+        return model.objects.filter(
+            **{f"{field}__firebase_id__startswith": self.prefix}
+        )
+
+    def test_seed_generates_varied_volume_and_is_idempotent(self):
+        call_command("seed_demo_data")
+
+        users = User.objects.filter(firebase_id__startswith=self.prefix)
+        self.assertGreaterEqual(users.count(), 100)
+
+        reports = self._seeded(LineStatusReport)
+        self.assertGreaterEqual(reports.count(), 250)
+
+        reported_line_ids = set(reports.values_list("line_id", flat=True))
+        for line in Line.objects.all()[:6]:
+            self.assertIn(line.id, reported_line_ids)
+
+        window = reports.filter(created__gte=now() - timedelta(minutes=15))
+        multi_status = (
+            window.values("line_id")
+            .annotate(distinct_statuses=Count("status", distinct=True))
+            .filter(distinct_statuses__gte=2)
+        )
+        self.assertGreaterEqual(multi_status.count(), 3)
+
+        self.assertTrue(reports.filter(notes="").exists())
+        self.assertTrue(reports.exclude(notes="").exists())
+        self.assertGreaterEqual(reports.values("status").distinct().count(), 2)
+        self.assertGreaterEqual(
+            reports.exclude(notes="").values("notes").distinct().count(), 5
+        )
+
+        links = self._seeded(SocialMediaLink)
+        self.assertGreaterEqual(links.count(), 30)
+        content_type = ContentType.objects.get_for_model(SocialMediaLink)
+        self.assertTrue(
+            Vote.objects.filter(
+                content_type=content_type,
+                object_id__in=list(links.values_list("id", flat=True)),
+            ).exists()
+        )
+
+        before = (
+            users.count(),
+            reports.count(),
+            links.count(),
+            Event.objects.filter(reporter__firebase_id__startswith=self.prefix).count(),
+        )
+        call_command("seed_demo_data")
+        after = (
+            User.objects.filter(firebase_id__startswith=self.prefix).count(),
+            self._seeded(LineStatusReport).count(),
+            self._seeded(SocialMediaLink).count(),
+            Event.objects.filter(reporter__firebase_id__startswith=self.prefix).count(),
+        )
+        self.assertEqual(before, after)
+
+    def test_flush_removes_only_seeded_rows(self):
+        outsider = User.objects.create(firebase_id="seed-outsider", nickname="Outsider")
+        keep_line = Line.objects.get(code="MRT PYL")
+        keep_link = SocialMediaLink.objects.create(
+            url="https://example.com/keep-me",
+            title="Unrelated pre-existing link",
+            user=outsider,
+        )
+        LineStatusReport.objects.create(
+            line=keep_line,
+            user=outsider,
+            status=PassengerStatus.NORMAL,
+            notes="pre-existing report",
+        )
+
+        call_command("seed_demo_data", reports=20, users=5, links=5)
+        self.assertTrue(
+            User.objects.filter(firebase_id__startswith=self.prefix).exists()
+        )
+
+        call_command("seed_demo_data", flush=True)
+
+        self.assertFalse(
+            User.objects.filter(firebase_id__startswith=self.prefix).exists()
+        )
+        self.assertFalse(self._seeded(LineStatusReport).exists())
+        self.assertFalse(self._seeded(SocialMediaLink).exists())
+        self.assertTrue(SocialMediaLink.objects.filter(id=keep_link.id).exists())
+        self.assertTrue(LineStatusReport.objects.filter(user=outsider).exists())

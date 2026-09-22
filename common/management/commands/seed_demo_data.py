@@ -1,15 +1,28 @@
 """Seed realistic demo data for the community front page.
 
-Idempotent: running it repeatedly reuses the same rows, keyed on stable natural
-identifiers (URL + user for links, line/user/status/notes for reports,
-reporter/vehicle/date/type for spotting events, user/content/object for votes).
+Generates a *large*, *varied* dataset so the front page can be reviewed under
+something resembling real load: hundreds of status reports from a pool of
+seeded users, dozens of feed links with real votes, and the spotting events.
+
+Idempotency is achieved by **delete-then-recreate**: every run first removes
+the rows owned by the seeded demo users (``firebase_id`` prefixed with
+``SEED_USER_PREFIX``) and then regenerates them from a fixed-seed RNG
+(``SEED``), so re-running the command yields the same rows and identical
+counts. Real user data is never touched — the deletion is strictly scoped to
+the seeded prefix.
 
 It attaches to the EXISTING reference data (lines, stations, vehicles) and never
 creates any of them. ``--flush`` removes only the rows this command owns.
+
+The generated timestamps are back-dated through a queryset ``update()`` because
+``created`` is ``auto_now_add``. Reports land both inside the rolling
+``WINDOW_MINUTES`` pulse window (so a line shows multiple passenger-status
+counts) and spread across the service day (so the hourly chart has shape).
 """
 
 from __future__ import annotations
 
+import random
 from datetime import timedelta
 from typing import Any
 
@@ -22,231 +35,161 @@ from django.utils import timezone
 from common.models import User, Vote
 from incident.enums import PassengerStatus, SocialMediaLinkStatus
 from incident.models import LineStatusReport, SocialMediaLink
+from incident.services.line_status import WINDOW_MINUTES, service_day_start
 from operation.enums import VehicleStatus
 from operation.models import Line, Station, Vehicle
 from spotting.enums import SpottingEventType, SpottingVehicleStatus
 from spotting.models import Event, LocationEvent
 
+# Fixed seed: the whole dataset is reproducible run to run. Never use bare
+# ``random`` — a shared global would make the output order-dependent.
+SEED = 1337
+
+# Primary demo identity; every seeded row hangs off a firebase id carrying this
+# prefix, which is what scopes deletion to seeded data only.
 DEMO_FIREBASE_ID = "demo-seed-user"
 DEMO_NICKNAME = "Demo Seed"
+SEED_USER_PREFIX = "demo-seed-"
 
-# Platform identities with real nicknames so the UI shows names, not ids.
-VOTER_IDS = (1, 7, 75, 80, 85)
+DEFAULT_LINES = 6
+DEFAULT_USERS = 150
+DEFAULT_REPORTS = 300
+DEFAULT_LINKS = 40
 
-# Front-page line pulses. Ordered; --lines N takes the first N entries.
-# (status, minutes_ago, delay_minutes, notes, attach_station)
-REPORT_PLAN: list[tuple[str, list[tuple[Any, int, int | None, str, bool]]]] = [
-    (
-        "LRT KJL",
-        [
-            (
-                PassengerStatus.EXTREMELY_CROWDED,
-                13,
-                None,
-                "Train packed at Masjid Jamek, no space to board",
-                True,
-            ),
-            (
-                PassengerStatus.EXTREMELY_CROWDED,
-                8,
-                None,
-                "Standing room only from KLCC to Gombak",
-                False,
-            ),
-            (
-                PassengerStatus.EXTREMELY_CROWDED,
-                3,
-                None,
-                "Evening peak crush load at KL Sentral",
-                True,
-            ),
-        ],
-    ),
-    (
-        "MRT KGL",
-        [
-            (
-                PassengerStatus.CROWDED,
-                12,
-                None,
-                "Platform filling up at Pasar Seni",
-                True,
-            ),
-            (
-                PassengerStatus.CROWDED,
-                6,
-                None,
-                "Packed but trains arriving every four minutes",
-                False,
-            ),
-            (
-                PassengerStatus.BUSY,
-                2,
-                None,
-                "Steady stream of commuters at Bukit Bintang",
-                False,
-            ),
-        ],
-    ),
-    (
-        "MRT PYL",
-        [
-            (
-                PassengerStatus.DELAYED,
-                11,
-                12,
-                "Signal fault causing 10-15 minute delays",
-                True,
-            ),
-            (
-                PassengerStatus.DELAYED,
-                5,
-                8,
-                "Trains held at Kwasa Damansara",
-                False,
-            ),
-        ],
-    ),
-    (
-        "MRL",
-        [
-            (
-                PassengerStatus.BACKLOGGED,
-                10,
-                20,
-                "Single-track section backing up at Tun Razak Exchange",
-                True,
-            ),
-        ],
-    ),
-    (
-        "BRT SBL",
-        [
-            (
-                PassengerStatus.NORMAL,
-                9,
-                None,
-                "Buses running smoothly with plenty of seats",
-                False,
-            ),
-        ],
-    ),
-    (
-        "LRT AGL",
-        [
-            (
-                PassengerStatus.DISRUPTED,
-                14,
-                None,
-                "Service suspended between Chan Sow Lin and Masjid Jamek",
-                True,
-            ),
-            (
-                PassengerStatus.DISRUPTED,
-                4,
-                None,
-                "Replacement buses struggling to cope with demand",
-                False,
-            ),
-        ],
-    ),
-]
+# Guarantee: this many lines get >= 2 distinct statuses inside the pulse window
+# so the line-card hover breakdown ("Normal 3 / Busy 2") is never invisible.
+HOT_LINE_COUNT = 3
+# Fraction of the bulk reports that land inside the rolling window.
+INSIDE_WINDOW_CHANCE = 0.25
+# Fraction of reports that carry a note (the rest are blank).
+NOTE_CHANCE = 0.5
 
-# ~10 LIVE feed rows. Tracking junk on two of them exercises canonicalisation.
-LINK_PLAN: list[dict[str, Any]] = [
-    {
-        "url": (
-            "https://www.facebook.com/groups/komuter/posts/1015987654321/"
-            "?fbclid=IwAR0demotrackingjunk"
-        ),
-        "title": "KTM Komuter delays at KL Sentral this morning",
-        "lines": ["KTMK-PKL", "KTMK-SRL"],
-        "stations": True,
-    },
-    {
-        "url": (
-            "https://x.com/mlptf_my/status/1790000000000000001?s=20&utm_source=demo"
-        ),
-        "title": "MRT Putrajaya Line signal fault — trains held",
-        "lines": ["MRT PYL"],
-        "stations": True,
-    },
-    {
-        "url": (
-            "https://www.reddit.com/r/malaysia/comments/1demo01/"
-            "lrt_kelana_jaya_morning_rush/"
-        ),
-        "title": "LRT Kelana Jaya is absolutely packed today",
-        "lines": ["LRT KJL"],
-    },
-    {
-        "url": (
-            "https://www.thestar.com.my/news/nation/2026/09/22/mrt-kajang-crowd-control"
-        ),
-        "title": "Crowd control at MRT Kajang Line stations during peak hour",
-        "lines": ["MRT KGL"],
-        "vehicles": True,
-    },
-    {
-        "url": (
-            "https://www.malaymail.com/news/malaysia/2026/09/22/"
-            "brt-sunway-line-adds-buses/123456"
-        ),
-        "title": "BRT Sunway Line adds buses to cope with commuter demand",
-        "lines": ["BRT SBL"],
-    },
-    {
-        "url": "https://paultan.org/2026/09/22/ampang-lrt-line-disruption/",
-        "title": "Ampang LRT line disruption enters its second day",
-        "lines": ["LRT AGL"],
-        "stations": True,
-    },
-    {
-        "url": "https://www.facebook.com/groups/rapidkl/posts/202600001/",
-        "title": "Rapid KL responds to Ampang Line commuter complaints",
-        "lines": ["LRT AGL"],
-    },
-    {
-        "url": (
-            "https://www.reddit.com/r/malaysia/comments/1demo02/"
-            "monorail_backlog_tun_razak_exchange/"
-        ),
-        "title": "Monorail backlog at Tun Razak Exchange station",
-        "lines": ["MRL"],
-    },
-    {
-        "url": "https://x.com/ktmkomuter/status/1790000000000000002",
-        "title": "KTM ETS on time today with a smooth journey to Ipoh",
-        "lines": ["KTM ETS"],
-        "vehicles": True,
-    },
-    {
-        "url": (
-            "https://www.thestar.com.my/metro/metro-news/2026/09/22/"
-            "mrt-putrajaya-back-to-normal"
-        ),
-        "title": "MRT Putrajaya Line back to normal after overnight repairs",
-        "lines": ["MRT PYL"],
-    },
-]
-
-# Vote plan keyed by LINK_PLAN index. Tuples are (voter_slot, value): slots
-# 0..4 map to the nickname users ordered by id, and -1 is the demo marker user.
-# Yields scores: +5, +2, 0, -1 among others.
-VOTE_PLAN: dict[int, list[tuple[int, int]]] = {
-    0: [(0, 1), (1, 1), (2, 1), (3, 1), (4, 1)],
-    1: [(0, 1), (1, 1)],
-    2: [(3, 1), (4, -1)],
-    3: [(2, -1)],
-    4: [(0, 1)],
-    5: [(1, 1), (2, 1), (3, 1)],
-    6: [(4, -1)],
-    7: [(0, 1), (3, -1)],
-    8: [(-1, 1)],
-    9: [(1, 1), (2, 1)],
+_STATUS_WEIGHTS: dict[str, int] = {
+    PassengerStatus.NORMAL: 6,
+    PassengerStatus.BUSY: 5,
+    PassengerStatus.CROWDED: 5,
+    PassengerStatus.EXTREMELY_CROWDED: 2,
+    PassengerStatus.BACKLOGGED: 2,
+    PassengerStatus.DELAYED: 3,
+    PassengerStatus.DISRUPTED: 1,
 }
+_DELAY_CHOICES = (5, 8, 10, 12, 15, 20, 25, 30)
 
-# (line_code, type, days_ago, notes, coords)
+NICKNAMES = [
+    "Aiman",
+    "Bella",
+    "Chong Wei",
+    "Devi",
+    "Farah",
+    "Ganesh",
+    "Hafiz",
+    "Izzah",
+    "Jia Hui",
+    "Kavitha",
+    "Ling",
+    "Maya",
+    "Nadia",
+    "Ong",
+    "Priya",
+    "Qistina",
+    "Rizal",
+    "Siti",
+    "Tan",
+    "Uma",
+    "Vijay",
+    "Wan",
+    "Xin Yi",
+    "Yusof",
+    "Zara",
+    "Amir",
+    "Boon",
+    "Cheryl",
+    "Danish",
+    "Elena",
+    "Fauzan",
+    "Grace",
+    "Hana",
+    "Imran",
+    "Joanne",
+    "Kumar",
+    "Liew",
+    "Mira",
+    "Nabil",
+    "Suhaila",
+]
+
+# Short natural notes; ``{station}`` is filled from the report's station (or the
+# line name when no station was attached).
+_NOTES = [
+    "Packed but moving, {station} is manageable",
+    "Standing room only at {station}",
+    "Trains every few minutes, no real wait",
+    "Crowd cleared after {station}",
+    "Quiet carriage past {station}",
+    "Held at {station} for a bit",
+    "Slow crawl into {station}",
+    "Surprisingly empty for the hour",
+    "Loud and packed, hard to board",
+    "Seats available near {station}",
+    "Delay announced at {station}",
+    "Aircon weak, getting stuffy",
+    "Something wrong at {station}, moving slowly",
+    "Smooth ride, no complaints",
+    "Long queue on the platform",
+    "Busy but staff managing the flow",
+    "Just missed one, next in 3 min",
+    "Everyone squeezed in at the doors",
+    "Signalling hiccup near {station}",
+    "Back to normal after earlier delay",
+]
+
+_DOMAINS = [
+    "facebook.com",
+    "x.com",
+    "reddit.com",
+    "thestar.com.my",
+    "malaymail.com",
+    "paultan.org",
+    "malaysiakini.com",
+    "theedgemalaysia.com",
+    "bharian.com.my",
+    "astroawani.com",
+]
+# Empty strings keep most URLs clean; the rest exercise canonicalisation
+# (tracking junk, and the same params in two different orders).
+_TRACKING = (
+    "",
+    "",
+    "",
+    "?fbclid=IwAR0demo",
+    "?utm_source=demo&utm_medium=social",
+    "?utm_medium=social&utm_source=demo",
+    "?s=20&utm_source=demo",
+)
+_SLUGS = [
+    "morning-rush",
+    "service-update",
+    "crowd-report",
+    "delay-watch",
+    "commuter-voice",
+    "peak-hour",
+    "line-status",
+    "station-notes",
+]
+_TITLE_TEMPLATES = [
+    "{line} commuters report crowding this morning",
+    "{line} delays spark complaints",
+    "{line} back to normal after repairs",
+    "Crowd control in place on {line}",
+    "{line} platform filling up at peak",
+    "Signal issue affecting {line}",
+    "{line} adds extra services",
+    "What is happening on {line} today?",
+    "{line} carriage temperatures rising",
+    "Commuters share their {line} experience",
+]
+
+# (line_code, type, days_ago, notes, coords) — the map signals/dots.
 SPOTTING_PLAN: list[tuple[str, Any, int, str, tuple[float, float] | None]] = [
     (
         "LRT KJL",
@@ -335,8 +278,26 @@ class Command(BaseCommand):
         parser.add_argument(
             "--lines",
             type=int,
-            default=6,
-            help="How many configured lines to give status reports (default 6).",
+            default=DEFAULT_LINES,
+            help=f"How many configured lines to give status reports (default {DEFAULT_LINES}).",
+        )
+        parser.add_argument(
+            "--users",
+            type=int,
+            default=DEFAULT_USERS,
+            help=f"Size of the seeded user pool (default {DEFAULT_USERS}).",
+        )
+        parser.add_argument(
+            "--reports",
+            type=int,
+            default=DEFAULT_REPORTS,
+            help=f"Number of status reports to generate (default {DEFAULT_REPORTS}).",
+        )
+        parser.add_argument(
+            "--links",
+            type=int,
+            default=DEFAULT_LINKS,
+            help=f"Number of feed links to generate (default {DEFAULT_LINKS}).",
         )
 
     def handle(self, *args: Any, **options: Any):
@@ -344,137 +305,222 @@ class Command(BaseCommand):
             self._flush()
             return
 
-        lines_by_code = {line.code: line for line in Line.objects.all()}
-        existing_codes = sorted(lines_by_code)
-        if not existing_codes:
+        # One RNG per invocation: re-running the command replays the same
+        # sequence, so the regenerated dataset is byte-for-byte identical.
+        self.rng = random.Random(SEED)
+
+        all_lines = list(Line.objects.all())  # Meta ordering = ["code"]
+        if not all_lines:
             self.stdout.write(
                 self.style.WARNING("No Lines found — nothing to attach demo data to.")
             )
             return
+        lines_by_code = {line.code: line for line in all_lines}
+        report_lines = all_lines[: max(options["lines"], 0)]
 
         with transaction.atomic():
-            demo_user = self._get_demo_user()
-            counts = {
-                "links": self._seed_links(demo_user, lines_by_code),
-                "reports": self._seed_reports(
-                    demo_user, lines_by_code, options["lines"]
-                ),
-                "events": self._seed_spotting(demo_user, lines_by_code),
-            }
-            votes = self._seed_votes(demo_user)
+            removed = self._purge_seeded()
+            users = self._seed_users(max(options["users"], 1))
+            links = self._seed_links(users, all_lines, max(options["links"], 0))
+            report_count, inside = self._seed_reports(
+                users, report_lines, max(options["reports"], 0)
+            )
+            votes = self._seed_votes(users, links)
+            events = self._seed_spotting(users[0], lines_by_code)
 
         summary = (
             "seed_demo_data complete: "
-            f"links {counts['links']['created']} created / "
-            f"{counts['links']['reused']} reused, "
-            f"reports {counts['reports']['created']} created / "
-            f"{counts['reports']['reused']} reused, "
-            f"spotting events {counts['events']['created']} created / "
-            f"{counts['events']['reused']} reused, "
-            f"votes {votes['created']} cast / {votes['reused']} updated."
+            f"purged {removed['links']} links / {removed['reports']} reports / "
+            f"{removed['votes']} votes / {removed['events']} events; "
+            f"users {len(users)}, links {len(links)}, "
+            f"reports {report_count} ({inside} inside the {WINDOW_MINUTES}-min window), "
+            f"votes {votes}, spotting events {events['created']}."
         )
         self.stdout.write(self.style.SUCCESS(summary))
 
-    def _get_demo_user(self) -> User:
-        user, _ = User.objects.get_or_create(
+    # ------------------------------------------------------------------ users
+
+    def _seed_users(self, count: int) -> list[User]:
+        primary, _ = User.objects.get_or_create(
             firebase_id=DEMO_FIREBASE_ID,
             defaults={"nickname": DEMO_NICKNAME},
         )
-        return user
-
-    def _seed_links(self, demo_user: User, lines_by_code: dict[str, Line]) -> dict:
-        created = reused = 0
-        for spec in LINK_PLAN:
-            link, was_created = SocialMediaLink.objects.update_or_create(
-                url=spec["url"],
-                user=demo_user,
-                defaults={
-                    "title": spec["title"],
-                    "status": SocialMediaLinkStatus.LIVE,
-                },
+        users = [primary]
+        for index in range(max(count - 1, 0)):
+            firebase_id = f"{DEMO_FIREBASE_ID}-{index:04d}"
+            user, _ = User.objects.get_or_create(
+                firebase_id=firebase_id,
+                defaults={"nickname": NICKNAMES[index % len(NICKNAMES)]},
             )
-            if was_created:
-                created += 1
-            else:
-                reused += 1
+            users.append(user)
+        return users
 
-            link_lines = [
-                lines_by_code[code]
-                for code in spec.get("lines", [])
-                if code in lines_by_code
-            ]
-            link.lines.set(link_lines)
-            if spec.get("stations") and link_lines:
+    # ------------------------------------------------------------------ links
+
+    def _seed_links(
+        self, users: list[User], all_lines: list[Line], total: int
+    ) -> list[SocialMediaLink]:
+        if total <= 0 or not all_lines:
+            return []
+        rng = self.rng
+        now = timezone.now()
+        links: list[SocialMediaLink] = []
+        for index in range(total):
+            line_count = min(3, len(all_lines))
+            chosen = rng.sample(all_lines, k=rng.randint(1, line_count))
+            title = rng.choice(_TITLE_TEMPLATES).format(
+                line=chosen[0].display_name if chosen else "the network"
+            )
+            link = SocialMediaLink.objects.create(
+                url=self._link_url(index),
+                title=title,
+                user=rng.choice(users),
+                status=SocialMediaLinkStatus.LIVE,
+            )
+            link.lines.set(chosen)
+            if chosen and rng.random() < 0.5:
                 link.stations.set(
-                    list(Station.objects.filter(lines__in=link_lines).distinct()[:3])
+                    list(Station.objects.filter(lines__in=chosen).distinct()[:3])
                 )
-            if spec.get("vehicles") and link_lines:
+            if chosen and rng.random() < 0.25:
                 link.vehicles.set(
-                    list(Vehicle.objects.filter(lines__in=link_lines).distinct()[:3])
+                    list(Vehicle.objects.filter(lines__in=chosen).distinct()[:3])
                 )
-        return {"created": created, "reused": reused}
+            # Spread the feed over the last three days for a varied "Load More".
+            SocialMediaLink.objects.filter(pk=link.pk).update(
+                created=now - timedelta(minutes=rng.randint(0, 3 * 24 * 60))
+            )
+            links.append(link)
+        return links
+
+    def _link_url(self, index: int) -> str:
+        rng = self.rng
+        host = rng.choice(_DOMAINS)
+        www = "www." if rng.random() < 0.4 else ""
+        tracking = rng.choice(_TRACKING)
+        if tracking == "?fbclid=IwAR0demo":
+            tracking = f"?fbclid=IwAR0demo{index}"
+        return f"https://{www}{host}/demo/{rng.choice(_SLUGS)}-{index}{tracking}"
+
+    # ---------------------------------------------------------------- reports
 
     def _seed_reports(
-        self, demo_user: User, lines_by_code: dict[str, Line], limit: int
-    ) -> dict:
-        created = reused = 0
+        self, users: list[User], lines: list[Line], total: int
+    ) -> tuple[int, int]:
+        if not lines or total <= 0:
+            return 0, 0
+        rng = self.rng
         now = timezone.now()
-        for code, specs in REPORT_PLAN[: max(limit, 0)]:
-            line = lines_by_code.get(code)
-            if line is None:
-                continue
-            line_stations = list(Station.objects.filter(lines=line)[:2])
-            for status, minutes_ago, delay, notes, attach_station in specs:
-                report, was_created = LineStatusReport.objects.update_or_create(
-                    line=line,
-                    user=demo_user,
-                    status=status,
-                    notes=notes,
-                    defaults={"delay_minutes": delay},
-                )
-                # `created` is auto_now_add; a queryset update bypasses it so the
-                # report lands inside the 15-minute consolidation window.
-                LineStatusReport.objects.filter(pk=report.pk).update(
-                    created=now - timedelta(minutes=minutes_ago)
-                )
-                if attach_station and line_stations:
-                    report.stations.set(line_stations)
-                if was_created:
-                    created += 1
-                else:
-                    reused += 1
-        return {"created": created, "reused": reused}
+        day_start = service_day_start(now)
+        span = max(int((now - day_start).total_seconds() // 60), WINDOW_MINUTES + 1)
+        stations_by_line = {
+            line.id: list(Station.objects.filter(lines=line)[:5]) for line in lines
+        }
+        statuses = list(_STATUS_WEIGHTS)
+        weights = list(_STATUS_WEIGHTS.values())
 
-    def _seed_votes(self, demo_user: User) -> dict:
+        def random_status() -> str:
+            return rng.choices(statuses, weights=weights, k=1)[0]
+
+        plans: list[dict[str, Any]] = []
+
+        def add(line: Line, status: str, inside: bool, station_bias: float) -> None:
+            if inside:
+                minutes_ago = rng.randint(1, max(WINDOW_MINUTES - 2, 1))
+            else:
+                minutes_ago = rng.randint(WINDOW_MINUTES, span)
+            delay = (
+                rng.choice(_DELAY_CHOICES)
+                if status in (PassengerStatus.DELAYED, PassengerStatus.BACKLOGGED)
+                else None
+            )
+            stations = stations_by_line.get(line.id) or []
+            station = (
+                rng.choice(stations)
+                if stations and rng.random() < station_bias
+                else None
+            )
+            plans.append(
+                {
+                    "line": line,
+                    "status": status,
+                    "delay": delay,
+                    "minutes_ago": minutes_ago,
+                    "station": station,
+                }
+            )
+
+        # 1) Guaranteed multi-status cluster inside the window.
+        if total >= HOT_LINE_COUNT * 2:
+            for line in lines[:HOT_LINE_COUNT]:
+                for status in rng.sample(statuses, 2):
+                    add(line, status, inside=True, station_bias=0.6)
+
+        # 2) Coverage: at least one report per configured line.
+        for line in lines:
+            if len(plans) >= total:
+                break
+            add(line, random_status(), rng.random() < INSIDE_WINDOW_CHANCE, 0.45)
+
+        # 3) Fill the rest round-robin so every line stays represented.
+        index = 0
+        while len(plans) < total:
+            line = lines[index % len(lines)]
+            add(line, random_status(), rng.random() < INSIDE_WINDOW_CHANCE, 0.45)
+            index += 1
+
+        for plan in plans:
+            report = LineStatusReport.objects.create(
+                line=plan["line"],
+                user=rng.choice(users),
+                status=plan["status"],
+                delay_minutes=plan["delay"],
+                notes=self._note(plan["station"], plan["line"]),
+            )
+            # `created` is auto_now_add; a queryset update bypasses it so the
+            # report lands where the plan wants it (inside or outside window).
+            LineStatusReport.objects.filter(pk=report.pk).update(
+                created=now - timedelta(minutes=plan["minutes_ago"])
+            )
+            if plan["station"] is not None:
+                report.stations.set([plan["station"]])
+
+        inside_count = sum(1 for p in plans if p["minutes_ago"] < WINDOW_MINUTES)
+        return len(plans), inside_count
+
+    def _note(self, station: Station | None, line: Line) -> str:
+        if self.rng.random() >= NOTE_CHANCE:
+            return ""
+        place = station.display_name if station is not None else line.display_name
+        return self.rng.choice(_NOTES).format(station=place)
+
+    # ----------------------------------------------------------------- votes
+
+    def _seed_votes(self, users: list[User], links: list[SocialMediaLink]) -> int:
+        if not links:
+            return 0
+        rng = self.rng
         content_type = ContentType.objects.get_for_model(SocialMediaLink)
-        voters = list(User.objects.filter(id__in=VOTER_IDS).order_by("id"))
-
-        links = list(SocialMediaLink.objects.filter(user=demo_user).order_by("id"))
-        created = reused = 0
-        for index, votes in VOTE_PLAN.items():
-            if index >= len(links):
-                continue
-            link = links[index]
-            for slot, value in votes:
-                if slot == -1:
-                    voter = demo_user
-                elif 0 <= slot < len(voters):
-                    voter = voters[slot]
-                else:
-                    continue
-                _, was_created = Vote.objects.update_or_create(
-                    user=voter,
-                    content_type=content_type,
-                    object_id=link.id,
-                    defaults={"value": value},
+        votes = []
+        for link in links:
+            voter_count = rng.randint(1, min(10, len(users)))
+            for voter in rng.sample(users, voter_count):
+                votes.append(
+                    Vote(
+                        user=voter,
+                        content_type=content_type,
+                        object_id=link.id,
+                        value=-1 if rng.random() < 0.15 else 1,
+                    )
                 )
-                if was_created:
-                    created += 1
-                else:
-                    reused += 1
-        return {"created": created, "reused": reused}
+        Vote.objects.bulk_create(votes)
+        return len(votes)
 
-    def _seed_spotting(self, demo_user: User, lines_by_code: dict[str, Line]) -> dict:
+    # --------------------------------------------------------------- spotting
+
+    def _seed_spotting(
+        self, demo_user: User, lines_by_code: dict[str, Line]
+    ) -> dict[str, int]:
         vehicles = list(
             Vehicle.objects.filter(status=VehicleStatus.IN_SERVICE).order_by("id")
         )
@@ -521,35 +567,50 @@ class Command(BaseCommand):
                 reused += 1
         return {"created": created, "reused": reused}
 
-    def _flush(self) -> None:
-        content_type = ContentType.objects.get_for_model(SocialMediaLink)
-        link_ids = list(
-            SocialMediaLink.objects.filter(
-                user__firebase_id=DEMO_FIREBASE_ID
-            ).values_list("id", flat=True)
-        )
-        votes_deleted, _ = Vote.objects.filter(
-            content_type=content_type, object_id__in=link_ids
-        ).delete()
-        location_events_deleted, _ = LocationEvent.objects.filter(
-            event__reporter__firebase_id=DEMO_FIREBASE_ID
-        ).delete()
-        events_deleted, _ = Event.objects.filter(
-            reporter__firebase_id=DEMO_FIREBASE_ID
-        ).delete()
-        reports_deleted, _ = LineStatusReport.objects.filter(
-            user__firebase_id=DEMO_FIREBASE_ID
-        ).delete()
-        links_deleted, _ = SocialMediaLink.objects.filter(
-            user__firebase_id=DEMO_FIREBASE_ID
-        ).delete()
-        users_deleted, _ = User.objects.filter(firebase_id=DEMO_FIREBASE_ID).delete()
+    # ------------------------------------------------------- delete helpers
 
+    def _purge_seeded(self) -> dict[str, int]:
+        """Delete every row owned by the seeded users. Scoped by id prefix."""
+        user_ids = list(
+            User.objects.filter(firebase_id__startswith=SEED_USER_PREFIX).values_list(
+                "id", flat=True
+            )
+        )
+        link_qs = SocialMediaLink.objects.filter(user_id__in=user_ids)
+        link_ids = list(link_qs.values_list("id", flat=True))
+        content_type = ContentType.objects.get_for_model(SocialMediaLink)
+        vote_qs = Vote.objects.filter(
+            user_id__in=user_ids, content_type=content_type, object_id__in=link_ids
+        )
+        location_qs = LocationEvent.objects.filter(event__reporter_id__in=user_ids)
+        event_qs = Event.objects.filter(reporter_id__in=user_ids)
+        report_qs = LineStatusReport.objects.filter(user_id__in=user_ids)
+        counts = {
+            "votes": vote_qs.count(),
+            "location_events": location_qs.count(),
+            "events": event_qs.count(),
+            "reports": report_qs.count(),
+            "links": link_qs.count(),
+        }
+        vote_qs.delete()
+        location_qs.delete()
+        event_qs.delete()
+        report_qs.delete()
+        # Deleting the links also clears any remaining vote targeting them.
+        link_qs.delete()
+        return counts
+
+    def _flush(self) -> None:
+        removed = self._purge_seeded()
+        users_deleted, _ = User.objects.filter(
+            firebase_id__startswith=SEED_USER_PREFIX
+        ).delete()
         self.stdout.write(
             self.style.SUCCESS(
                 "seed_demo_data --flush complete: "
-                f"votes {votes_deleted}, location events {location_events_deleted}, "
-                f"spotting events {events_deleted}, status reports {reports_deleted}, "
-                f"social links {links_deleted}, users {users_deleted} deleted."
+                f"votes {removed['votes']}, location events "
+                f"{removed['location_events']}, spotting events {removed['events']}, "
+                f"status reports {removed['reports']}, "
+                f"social links {removed['links']}, users {users_deleted} deleted."
             )
         )

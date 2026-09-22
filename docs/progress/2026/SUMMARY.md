@@ -4,7 +4,7 @@ Total commits: 101
 
 ## Monthly Breakdown
 
-### 2026-09 (28 commits)
+### 2026-09 (29 commits)
 
 #### Incident (15 commits)
 
@@ -30,8 +30,9 @@ Total commits: 101
 
 - **7c813fe** [feat](operation): per-line pulse fields and DataLoaders
 
-#### Common (6 commits)
+#### Common (7 commits)
 
+- (this commit) [chore](common): seed hundreds of varied reports across lines
 - **010428c** [test](common): cover video pipeline and bounded cleanup
 - **82addcc** [feat](common): support video in temporary media pipeline
 - **a9f1067** [feat](common): hold AWAITING_REVIEW media from auto-conversion
@@ -147,6 +148,7 @@ Total commits: 101
 
 ### Major Features & Refactors
 
+- **2026-09-22** (this commit) [chore](common): `seed_demo_data` generates hundreds of varied reports from a ~150-user pool (seeded RNG, delete-then-recreate idempotency, guaranteed multi-status lines inside the pulse window)
 - **2026-09-22** (this commit) [feat](incident): per-status report breakdown on a line — `Line.passengerStatusCounts` exposes how many reports fell into each `PassengerStatus`, batched through the existing `line_pulse_loader`
 - **2026-09-22** (a9418c5) [feat](incident): community front page backend — feed link submit with canonical-URL dedup + auto-upvote, line status reports, deterministic per-line passenger-status pulse (`operation.Line.passengerStatus`/`pulseLinks`) and social-link votes
 - **2026-09-12** (a82de20) [feat](telegram): auto-attach incoming photo/video to latest spotting
