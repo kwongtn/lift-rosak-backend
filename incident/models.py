@@ -441,3 +441,6 @@ class LineStatusReport(TimeStampedModel):
 
     class Meta:
         ordering = ["-created"]
+        indexes = [
+            models.Index(fields=["line", "created"]),
+        ]
