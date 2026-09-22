@@ -198,6 +198,7 @@ async def batch_load_line_pulse(keys: List[int]) -> List:
         message=None,
         count=0,
         status_count=0,
+        status_counts={},
         window_minutes=WINDOW_MINUTES,
         links=[],
     )

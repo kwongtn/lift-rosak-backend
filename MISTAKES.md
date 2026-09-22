@@ -389,6 +389,13 @@ backend is authoritative.
 
 ---
 
+### [2026-09-22] rosak: top-level `tests/` tree is invisible to `manage.py test` and has no pytest — TRAP
+
+**Problem**: `python manage.py test tests.operation tests.incident` fails with `TypeError: expected str, bytes or os.PathLike object, not NoneType` during discovery, and the ~300 pytest tests under `tests/` (line-pulse fields/loaders, line-status consolidation, feed-link mutations, …) never run in the standard gate. `python -m pytest` fails with `No module named pytest` in the `app` container and in the host `.venv`.
+**Root Cause**: `tests/` (and its subdirectories) carry no `__init__.py`, so they are namespace packages: Django's label discovery cannot resolve `tests.operation`, and plain `manage.py test` skips the non-package directory entirely. `pytest` is declared for dev but is not installed in any current environment, so the pytest-only suite is unrunnable while it silently looks green.
+**Fix**: _Workaround._ Runnable tests live in the app modules (`operation/tests.py`, `incident/tests.py`, `rosak/tests/…`) and are run with app labels (`manage.py test operation incident rosak`). The `tests/` suite needs pytest installed or an `__init__.py` conversion before it can join the gate.
+**Prevention**: Put new DB/schema tests where `manage.py test` actually collects them (app `tests.py` or `rosak/tests/`), or install pytest before relying on `tests/`. Don't quote a passing pytest suite as verification when the environment cannot run it.
+
 ### Sources
 
 - `docs/APPS.md` — Known Defects & Traps table and Beat schedule / Dependency graph sections.

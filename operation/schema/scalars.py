@@ -32,6 +32,12 @@ class VehicleStatusCount:
     count: int
 
 
+@strawberry.type
+class PassengerStatusCount:
+    status: PassengerStatus
+    count: int
+
+
 @strawberry_django.type(models.Station)
 class Station:
     id: strawberry.ID
@@ -121,6 +127,17 @@ class Line:
             self.id
         )
         return pulse.status_count
+
+    @strawberry.field
+    async def passenger_status_counts(self, info: Info) -> List[PassengerStatusCount]:
+        pulse = await info.context.loaders["operation"]["line_pulse_loader"].load(
+            self.id
+        )
+        return [
+            PassengerStatusCount(status=status, count=pulse.status_counts[status.value])
+            for status in PassengerStatus
+            if pulse.status_counts.get(status.value, 0) >= 1
+        ]
 
     @strawberry.field
     async def status_window_minutes(self, info: Info) -> int:

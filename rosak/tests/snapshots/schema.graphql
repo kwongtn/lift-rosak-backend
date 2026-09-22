@@ -453,6 +453,7 @@ type Line {
   passengerStatusMessage: String
   statusReportCount: Int!
   passengerStatusCount: Int!
+  passengerStatusCounts: [PassengerStatusCount!]!
   statusWindowMinutes: Int!
   pulseLinks: [SocialMediaLinkScalar!]!
   vehicleTypes: [VehicleType!]!
@@ -720,6 +721,11 @@ enum PassengerStatus {
   BACKLOGGED
   DELAYED
   DISRUPTED
+}
+
+type PassengerStatusCount {
+  status: PassengerStatus!
+  count: Int!
 }
 
 """Represents a point as `(x, y, z)` or `(x, y)`."""

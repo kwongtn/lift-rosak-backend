@@ -55,6 +55,8 @@ class Consolidation:
     status: str
     count: int
     status_count: int
+    # Per-status raw report counts; ``status_count`` is the winner's entry.
+    status_counts: dict[str, int]
     message: str
 
 
@@ -64,6 +66,7 @@ class LinePulseData:
     message: str | None
     count: int
     status_count: int
+    status_counts: dict[str, int]
     window_minutes: int
     links: list[SocialMediaLink]
 
@@ -128,6 +131,7 @@ def consolidate(
         status=best,
         count=contributing,
         status_count=status_count[best],
+        status_counts=status_count,
         message=message,
     )
 
@@ -166,7 +170,7 @@ async def load_line_pulses(
 
     Returns an entry for every requested line: a line without a recent report
     maps to ``LinePulseData(status=None, message=None, count=0, status_count=0,
-    window_minutes=WINDOW_MINUTES, links=[])``.
+    status_counts={}, window_minutes=WINDOW_MINUTES, links=[])``.
     """
     now = now or timezone.now()
     window = timedelta(minutes=WINDOW_MINUTES)
@@ -213,6 +217,7 @@ async def load_line_pulses(
                 message=None,
                 count=0,
                 status_count=0,
+                status_counts={},
                 window_minutes=WINDOW_MINUTES,
                 links=[],
             )
@@ -223,6 +228,7 @@ async def load_line_pulses(
             message=consolidation.message,
             count=consolidation.count,
             status_count=consolidation.status_count,
+            status_counts=consolidation.status_counts,
             window_minutes=WINDOW_MINUTES,
             links=[links_by_id[link_id] for link_id in order if link_id in links_by_id],
         )

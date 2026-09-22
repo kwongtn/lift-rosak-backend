@@ -12,6 +12,8 @@ from dotmap import DotMap
 from chartography.enums import DataSources
 from chartography.models import LineVehicleStatusCountHistory, Snapshot, Source
 from common.models import User
+from incident.enums import PassengerStatus
+from incident.models import LineStatusReport
 from operation.enums import AssetStatus, AssetType, VehicleStatus, WheelStatus
 from operation.models import (
     Asset,
@@ -738,3 +740,104 @@ class TestTrendsResolvers(TestCase):
             add_zero=True,
         )
         self.assertEqual(len(trends), 3)
+
+
+class PassengerStatusCountsGraphQLTests(TestCase):
+    """``Line.passengerStatusCounts`` per-category breakdown, real schema."""
+
+    QUERY = """
+        query {
+            lines {
+                code
+                statusReportCount
+                passengerStatusCount
+                passengerStatusCounts {
+                    status
+                    count
+                }
+            }
+        }
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.reporting_line = Line.objects.create(
+            display_name="Reporting Line",
+            code="PS1",
+            display_color="#00ff00",
+        )
+        cls.empty_line = Line.objects.create(
+            display_name="Empty Line",
+            code="PS2",
+            display_color="#0000ff",
+        )
+        cls.ordered_line = Line.objects.create(
+            display_name="Ordered Line",
+            code="PS3",
+            display_color="#ff00ff",
+        )
+        cls.user = User.objects.create(firebase_id="firebase-uid-status-counts")
+
+    def _lines(self):
+        result = execute_graphql(self.QUERY)
+        self.assertIsNone(result.errors)
+        return {line["code"]: line for line in result.data["lines"]}
+
+    def _report(self, line, status):
+        return LineStatusReport.objects.create(line=line, status=status, user=self.user)
+
+    def test_breakdown_lists_each_reported_status_with_counts(self):
+        # Inserted out of enum order to prove the output is not insertion order.
+        self._report(self.reporting_line, PassengerStatus.DISRUPTED)
+        self._report(self.reporting_line, PassengerStatus.BUSY)
+        self._report(self.reporting_line, PassengerStatus.NORMAL)
+        self._report(self.reporting_line, PassengerStatus.NORMAL)
+
+        line = self._lines()["PS1"]
+
+        self.assertEqual(
+            line["passengerStatusCounts"],
+            [
+                {"status": "NORMAL", "count": 2},
+                {"status": "BUSY", "count": 1},
+                {"status": "DISRUPTED", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            sum(row["count"] for row in line["passengerStatusCounts"]),
+            line["statusReportCount"],
+        )
+        self.assertEqual(line["statusReportCount"], 4)
+        # Winner-only count is unchanged by the breakdown.
+        self.assertEqual(line["passengerStatusCount"], 2)
+
+    def test_breakdown_omits_zero_count_statuses(self):
+        self._report(self.reporting_line, PassengerStatus.BUSY)
+
+        line = self._lines()["PS1"]
+
+        self.assertEqual(
+            line["passengerStatusCounts"],
+            [{"status": "BUSY", "count": 1}],
+        )
+        self.assertEqual(line["passengerStatusCount"], 1)
+
+    def test_breakdown_empty_for_line_without_reports(self):
+        line = self._lines()["PS2"]
+
+        self.assertEqual(line["passengerStatusCounts"], [])
+        self.assertEqual(line["statusReportCount"], 0)
+        self.assertEqual(line["passengerStatusCount"], 0)
+
+    def test_breakdown_follows_enum_declaration_order(self):
+        # CROWDED (3rd), BACKLOGGED (5th), DELAYED (6th) in reverse insertion.
+        self._report(self.ordered_line, PassengerStatus.DELAYED)
+        self._report(self.ordered_line, PassengerStatus.BACKLOGGED)
+        self._report(self.ordered_line, PassengerStatus.CROWDED)
+
+        line = self._lines()["PS3"]
+
+        self.assertEqual(
+            [row["status"] for row in line["passengerStatusCounts"]],
+            ["CROWDED", "BACKLOGGED", "DELAYED"],
+        )

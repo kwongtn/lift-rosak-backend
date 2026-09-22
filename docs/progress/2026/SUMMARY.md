@@ -1,12 +1,12 @@
 # Yearly Summary - 2026
 
-Total commits: 100
+Total commits: 101
 
 ## Monthly Breakdown
 
-### 2026-09 (27 commits)
+### 2026-09 (28 commits)
 
-#### Incident (14 commits)
+#### Incident (15 commits)
 
 - **67a830c** [feat](incident): complete insiden reporting backend
 - **b9bd6fd** [feat](incident): add public publicSocialMediaLinks GraphQL query with line filter
@@ -24,6 +24,7 @@ Total commits: 100
 - **f0ded00** [feat](incident): feed link submit with dedup and auto-upvote
 - **a62ed6d** [feat](incident): line status report and page title services
 - **a9418c5** [feat](incident): feed submit and line status report mutations
+- (this commit) [feat](incident): expose per-status report counts on a line
 
 #### Operation (1 commits)
 
@@ -146,6 +147,7 @@ Total commits: 100
 
 ### Major Features & Refactors
 
+- **2026-09-22** (this commit) [feat](incident): per-status report breakdown on a line — `Line.passengerStatusCounts` exposes how many reports fell into each `PassengerStatus`, batched through the existing `line_pulse_loader`
 - **2026-09-22** (a9418c5) [feat](incident): community front page backend — feed link submit with canonical-URL dedup + auto-upvote, line status reports, deterministic per-line passenger-status pulse (`operation.Line.passengerStatus`/`pulseLinks`) and social-link votes
 - **2026-09-12** (a82de20) [feat](telegram): auto-attach incoming photo/video to latest spotting
 - **2026-09-16** (uncommitted) [feat](telegram): /spotting_today not-in-service exclusion flag; media uploads queued as TemporaryMedia even while uploads disabled; /approve approves replied /link

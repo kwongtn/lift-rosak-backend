@@ -170,6 +170,10 @@ def test_status_count_counts_only_the_winning_status():
     assert result.status == PassengerStatus.NORMAL
     assert result.count == 3
     assert result.status_count == 2
+    assert result.status_counts == {
+        PassengerStatus.NORMAL: 2,
+        PassengerStatus.DELAYED: 1,
+    }
 
 
 def test_only_old_reports_returns_none():
@@ -187,6 +191,7 @@ def test_message_singular_phrasing():
         status=PassengerStatus.NORMAL,
         count=1,
         status_count=1,
+        status_counts={PassengerStatus.NORMAL: 1},
         message="According to 1 social media entry, this line is Normal.",
     )
 
