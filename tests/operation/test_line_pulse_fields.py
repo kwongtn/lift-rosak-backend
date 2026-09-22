@@ -32,6 +32,8 @@ query {
     }
     passengerStatus
     passengerStatusMessage
+    passengerStatusCount
+    statusWindowMinutes
     statusReportCount
     pulseLinks {
       id
@@ -145,6 +147,8 @@ async def test_line_fields_report_vehicle_counts_and_no_data_pulse():
     ]
     assert item["passengerStatus"] is None
     assert item["passengerStatusMessage"] is None
+    assert item["passengerStatusCount"] == 0
+    assert item["statusWindowMinutes"] == 15
     assert item["statusReportCount"] == 0
     assert item["pulseLinks"] == []
 

@@ -6,12 +6,13 @@ Covers ``batch_load_line_vehicle_counts`` (one aggregate for N lines) and
 
 import pytest
 from asgiref.sync import async_to_sync, sync_to_async
+from django.contrib.contenttypes.models import ContentType
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
 from common.models import User
 from incident.enums import PassengerStatus
-from incident.models import LineStatusReport
+from incident.models import LineStatusReport, SocialMediaLink
 from operation.enums import VehicleStatus
 from operation.models import Line, Vehicle, VehicleLine, VehicleType
 from operation.schema.loaders import (
@@ -178,3 +179,31 @@ async def test_line_pulse_loader_unknown_key_returns_empty_pulse():
     assert len(pulses) == 1
     assert pulses[0].status is None
     assert pulses[0].count == 0
+
+
+@pytest.mark.django_db
+def test_line_pulse_loader_query_count_is_constant_in_line_count():
+    user = User.objects.create(firebase_id="pulse-query-user")
+    lines = []
+    for i in range(5):
+        line = Line.objects.create(
+            code=f"PQ{i}", display_name=f"PQ{i}", display_color="#FF0000"
+        )
+        LineStatusReport.objects.create(
+            line=line, status=PassengerStatus.NORMAL, user=user
+        )
+        lines.append(line)
+
+    def _count(ids):
+        with CaptureQueriesContext(connection) as captured:
+            pulses = async_to_sync(batch_load_line_pulse)(ids)
+        return len(captured.captured_queries), pulses
+
+    # Warm the ContentType cache so the count reflects only the pulse query.
+    ContentType.objects.get_for_model(SocialMediaLink)
+
+    one_line_queries, _ = _count([lines[0].id])
+    many_line_queries, pulses = _count([line.id for line in lines])
+
+    assert one_line_queries == many_line_queries == 1
+    assert all(pulse.status == PassengerStatus.NORMAL for pulse in pulses)

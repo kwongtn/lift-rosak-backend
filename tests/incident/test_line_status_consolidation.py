@@ -137,7 +137,7 @@ def test_weight_and_recency_tie_severity_rank_wins():
 def test_window_excludes_older_report():
     # (i)
     entries = [
-        _entry(PassengerStatus.CROWDED, minutes_ago=7 * 60),
+        _entry(PassengerStatus.CROWDED, minutes_ago=30),
         _entry(PassengerStatus.NORMAL, minutes_ago=5),
     ]
 
@@ -148,9 +148,33 @@ def test_window_excludes_older_report():
     assert result.count == 1
 
 
+def test_default_window_is_fifteen_minutes():
+    # 14 minutes inside the window, 16 minutes outside.
+    inside = _entry(PassengerStatus.NORMAL, minutes_ago=14)
+    outside = _entry(PassengerStatus.CROWDED, minutes_ago=16)
+
+    assert consolidate([inside], {}, now=NOW) is not None
+    assert consolidate([outside], {}, now=NOW) is None
+
+
+def test_status_count_counts_only_the_winning_status():
+    entries = [
+        _entry(PassengerStatus.NORMAL, minutes_ago=5),
+        _entry(PassengerStatus.NORMAL, minutes_ago=3),
+        _entry(PassengerStatus.DELAYED, minutes_ago=1),
+    ]
+
+    result = consolidate(entries, {}, now=NOW)
+
+    assert result is not None
+    assert result.status == PassengerStatus.NORMAL
+    assert result.count == 3
+    assert result.status_count == 2
+
+
 def test_only_old_reports_returns_none():
     # (i, cont.) a report outside the window does not count at all.
-    entries = [_entry(PassengerStatus.CROWDED, minutes_ago=7 * 60)]
+    entries = [_entry(PassengerStatus.CROWDED, minutes_ago=30)]
 
     assert consolidate(entries, {}, now=NOW) is None
 
@@ -162,6 +186,7 @@ def test_message_singular_phrasing():
     assert result == Consolidation(
         status=PassengerStatus.NORMAL,
         count=1,
+        status_count=1,
         message="According to 1 social media entry, this line is Normal.",
     )
 

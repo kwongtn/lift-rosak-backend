@@ -20,7 +20,11 @@ from incident.enums import PassengerStatus
 from incident.models import LineStatusReport, SocialMediaLink
 
 # Calibration knobs.
-WINDOW_HOURS = 6
+# 15-minute rolling window. Crowd-sourced crowding displays use a ~10-minute
+# window in industry practice (Moovit/Transit); with 2-8 minute metro headways
+# anything near an hour is far too stale to describe the next train, so we keep
+# a small margin above the 10-minute display window.
+WINDOW_MINUTES = 15
 MIN_REPORTS = 1
 _MAX_PULSE_LINKS = 5
 
@@ -46,6 +50,7 @@ class ReportEntry:
 class Consolidation:
     status: str
     count: int
+    status_count: int
     message: str
 
 
@@ -54,6 +59,8 @@ class LinePulseData:
     status: str | None
     message: str | None
     count: int
+    status_count: int
+    window_minutes: int
     links: list[SocialMediaLink]
 
 
@@ -62,7 +69,7 @@ def consolidate(
     scores: Mapping[int, int],
     *,
     now: datetime,
-    window: timedelta = timedelta(hours=WINDOW_HOURS),
+    window: timedelta = timedelta(minutes=WINDOW_MINUTES),
     min_reports: int = MIN_REPORTS,
 ) -> Consolidation | None:
     """Weighted majority over recent report entries, deterministically.
@@ -77,6 +84,7 @@ def consolidate(
         return None
 
     weight: dict[str, int] = {}
+    status_count: dict[str, int] = {}
     latest: dict[str, datetime] = {}
     contributing = 0
     for entry in recent:
@@ -87,6 +95,7 @@ def consolidate(
         if contribution <= 0:
             continue
         weight[entry.status] = weight.get(entry.status, 0) + contribution
+        status_count[entry.status] = status_count.get(entry.status, 0) + 1
         latest[entry.status] = max(
             latest.get(entry.status, entry.created), entry.created
         )
@@ -103,7 +112,12 @@ def consolidate(
     message = (
         f"According to {contributing} social media {noun}, this line is {LABEL[best]}."
     )
-    return Consolidation(status=best, count=contributing, message=message)
+    return Consolidation(
+        status=best,
+        count=contributing,
+        status_count=status_count[best],
+        message=message,
+    )
 
 
 async def _content_type_for(model) -> ContentType:
@@ -139,10 +153,11 @@ async def load_line_pulses(
     """Consolidated pulse per line id in a constant number of queries.
 
     Returns an entry for every requested line: a line without a recent report
-    maps to ``LinePulseData(status=None, message=None, count=0, links=[])``.
+    maps to ``LinePulseData(status=None, message=None, count=0, status_count=0,
+    window_minutes=WINDOW_MINUTES, links=[])``.
     """
     now = now or timezone.now()
-    window = timedelta(hours=WINDOW_HOURS)
+    window = timedelta(minutes=WINDOW_MINUTES)
 
     reports = [
         report
@@ -177,10 +192,17 @@ async def load_line_pulses(
 
     pulses: dict[int, LinePulseData] = {}
     for line_id in line_ids:
-        consolidation = consolidate(entries_by_line.get(line_id, []), scores, now=now)
+        consolidation = consolidate(
+            entries_by_line.get(line_id, []), scores, now=now, window=window
+        )
         if consolidation is None:
             pulses[line_id] = LinePulseData(
-                status=None, message=None, count=0, links=[]
+                status=None,
+                message=None,
+                count=0,
+                status_count=0,
+                window_minutes=WINDOW_MINUTES,
+                links=[],
             )
             continue
         order = link_order_by_line.get(line_id, [])[:_MAX_PULSE_LINKS]
@@ -188,6 +210,9 @@ async def load_line_pulses(
             status=consolidation.status,
             message=consolidation.message,
             count=consolidation.count,
+            status_count=consolidation.status_count,
+            window_minutes=WINDOW_MINUTES,
             links=[links_by_id[link_id] for link_id in order if link_id in links_by_id],
         )
     return pulses
+

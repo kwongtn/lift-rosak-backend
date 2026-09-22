@@ -116,6 +116,20 @@ class Line:
         return pulse.count
 
     @strawberry.field
+    async def passenger_status_count(self, info: Info) -> int:
+        pulse = await info.context.loaders["operation"]["line_pulse_loader"].load(
+            self.id
+        )
+        return pulse.status_count
+
+    @strawberry.field
+    async def status_window_minutes(self, info: Info) -> int:
+        pulse = await info.context.loaders["operation"]["line_pulse_loader"].load(
+            self.id
+        )
+        return pulse.window_minutes
+
+    @strawberry.field
     async def pulse_links(self, info: Info) -> List[SocialMediaLinkScalar]:
         pulse = await info.context.loaders["operation"]["line_pulse_loader"].load(
             self.id

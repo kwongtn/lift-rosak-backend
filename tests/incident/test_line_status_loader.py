@@ -63,12 +63,16 @@ async def test_line_with_report_gets_consolidated_pulse_and_others_are_empty():
     assert set(pulses) == {line.id, empty_line.id}
     assert pulses[line.id].status == PassengerStatus.CROWDED
     assert pulses[line.id].count == 1
+    assert pulses[line.id].status_count == 1
+    assert pulses[line.id].window_minutes == 15
     assert pulses[line.id].message == (
         "According to 1 social media entry, this line is Crowded."
     )
     assert pulses[empty_line.id].status is None
     assert pulses[empty_line.id].message is None
     assert pulses[empty_line.id].count == 0
+    assert pulses[empty_line.id].status_count == 0
+    assert pulses[empty_line.id].window_minutes == 15
     assert pulses[empty_line.id].links == []
 
 
@@ -76,12 +80,28 @@ async def test_line_with_report_gets_consolidated_pulse_and_others_are_empty():
 async def test_reports_older_than_window_are_ignored():
     user = await _make_user(2)
     line = await _make_line("P3")
-    await _make_report(line, user, PassengerStatus.DISRUPTED, minutes_ago=7 * 60)
+    await _make_report(line, user, PassengerStatus.DISRUPTED, minutes_ago=20)
 
     pulses = await load_line_pulses([line.id])
 
     assert pulses[line.id].status is None
     assert pulses[line.id].count == 0
+    assert pulses[line.id].status_count == 0
+
+
+@pytest.mark.django_db
+async def test_status_count_only_counts_the_consolidated_status():
+    user = await _make_user(4)
+    line = await _make_line("P5")
+    await _make_report(line, user, PassengerStatus.NORMAL, minutes_ago=5)
+    await _make_report(line, user, PassengerStatus.NORMAL, minutes_ago=3)
+    await _make_report(line, user, PassengerStatus.DELAYED, minutes_ago=1)
+
+    pulses = await load_line_pulses([line.id])
+
+    assert pulses[line.id].status == PassengerStatus.NORMAL
+    assert pulses[line.id].count == 3
+    assert pulses[line.id].status_count == 2
 
 
 @pytest.mark.django_db
@@ -104,6 +124,7 @@ async def test_pulse_links_are_newest_first_distinct_and_capped_at_five():
     pulses = await load_line_pulses([line.id])
 
     assert pulses[line.id].count == 7
+    assert pulses[line.id].status_count == 7
     assert [link.id for link in pulses[line.id].links] == [
         link.id for link in links[:5]
     ]

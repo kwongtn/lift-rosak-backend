@@ -186,10 +186,21 @@ async def batch_load_line_vehicle_counts(keys: List[int]) -> List[dict]:
 async def batch_load_line_pulse(keys: List[int]) -> List:
     # Local import keeps the operation -> incident.services edge out of module
     # import time (incident.services.line_status imports incident.models).
-    from incident.services.line_status import LinePulseData, load_line_pulses
+    from incident.services.line_status import (
+        WINDOW_MINUTES,
+        LinePulseData,
+        load_line_pulses,
+    )
 
     pulses = await load_line_pulses(list(keys))
-    empty = LinePulseData(status=None, message=None, count=0, links=[])
+    empty = LinePulseData(
+        status=None,
+        message=None,
+        count=0,
+        status_count=0,
+        window_minutes=WINDOW_MINUTES,
+        links=[],
+    )
     return [pulses.get(key, empty) for key in keys]
 
 
