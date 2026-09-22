@@ -1,10 +1,10 @@
 # Yearly Summary - 2026
 
-Total commits: 101
+Total commits: 102
 
 ## Monthly Breakdown
 
-### 2026-09 (29 commits)
+### 2026-09 (30 commits)
 
 #### Incident (15 commits)
 
@@ -29,6 +29,10 @@ Total commits: 101
 #### Operation (1 commits)
 
 - **7c813fe** [feat](operation): per-line pulse fields and DataLoaders
+
+#### Spotting (1 commits)
+
+- **46cfde5** [fix](spotting): mount the firebase credential from the real home path
 
 #### Common (7 commits)
 

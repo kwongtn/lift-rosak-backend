@@ -167,6 +167,13 @@ backend is authoritative.
 
 ## spotting
 
+### [2026-09-22] spotting: Firebase credential mount became a root-owned directory — FIXED (2026-09-22) `46cfde5`
+
+**Problem**: Firebase id-token verification raised `IsADirectoryError` from `google.auth` on the first authenticated request even though the service booted and answered `/graphql/` fine. The mounted credential path was not a file at all.
+**Root Cause**: `docker-compose.yml` bind-mounted a literal host path that did not exist. Docker auto-creates a missing bind source as an **empty root-owned directory** rather than failing, so the container saw a directory at `GOOGLE_APPLICATION_CREDENTIALS`; `firebase_admin` only reads that path at **request** time (`verify_id_token`), which is why a misconfigured mount looked like a generic auth failure instead of a boot-time config error.
+**Fix**: Mount from `${HOME}/.firebase/…` (the real host path) and add a fail-fast check in `SpottingConfig.ready()` — raise `ImproperlyConfigured` when `GOOGLE_APPLICATION_CREDENTIALS` is set but `os.path.isfile` is false. `.firebase/` added to `.gitignore`. Commit `46cfde5` `fix(spotting): mount the firebase credential from the real home path` (2026-09-22).
+**Prevention**: Never bind-mount a source that might not exist — Docker silently substitutes a directory. Validate credential paths at startup (app `ready()` / `manage.py check`) so a bad mount fails immediately instead of surfacing as an auth error at request time.
+
 ### [2026-08-24] spotting: `markAsRead` gated `IsAdmin` — per-user read state unreachable — FIXED (2026-08-24) `1e2a421`
 
 **Problem**: `EventScalar.is_read` / `EventFilter.is_read` are user-scoped and `IsLoggedIn`, but `markAsRead` required `IsAdmin` (`spotting/schema/schema.py:180`) — complete feature switched off for non-admins (`docs/APPS.md:295`, `docs/components/spotting.md:34,93`).

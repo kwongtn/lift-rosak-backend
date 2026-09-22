@@ -52,7 +52,7 @@
 
 - **Cross-app FKs out of `spotting`:** `Event.reporter → common.User` (CASCADE), `Event.vehicle → operation.Vehicle` (CASCADE), `Event.origin_station` / `destination_station → operation.Station` (PROTECT), `Event.medias → common.Media` M2M through `EventMedia`, `EventRead.reader → common.User`. `LocationEvent` extends `generic.models.WebLocationModel`.
 - **Cross-app FKs into `spotting`:** `telegram_provider.TelegramSpottingEventLog.spotting_event → spotting.Event`.
-- **Python/infra:** `strawberry` / `strawberry-django`, `django.contrib.gis` (PostGIS `PointField`), `django_choices_field.TextChoicesField`, `model_utils.TimeStampedModel`, `django.contrib.postgres.indexes.BTreeIndex`, `python-telegram-bot`, `celery`, `firebase_admin` (initialised in `SpottingConfig.ready()` — the app config is the global Firebase bootstrap), `django-advanced-filters` / `django-rangefilter` / `ordered-model` in admin.
+- **Python/infra:** `strawberry` / `strawberry-django`, `django.contrib.gis` (PostGIS `PointField`), `django_choices_field.TextChoicesField`, `model_utils.TimeStampedModel`, `django.contrib.postgres.indexes.BTreeIndex`, `python-telegram-bot`, `celery`, `firebase_admin` (initialised in `SpottingConfig.ready()` — the app config is the global Firebase bootstrap; `ready()` also raises `ImproperlyConfigured` when `GOOGLE_APPLICATION_CREDENTIALS` is set but is not a readable file, catching a missing `docker-compose` bind mount that Docker had silently created as a directory), `django-advanced-filters` / `django-rangefilter` / `ordered-model` in admin.
 
 ## ⚙️ Internal State & Logic
 
@@ -86,7 +86,7 @@
 - **`SpottingContextLoaders` dict** — dropping a new `DataLoader` key here and a matching `@strawberry.field` on `EventScalar` adds a batched relation without touching `rosak/context.py`.
 - **`EventSource` table + `SpottingDataSource`** — the designed seam for new ingestion channels (a Discord bot, an OCR importer, an open API) without schema migrations; the `EventSource.data` JSON column (migration 0017) is the per-source payload escape hatch.
 - **`TemporaryMediaType` + `TemporaryMedia.metadata`** — the moderation pipeline is generic over upload types, so new spotting attachment kinds (video, audio, ticket scans) plug in as new `upload_type` branches.
-- **`SpottingConfig.ready()`** — currently only bootstraps Firebase; the natural place to register `post_save` signals on `Event` (there are none today, so e.g. push notification or leaderboard fan-out would attach here).
+- **`SpottingConfig.ready()`** — bootstraps Firebase and validates the `GOOGLE_APPLICATION_CREDENTIALS` path; the natural place to register `post_save` signals on `Event` (there are none today, so e.g. push notification or leaderboard fan-out would attach here).
 - **`common.ClearanceType`** — permission gradations (`TRUSTED_MEDIA_UPLOADER`) already exist; new spotting-specific clearances can gate mutations via new `rosak.permissions` classes.
 - **Celery beat** — `report_spotting_today` is the template for further scheduled digests; add entries to `app.conf.beat_schedule`.
 

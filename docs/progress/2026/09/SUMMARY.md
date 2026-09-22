@@ -1,11 +1,11 @@
 # Monthly Summary - September 2026
 
-Total commits: 29
+Total commits: 30
 
 ## Commit Type Distribution
 
 - feat: 22
-- fix: 3
+- fix: 4
 - test: 2
 - chore: 2
 
@@ -35,6 +35,10 @@ Total commits: 29
 ### Operation (1 commits)
 
 - **7c813fe** [feat](operation): per-line pulse fields and DataLoaders
+
+### Spotting (1 commits)
+
+- **46cfde5** [fix](spotting): mount the firebase credential from the real home path
 
 ### Common (7 commits)
 
