@@ -280,6 +280,13 @@ backend is authoritative.
 **Fix**: The handler now always records the `TemporaryMedia` row (flagged `metadata["uploads_disabled"] = True`) and merely defers publication; the conversion task's existing `should_upload_media()` re-check keeps the row queued until re-enabled. Reply on the disabled path now says the media is queued.
 **Prevention**: Gate publication (task dispatch / feature on/off), not ingestion — always persist the user's submission so the flag flips without losing data.
 
+### [2026-09-24] telegram_provider: `/spotting_today` referenced a non-existent `VehicleStatus` member — FIXED `6075118`
+
+**Problem**: `utils.get_daily_updates` excluded `vehicle__status=VehicleStatus.NOT_IN_SERVICE`, but `operation.VehicleStatus` has no such member (it is `OUT_OF_SERVICE`; only `spotting.SpottingVehicleStatus` keeps `NOT_IN_SERVICE`). Every `/spotting_today` call and the 03:00 `report_spotting_today` digest raised `AttributeError` before rendering.
+**Root Cause**: The flag was written against the spotting-event enum's member name while filtering the operation `Vehicle.status`, and no test exercised `get_daily_updates` against real rows, so the bad attribute reference survived review (it was only ever mocked).
+**Fix**: Use `VehicleStatus.OUT_OF_SERVICE`; added `telegram_provider/tests.py::GetDailyUpdatesTests` (real ORM) covering default exclusion and `include_not_in_service=True` inclusion.
+**Prevention**: Give every enum-attribute reference at least one real-query test — `AttributeError` on a `TextChoices` member is invisible to mocks; confirm which app owns the model before reusing an enum member name.
+
 ---
 
 ## chartography

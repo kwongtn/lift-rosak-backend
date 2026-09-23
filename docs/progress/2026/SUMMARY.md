@@ -1,10 +1,10 @@
 # Yearly Summary - 2026
 
-Total commits: 105
+Total commits: 106
 
 ## Monthly Breakdown
 
-### 2026-09 (33 commits)
+### 2026-09 (34 commits)
 
 #### Incident (18 commits)
 
@@ -50,12 +50,13 @@ Total commits: 105
 - **a531e51** [feat](common): add AWAITING_REVIEW temporary media status
 - (uncommitted) [fix](common): disable boto3 trailer checksums for OCI S3-compat (aws-chunked 501)
 
-#### Telegram (4 commits)
+#### Telegram (5 commits)
 
 - **82e5c3f** [test](telegram): cover media upload + /approve
 - **ed9c461** [feat](telegram): register media handler and /approve command
 - **ea49424** [feat](telegram): add /approve for reviewed media
 - **a82de20** [feat](telegram): auto-attach incoming photo/video to latest spotting
+- **6075118** [fix](telegram): `/spotting_today` referenced a non-existent `VehicleStatus` member — now excludes `OUT_OF_SERVICE`
 
 #### Ci (1 commits)
 
@@ -157,6 +158,7 @@ Total commits: 105
 
 ### Major Features & Refactors
 
+- **2026-09-24** **6075118** [fix](telegram): `/spotting_today` excludes the operation status `OUT_OF_SERVICE` — the not-in-service flag referenced a non-existent `VehicleStatus.NOT_IN_SERVICE`, so every digest call raised `AttributeError`
 - **2026-09-23** **32b7686** [feat](incident): admin-only `deleteSocialMediaLink` mutation removes a feed link (the ownership check in `delete_social_media_link` is bypassed for admins)
 - **2026-09-23** (this commit) [docs](incident): `LineStatusHourBucket.statusCounts` documented as reusing the existing `operation.schema.scalars.PassengerStatusCount` type (the feature itself landed in `22baa99`)
 - **2026-09-22** (this commit) [fix](incident): `lineStatusHistory` returns the full 24-bucket service day (03:00 → 02:00) instead of stopping at the current hour; a line with no report still returns `[]` for the "No data" state
