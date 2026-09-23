@@ -65,6 +65,7 @@ Total commits: 34
 - **a82de20** [feat](telegram): auto-attach incoming photo/video to latest spotting
 - **6075118** [fix](telegram): `/spotting_today` referenced a non-existent `VehicleStatus` member — now excludes `OUT_OF_SERVICE`
 - (uncommitted) [feat](telegram): /spotting_today excludes not-in-service by default with `--include-not-in-service`/`--inis` opt-in; media uploads always record a TemporaryMedia row while uploads disabled; /approve on a replied /link message approves the link
+- **42d8b12** [feat](telegram): `/spotting_today` service-day cutoff — 3am default (pre-3am counts as previous day), `--use-actual-date`, `--cutoff=HHMM`; explicit date never shifted
 
 ### Ci (1 commits)
 

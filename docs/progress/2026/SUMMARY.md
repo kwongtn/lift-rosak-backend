@@ -57,6 +57,7 @@ Total commits: 106
 - **ea49424** [feat](telegram): add /approve for reviewed media
 - **a82de20** [feat](telegram): auto-attach incoming photo/video to latest spotting
 - **6075118** [fix](telegram): `/spotting_today` referenced a non-existent `VehicleStatus` member — now excludes `OUT_OF_SERVICE`
+- **42d8b12** [feat](telegram): `/spotting_today` service-day cutoff — 3am default (pre-3am counts as previous day), `--use-actual-date`, `--cutoff=HHMM`; explicit date never shifted
 
 #### Ci (1 commits)
 
@@ -158,6 +159,7 @@ Total commits: 106
 
 ### Major Features & Refactors
 
+- **2026-09-24** **42d8b12** [feat](telegram): `/spotting_today` service-day cutoff — pre-3am counts as the previous day by default; `--use-actual-date` (12am) and `--cutoff=HHMM` override; explicit dates never shift
 - **2026-09-24** **6075118** [fix](telegram): `/spotting_today` excludes the operation status `OUT_OF_SERVICE` — the not-in-service flag referenced a non-existent `VehicleStatus.NOT_IN_SERVICE`, so every digest call raised `AttributeError`
 - **2026-09-23** **32b7686** [feat](incident): admin-only `deleteSocialMediaLink` mutation removes a feed link (the ownership check in `delete_social_media_link` is bypassed for admins)
 - **2026-09-23** (this commit) [docs](incident): `LineStatusHourBucket.statusCounts` documented as reusing the existing `operation.schema.scalars.PassengerStatusCount` type (the feature itself landed in `22baa99`)

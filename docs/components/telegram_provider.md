@@ -44,7 +44,7 @@
 | `/fav` | `favourite_vehicle` | Aggregates `spotting.Event` counts per vehicle for this user on the channel's line. |
 | `/spot`, `/s` | `spot` | The main ingestion path (below). |
 | `/delete` | `delete` | Reply-to-message deletion of a spotting entry. |
-| `/spotting_today` | `spotting_today` | Renders `utils.get_daily_updates(line_id)` for the channel's line. |
+| `/spotting_today [date] [--inis] [--use-actual-date \| --cutoff=HHMM]` | `spotting_today` | Renders `utils.get_daily_updates(...)` for the channel's line. Without an explicit date, "today" runs through `utils.effective_spotting_date(now, cutoff)` in `settings.TIME_ZONE`: the default 03:00 cutoff makes 00:00–02:59 count as the previous day; `--use-actual-date` uses the 12am cutoff and `--cutoff=HHMM` a custom one (mutually exclusive). An explicit date is never shifted. |
 | `/approve` | `approve` | Admin-only approval of a held `AWAITING_REVIEW` media row (reply to the media or its review message); re-stamps it `OVERRIDE_CLEARED` and dispatches conversion. |
 | — (plain message) | `media` | Non-command photo/video/animation/video-document messages; downloads the file and stages a `TemporaryMedia` attached to the sender's latest `spotting.Event` on the channel's line. Registered as a separate `MessageHandler` (not in `handlers_dict`) and explicitly excludes commands. |
 | — | `error_handler` | Formats update + `chat_data`/`user_data` + traceback into an HTML report; **currently only `print`s it** (the developer-DM `send_message` is commented out, and `TELEGRAM_ADMIN_CHAT_ID` is unused).
@@ -90,7 +90,7 @@ Verified user lookup by `telegram_id` → argparse → channel's `Line` → `Veh
   - `TelegramSpottingEventLog` — join table: FK `spotting.Event` (`SET_NULL`, related_name `telegram_logs`) + FK `TelegramLogs` (`CASCADE`, related_name also `telegram_logs`).
 - **No conversation/session state.** Every command is stateless and re-derives context from the message (chat id → line, `from_user.id` → user). PTB's `chat_data`/`user_data` are only touched in `error_handler` reporting.
 - **Resilience:** `utils.retry_on_error(obj, fn_name, *args, max_retries=3, backoff_base=2.0)` retries any bot call with bounded exponential backoff, treating `BadRequest("Message to react not found")` as terminal-success. The old unbounded `infinite_retry_on_error` no longer exists (replaced in `0d1c3a4`), though `AGENTS.md` still references the old name.
-- **Reporting logic:** `utils.get_daily_updates(line_id, spotting_date)` is sync ORM code (wrapped in `sync_to_async` by callers) that buckets a line's `VehicleLine` roster into "Not Spotted" / "Spotted Today" / "Spotted Today, to review" and renders Telegram HTML. Its `spotting_date` argument is immediately overwritten with `date.today()` inside the function — so `report_spotting_today`'s "yesterday" intent is silently ignored.
+- **Reporting logic:** `utils.get_daily_updates(line_id, spotting_date)` is sync ORM code (wrapped in `sync_to_async` by callers) that buckets a line's `VehicleLine` roster into "Not Spotted" / "Spotted Today" / "Spotted Today, to review" and renders Telegram HTML. The `spotting_date` argument filters the spotted set, but the rendered header always uses `date.today()` — so `report_spotting_today`'s "yesterday" intent is silently mislabelled.
 
 ### Cross-app coupling
 
