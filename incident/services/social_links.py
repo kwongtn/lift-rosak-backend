@@ -127,9 +127,11 @@ async def update_social_media_link(
     return link
 
 
-async def delete_social_media_link(user: User, *, link_id: int) -> None:
+async def delete_social_media_link(
+    user: User, *, link_id: int, is_admin: bool = False
+) -> None:
     link = await SocialMediaLink.objects.aget(pk=link_id)
-    if link.user_id != user.id:
+    if not is_admin and link.user_id != user.id:
         raise IncidentServiceError(
             f"SocialMediaLink {link_id} is not owned by this user."
         )

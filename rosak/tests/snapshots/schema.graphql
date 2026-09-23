@@ -671,6 +671,7 @@ type Mutation {
   submitSocialMediaLink(input: SocialMediaLinkInput!): GenericMutationReturn!
   markSocialMediaLinkCompleted(socialMediaLinkId: ID!): GenericMutationReturn!
   updateSocialMediaLink(socialMediaLinkId: ID!, input: SocialMediaLinkInput!): GenericMutationReturn!
+  deleteSocialMediaLink(socialMediaLinkId: ID!): GenericMutationReturn!
   submitFeedLink(input: FeedLinkInput!): FeedLinkPayload!
   submitLineStatusReport(input: LineStatusReportInput!): GenericMutationReturn!
   upvoteSocialMediaLink(socialMediaLinkId: ID!): GenericMutationReturn!

@@ -159,6 +159,20 @@ class SocialMediaLinkMutations:
             raise_service_error(exc)
         return GenericMutationReturn(ok=True)
 
+    @strawberry.mutation(permission_classes=[IsAdmin])
+    async def delete_social_media_link(
+        self, info: Info, social_media_link_id: strawberry.ID
+    ) -> GenericMutationReturn:
+        try:
+            await services.delete_social_media_link(
+                info.context.user,
+                link_id=int(social_media_link_id),
+                is_admin=True,
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
     @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def submit_feed_link(
         self, info: Info, input: FeedLinkInput

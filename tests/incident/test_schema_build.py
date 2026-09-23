@@ -57,6 +57,7 @@ def test_root_mutation_exposes_all_incident_mutations():
         "remove_vote",
         "submit_social_media_link",
         "mark_social_media_link_completed",
+        "delete_social_media_link",
         "extract_data_from_url",
     }
     missing = expected - mutation_fields

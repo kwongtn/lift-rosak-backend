@@ -785,6 +785,59 @@ class SocialMediaLinkTests(TestCase):
             CalendarIncidentCategory.objects.filter(name="Just Reporting").exists()
         )
 
+    def test_delete_social_media_link_admin_deletes_another_users_link(self):
+        from unittest.mock import patch
+
+        from incident.models import SocialMediaLink
+
+        link = SocialMediaLink.objects.create(
+            url="https://twitter.com/user/status/delete-me",
+            title="Delete me",
+            user=self.user,
+        )
+        query = """
+            mutation DeleteSocialMediaLink($linkId: ID!) {
+                deleteSocialMediaLink(socialMediaLinkId: $linkId) {
+                    ok
+                }
+            }
+        """
+        with patch("rosak.permissions.has_admin_claim", return_value=True):
+            result = execute_graphql(
+                query,
+                variables={"linkId": str(link.id)},
+                user=self.admin_user,
+            )
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        self.assertTrue(result.data["deleteSocialMediaLink"]["ok"])
+        self.assertFalse(SocialMediaLink.objects.filter(pk=link.id).exists())
+
+    def test_delete_social_media_link_requires_admin(self):
+        from unittest.mock import patch
+
+        from incident.models import SocialMediaLink
+
+        link = SocialMediaLink.objects.create(
+            url="https://twitter.com/user/status/keep-me",
+            title="Keep me",
+            user=self.user,
+        )
+        query = """
+            mutation DeleteSocialMediaLink($linkId: ID!) {
+                deleteSocialMediaLink(socialMediaLinkId: $linkId) {
+                    ok
+                }
+            }
+        """
+        with patch("rosak.permissions.has_admin_claim", return_value=False):
+            result = execute_graphql(
+                query,
+                variables={"linkId": str(link.id)},
+                user=self.user,
+            )
+        self.assertIsNotNone(result.errors)
+        self.assertTrue(SocialMediaLink.objects.filter(pk=link.id).exists())
+
     def test_submit_social_media_link_title_null_coerced_via_graphql(self):
         query = """
             mutation SubmitSocialMediaLink($input: SocialMediaLinkInput!) {
