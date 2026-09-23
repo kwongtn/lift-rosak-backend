@@ -3,6 +3,7 @@ import json
 from datetime import date
 
 from asgiref.sync import async_to_sync
+from django.contrib import admin
 from django.contrib.gis.geos import Point
 from django.db import IntegrityError
 from django.test import TestCase, modify_settings
@@ -14,6 +15,7 @@ from chartography.models import LineVehicleStatusCountHistory, Snapshot, Source
 from common.models import User
 from incident.enums import PassengerStatus
 from incident.models import LineStatusReport
+from operation.admin import LineAdmin
 from operation.enums import AssetStatus, AssetType, VehicleStatus, WheelStatus
 from operation.models import (
     Asset,
@@ -105,6 +107,12 @@ class OperationModelTests(TestCase):
                 code="KJL",  # duplicate code
                 display_color="#00ff00",
             )
+
+
+class LineAdminConfigTests(TestCase):
+    def test_calendar_incidents_not_rendered_in_line_change_form(self):
+        model_admin = LineAdmin(Line, admin.site)
+        self.assertNotIn("calendar_incidents", model_admin.get_fields(None))
 
 
 @modify_settings(

@@ -91,6 +91,9 @@ class VehicleLineTabularInline(admin.TabularInline):
 
 
 class LineAdmin(AdminAdvancedFiltersMixin, admin.ModelAdmin):
+    # The calendar_incidents M2M is edited from CalendarIncidentAdmin; rendering it
+    # here loads every CalendarIncident into a multi-select on each Line page.
+    exclude = ("calendar_incidents",)
     inlines = [
         StationLineTabularInline,
         VehicleLineTabularInline,
