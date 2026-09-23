@@ -43,6 +43,10 @@ handlers_dict = {
     },
     "spotting_today": {
         "description": "Displays spotting stats for today",
+        "help_text": (
+            "Displays spotting stats for today (default cutoff 3am; "
+            "use --use-actual-date or --cutoff=HHMM to change it)"
+        ),
     },
     "link": {
         "description": "Submit a social media link to an incident on this line",

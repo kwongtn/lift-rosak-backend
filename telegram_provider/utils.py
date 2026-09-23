@@ -2,7 +2,8 @@ import asyncio
 import contextlib
 import time
 from collections import deque
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from datetime import time as time_of_day
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -206,6 +207,24 @@ async def retry_on_error(
                 raise
         await asyncio.sleep(backoff_base**attempt)
     return None
+
+
+DEFAULT_SPOTTING_CUTOFF = time_of_day(3, 0)
+
+
+def effective_spotting_date(
+    now: datetime, cutoff: time_of_day = DEFAULT_SPOTTING_CUTOFF
+) -> date:
+    """Return the spotting date ``now`` belongs to under a day-cutoff.
+
+    An instant strictly before ``cutoff`` (wall-clock, in ``now``'s own
+    timezone) belongs to the previous calendar day, so with the default
+    03:00 cutoff a command run at 02:59 on 24 Sep reports 23 Sep. Pass
+    ``time(0, 0)`` to disable the shift and use the actual date.
+    """
+    if now.time().replace(tzinfo=None) < cutoff:
+        return now.date() - timedelta(days=1)
+    return now.date()
 
 
 def get_daily_updates(

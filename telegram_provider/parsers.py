@@ -1,5 +1,6 @@
 import argparse
 from ctypes import ArgumentError
+from datetime import time
 
 
 class Formatter(argparse.HelpFormatter):
@@ -151,6 +152,19 @@ def spotting_parser():
     return parser
 
 
+def _parse_cutoff(value: str) -> time:
+    """Parse a 24-hour HHMM cutoff (e.g. "0300", "0430") into a time."""
+    try:
+        if len(value) != 4 or not value.isdigit():
+            raise ValueError(value)
+        return time(int(value[:2]), int(value[2:]))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Invalid cutoff time '{value}'. Please use 24-hour HHMM format "
+            "(e.g., 0300, 0430)."
+        ) from exc
+
+
 def spotting_today_parser():
     parser = ArgumentParser(
         prog="/spotting_today",
@@ -171,6 +185,23 @@ def spotting_today_parser():
         action="store_true",
         dest="include_not_in_service",
         help="Include vehicles that are not in service",
+    )
+
+    cutoff_group = parser.add_mutually_exclusive_group()
+    cutoff_group.add_argument(
+        "--use-actual-date",
+        action="store_true",
+        dest="use_actual_date",
+        help="Use the actual calendar date (12am cutoff) instead of the 3am cutoff",
+    )
+    cutoff_group.add_argument(
+        "--cutoff",
+        type=_parse_cutoff,
+        default=None,
+        help=(
+            "Custom cutoff time in 24-hour HHMM format (e.g. 0300, 0430); "
+            "times before it count as the previous day"
+        ),
     )
 
     return parser

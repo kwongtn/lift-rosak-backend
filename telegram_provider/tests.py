@@ -1,10 +1,12 @@
 import asyncio
 from contextlib import ExitStack, contextmanager
 from ctypes import ArgumentError
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
+from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.test import TestCase, override_settings
 from telegram.constants import ReactionEmoji
 from telegram.error import BadRequest
@@ -27,8 +29,10 @@ from telegram_provider.models import TelegramLogs
 from telegram_provider.parsers import link_parser, spotting_today_parser
 from telegram_provider.tasks import cleanup_telegram_logs
 from telegram_provider.utils import (
+    DEFAULT_SPOTTING_CUTOFF,
     PerChatRateLimiter,
     TelegramBotNotReady,
+    effective_spotting_date,
     get_daily_updates,
     retry_on_error,
     send_message,
@@ -95,6 +99,69 @@ class CleanupTelegramLogsTaskTests(TestCase):
                 cleanup_telegram_logs.apply(throw=True)
 
 
+class EffectiveSpottingDateTests(TestCase):
+    """Pure cutoff math for utils.effective_spotting_date."""
+
+    def test_default_cutoff_before_3am_is_previous_day(self):
+        self.assertEqual(
+            effective_spotting_date(datetime(2026, 9, 24, 2, 59, 59)),
+            date(2026, 9, 23),
+        )
+
+    def test_default_cutoff_at_3am_is_same_day(self):
+        self.assertEqual(
+            effective_spotting_date(datetime(2026, 9, 24, 3, 0)),
+            date(2026, 9, 24),
+        )
+
+    def test_default_cutoff_after_3am_is_same_day(self):
+        self.assertEqual(
+            effective_spotting_date(datetime(2026, 9, 24, 12, 0)),
+            date(2026, 9, 24),
+        )
+
+    def test_aware_datetime_uses_wall_clock_time(self):
+        tz = ZoneInfo(settings.TIME_ZONE)
+        self.assertEqual(
+            effective_spotting_date(datetime(2026, 9, 24, 2, 59, tzinfo=tz)),
+            date(2026, 9, 23),
+        )
+        self.assertEqual(
+            effective_spotting_date(datetime(2026, 9, 24, 3, 0, tzinfo=tz)),
+            date(2026, 9, 24),
+        )
+
+    def test_midnight_cutoff_uses_actual_date(self):
+        for moment in (datetime(2026, 9, 24, 0, 0), datetime(2026, 9, 24, 23, 59)):
+            with self.subTest(moment=moment):
+                self.assertEqual(
+                    effective_spotting_date(moment, time(0, 0)), date(2026, 9, 24)
+                )
+
+    def test_custom_cutoff_boundary(self):
+        self.assertEqual(
+            effective_spotting_date(datetime(2026, 9, 24, 4, 29), time(4, 30)),
+            date(2026, 9, 23),
+        )
+        self.assertEqual(
+            effective_spotting_date(datetime(2026, 9, 24, 4, 30), time(4, 30)),
+            date(2026, 9, 24),
+        )
+
+    def test_crosses_month_and_year_boundaries(self):
+        self.assertEqual(
+            effective_spotting_date(datetime(2026, 10, 1, 1, 0)),
+            date(2026, 9, 30),
+        )
+        self.assertEqual(
+            effective_spotting_date(datetime(2026, 1, 1, 2, 0)),
+            date(2025, 12, 31),
+        )
+
+    def test_default_constant_is_3am(self):
+        self.assertEqual(DEFAULT_SPOTTING_CUTOFF, time(3, 0))
+
+
 class SpottingTodayHandlerTests(TestCase):
     def setUp(self):
         self.line = Line.objects.create(
@@ -103,10 +170,27 @@ class SpottingTodayHandlerTests(TestCase):
             display_color="#FF0000",
             telegram_channel_id="123456",
         )
+        self.effective_date = date(2026, 9, 23)
 
+    def _make_update(self, text):
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = text
+        update.message.reply_html = AsyncMock()
+        update.effective_chat.id = 123456
+        return update
+
+    def _make_context(self, args):
+        context = MagicMock()
+        context.args = args
+        return context
+
+    @patch("telegram_provider.handlers.effective_spotting_date")
     @patch("telegram_provider.handlers.get_daily_updates")
     @patch("telegram_provider.handlers.Line")
-    def test_spotting_today_no_date_arg(self, mock_line_model, mock_get_daily_updates):
+    def test_spotting_today_no_date_arg(
+        self, mock_line_model, mock_get_daily_updates, mock_effective_date
+    ):
         # spotting_today opens with a real async-ORM Line lookup, which cannot
         # see TestCase's transaction from its worker thread — stub it so the
         # handler proceeds past the channel resolution deterministically.
@@ -114,28 +198,27 @@ class SpottingTodayHandlerTests(TestCase):
             return_value=self.line
         )
         mock_get_daily_updates.return_value = "Stats for today"
-        update = MagicMock()
-        update.message = MagicMock()
-        update.message.text = "/spotting_today"
-        update.message.reply_html = AsyncMock()
-        update.effective_chat.id = 123456
+        mock_effective_date.return_value = self.effective_date
 
-        context = MagicMock()
-        context.args = []
+        asyncio.run(
+            spotting_today(self._make_update("/spotting_today"), self._make_context([]))
+        )
 
-        asyncio.run(spotting_today(update, context))
-
+        mock_effective_date.assert_called_once()
+        called_now, called_cutoff = mock_effective_date.call_args.args
+        self.assertEqual(called_cutoff, time(3, 0))
+        self.assertEqual(called_now.tzinfo, ZoneInfo(settings.TIME_ZONE))
         mock_get_daily_updates.assert_called_once_with(
             line_id=self.line.id,
-            spotting_date=date.today(),
+            spotting_date=self.effective_date,
             include_not_in_service=False,
         )
-        update.message.reply_html.assert_awaited_once_with(text="Stats for today")
 
+    @patch("telegram_provider.handlers.effective_spotting_date")
     @patch("telegram_provider.handlers.get_daily_updates")
     @patch("telegram_provider.handlers.Line")
     def test_spotting_today_valid_date_arg(
-        self, mock_line_model, mock_get_daily_updates
+        self, mock_line_model, mock_get_daily_updates, mock_effective_date
     ):
         # Same async-ORM Line-lookup stub as above (TestCase transaction is
         # invisible to the handler's worker thread).
@@ -143,74 +226,183 @@ class SpottingTodayHandlerTests(TestCase):
             return_value=self.line
         )
         mock_get_daily_updates.return_value = "Stats for 2026-08-17"
-        update = MagicMock()
-        update.message = MagicMock()
-        update.message.text = "/spotting_today 2026-08-17"
-        update.message.reply_html = AsyncMock()
-        update.effective_chat.id = 123456
 
-        context = MagicMock()
-        context.args = ["2026-08-17"]
+        asyncio.run(
+            spotting_today(
+                self._make_update("/spotting_today 2026-08-17"),
+                self._make_context(["2026-08-17"]),
+            )
+        )
 
-        asyncio.run(spotting_today(update, context))
-
+        mock_effective_date.assert_not_called()
         mock_get_daily_updates.assert_called_once_with(
             line_id=self.line.id,
             spotting_date=date(2026, 8, 17),
             include_not_in_service=False,
         )
-        update.message.reply_html.assert_awaited_once_with(text="Stats for 2026-08-17")
 
+    @patch("telegram_provider.handlers.effective_spotting_date")
     @patch("telegram_provider.handlers.get_daily_updates")
     @patch("telegram_provider.handlers.Line")
     def test_spotting_today_include_not_in_service_flag(
-        self, mock_line_model, mock_get_daily_updates
+        self, mock_line_model, mock_get_daily_updates, mock_effective_date
     ):
         mock_line_model.objects.filter.return_value.afirst = AsyncMock(
             return_value=self.line
         )
         mock_get_daily_updates.return_value = "Stats incl. out-of-service"
-        update = MagicMock()
-        update.message = MagicMock()
-        update.message.text = "/spotting_today --include-not-in-service 2026-08-17"
-        update.message.reply_html = AsyncMock()
-        update.effective_chat.id = 123456
 
-        context = MagicMock()
-        context.args = ["--include-not-in-service", "2026-08-17"]
-
-        asyncio.run(spotting_today(update, context))
+        asyncio.run(
+            spotting_today(
+                self._make_update(
+                    "/spotting_today --include-not-in-service 2026-08-17"
+                ),
+                self._make_context(["--include-not-in-service", "2026-08-17"]),
+            )
+        )
 
         mock_get_daily_updates.assert_called_once_with(
             line_id=self.line.id,
             spotting_date=date(2026, 8, 17),
             include_not_in_service=True,
         )
-        update.message.reply_html.assert_awaited_once_with(
-            text="Stats incl. out-of-service"
+
+    @patch("telegram_provider.handlers.effective_spotting_date")
+    @patch("telegram_provider.handlers.get_daily_updates")
+    @patch("telegram_provider.handlers.Line")
+    def test_spotting_today_use_actual_date_flag(
+        self, mock_line_model, mock_get_daily_updates, mock_effective_date
+    ):
+        mock_line_model.objects.filter.return_value.afirst = AsyncMock(
+            return_value=self.line
+        )
+        mock_effective_date.return_value = date(2026, 9, 24)
+
+        asyncio.run(
+            spotting_today(
+                self._make_update("/spotting_today --use-actual-date"),
+                self._make_context(["--use-actual-date"]),
+            )
         )
 
+        mock_effective_date.assert_called_once()
+        self.assertEqual(mock_effective_date.call_args.args[1], time(0, 0))
+        mock_get_daily_updates.assert_called_once_with(
+            line_id=self.line.id,
+            spotting_date=date(2026, 9, 24),
+            include_not_in_service=False,
+        )
+
+    @patch("telegram_provider.handlers.effective_spotting_date")
+    @patch("telegram_provider.handlers.get_daily_updates")
+    @patch("telegram_provider.handlers.Line")
+    def test_spotting_today_custom_cutoff_flag(
+        self, mock_line_model, mock_get_daily_updates, mock_effective_date
+    ):
+        mock_line_model.objects.filter.return_value.afirst = AsyncMock(
+            return_value=self.line
+        )
+        mock_effective_date.return_value = date(2026, 9, 23)
+
+        asyncio.run(
+            spotting_today(
+                self._make_update("/spotting_today --cutoff=0430"),
+                self._make_context(["--cutoff=0430"]),
+            )
+        )
+
+        mock_effective_date.assert_called_once()
+        self.assertEqual(mock_effective_date.call_args.args[1], time(4, 30))
+        mock_get_daily_updates.assert_called_once_with(
+            line_id=self.line.id,
+            spotting_date=date(2026, 9, 23),
+            include_not_in_service=False,
+        )
+
+    @patch("telegram_provider.handlers.effective_spotting_date")
+    @patch("telegram_provider.handlers.get_daily_updates")
+    @patch("telegram_provider.handlers.Line")
+    def test_spotting_today_explicit_date_ignores_cutoff_flag(
+        self, mock_line_model, mock_get_daily_updates, mock_effective_date
+    ):
+        mock_line_model.objects.filter.return_value.afirst = AsyncMock(
+            return_value=self.line
+        )
+
+        asyncio.run(
+            spotting_today(
+                self._make_update("/spotting_today --cutoff=0430 2026-08-17"),
+                self._make_context(["--cutoff=0430", "2026-08-17"]),
+            )
+        )
+
+        mock_effective_date.assert_not_called()
+        mock_get_daily_updates.assert_called_once_with(
+            line_id=self.line.id,
+            spotting_date=date(2026, 8, 17),
+            include_not_in_service=False,
+        )
+
+    @patch("telegram_provider.handlers.effective_spotting_date")
+    @patch("telegram_provider.handlers.get_daily_updates")
+    @patch("telegram_provider.handlers.Line")
+    def test_spotting_today_cutoff_and_use_actual_date_mutually_exclusive(
+        self, mock_line_model, mock_get_daily_updates, mock_effective_date
+    ):
+        mock_line_model.objects.filter.return_value.afirst = AsyncMock(
+            return_value=self.line
+        )
+        update = self._make_update("/spotting_today --use-actual-date --cutoff=0430")
+
+        asyncio.run(
+            spotting_today(
+                update, self._make_context(["--use-actual-date", "--cutoff=0430"])
+            )
+        )
+
+        mock_effective_date.assert_not_called()
+        mock_get_daily_updates.assert_not_called()
+        update.message.reply_html.assert_awaited_once()
+        self.assertIn(
+            "not allowed with", update.message.reply_html.await_args.kwargs["text"]
+        )
+
+    @patch("telegram_provider.handlers.effective_spotting_date")
+    @patch("telegram_provider.handlers.get_daily_updates")
+    @patch("telegram_provider.handlers.Line")
+    def test_spotting_today_invalid_cutoff_replies_error(
+        self, mock_line_model, mock_get_daily_updates, mock_effective_date
+    ):
+        mock_line_model.objects.filter.return_value.afirst = AsyncMock(
+            return_value=self.line
+        )
+        update = self._make_update("/spotting_today --cutoff=9999")
+
+        asyncio.run(spotting_today(update, self._make_context(["--cutoff=9999"])))
+
+        mock_effective_date.assert_not_called()
+        mock_get_daily_updates.assert_not_called()
+        update.message.reply_html.assert_awaited_once()
+        self.assertIn(
+            "Invalid cutoff time", update.message.reply_html.await_args.kwargs["text"]
+        )
+
+    @patch("telegram_provider.handlers.effective_spotting_date")
     @patch("telegram_provider.handlers.get_daily_updates")
     @patch("telegram_provider.handlers.Line")
     def test_spotting_today_invalid_date_arg(
-        self, mock_line_model, mock_get_daily_updates
+        self, mock_line_model, mock_get_daily_updates, mock_effective_date
     ):
         # Same async-ORM Line-lookup stub as above (TestCase transaction is
         # invisible to the handler's worker thread).
         mock_line_model.objects.filter.return_value.afirst = AsyncMock(
             return_value=self.line
         )
-        update = MagicMock()
-        update.message = MagicMock()
-        update.message.text = "/spotting_today invalid-date"
-        update.message.reply_html = AsyncMock()
-        update.effective_chat.id = 123456
+        update = self._make_update("/spotting_today invalid-date")
 
-        context = MagicMock()
-        context.args = ["invalid-date"]
+        asyncio.run(spotting_today(update, self._make_context(["invalid-date"])))
 
-        asyncio.run(spotting_today(update, context))
-
+        mock_effective_date.assert_not_called()
         mock_get_daily_updates.assert_not_called()
         update.message.reply_html.assert_awaited_once_with(
             text="Invalid date format. Please use yyyy-mm-dd format (e.g., 2026-08-17)"
@@ -933,6 +1125,35 @@ class LinkHandlerTests(TestCase):
         args = spotting_today_parser().parse_args([])
         self.assertFalse(args.include_not_in_service)
         self.assertIsNone(args.date)
+
+    def test_spotting_today_parser_default_cutoff_flags(self):
+        args = spotting_today_parser().parse_args([])
+        self.assertFalse(args.use_actual_date)
+        self.assertIsNone(args.cutoff)
+
+    def test_spotting_today_parser_use_actual_date_flag(self):
+        args = spotting_today_parser().parse_args(["--use-actual-date"])
+        self.assertTrue(args.use_actual_date)
+        self.assertIsNone(args.cutoff)
+
+    def test_spotting_today_parser_custom_cutoff_hhmm(self):
+        args = spotting_today_parser().parse_args(["--cutoff=0430"])
+        self.assertEqual(args.cutoff, time(4, 30))
+        self.assertFalse(args.use_actual_date)
+
+    def test_spotting_today_parser_custom_cutoff_space_separated(self):
+        args = spotting_today_parser().parse_args(["--cutoff", "0300"])
+        self.assertEqual(args.cutoff, time(3, 0))
+
+    def test_spotting_today_parser_rejects_malformed_cutoff(self):
+        for value in ("430", "9999", "2460", "abcd", "04:30", ""):
+            with self.subTest(value=value):
+                with self.assertRaises(ArgumentError):
+                    spotting_today_parser().parse_args([f"--cutoff={value}"])
+
+    def test_spotting_today_parser_cutoff_flags_mutually_exclusive(self):
+        with self.assertRaises(ArgumentError):
+            spotting_today_parser().parse_args(["--use-actual-date", "--cutoff=0300"])
 
 
 class MediaHandlerTests(TestCase):

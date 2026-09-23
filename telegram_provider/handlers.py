@@ -4,7 +4,7 @@ import json
 import logging
 import traceback
 from ctypes import ArgumentError
-from datetime import date, datetime
+from datetime import datetime, time
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -42,7 +42,13 @@ from telegram_provider.parsers import (
     spotting_parser,
     spotting_today_parser,
 )
-from telegram_provider.utils import get_daily_updates, retry_on_error, send_message
+from telegram_provider.utils import (
+    DEFAULT_SPOTTING_CUTOFF,
+    effective_spotting_date,
+    get_daily_updates,
+    retry_on_error,
+    send_message,
+)
 
 if TYPE_CHECKING:
     from telegram.ext import ContextTypes
@@ -535,7 +541,7 @@ async def spotting_today(update: Update, context) -> None:
         await update.message.reply_html(text="No line assigned for this channel.")
         return
 
-    spotting_date = date.today()
+    spotting_date = None
     include_not_in_service = False
     args = (
         context.args
@@ -551,6 +557,16 @@ async def spotting_today(update: Update, context) -> None:
         include_not_in_service = parsed.include_not_in_service
         if parsed.date:
             spotting_date = datetime.strptime(parsed.date, "%Y-%m-%d").date()
+        else:
+            if parsed.use_actual_date:
+                cutoff = time(0, 0)
+            elif parsed.cutoff is not None:
+                cutoff = parsed.cutoff
+            else:
+                cutoff = DEFAULT_SPOTTING_CUTOFF
+            spotting_date = effective_spotting_date(
+                datetime.now(ZoneInfo(settings.TIME_ZONE)), cutoff
+            )
     except ArgumentError as e:
         await update.message.reply_html(text=str(e))
         return
