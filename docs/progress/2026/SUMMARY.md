@@ -33,6 +33,7 @@ Total commits: 106
 #### Operation (1 commits)
 
 - **7c813fe** [feat](operation): per-line pulse fields and DataLoaders
+- (uncommitted) [fix](operation): exclude `calendar_incidents` from `LineAdmin` change form (slow page loaded every incident; field no longer required)
 
 #### Spotting (1 commits)
 
@@ -159,6 +160,7 @@ Total commits: 106
 
 ### Major Features & Refactors
 
+- **2026-09-24** (uncommitted) [fix](operation): `LineAdmin` excludes the `calendar_incidents` M2M — the change form no longer loads every CalendarIncident, and the field is no longer required
 - **2026-09-24** **42d8b12** [feat](telegram): `/spotting_today` service-day cutoff — pre-3am counts as the previous day by default; `--use-actual-date` (12am) and `--cutoff=HHMM` override; explicit dates never shift
 - **2026-09-24** **6075118** [fix](telegram): `/spotting_today` excludes the operation status `OUT_OF_SERVICE` — the not-in-service flag referenced a non-existent `VehicleStatus.NOT_IN_SERVICE`, so every digest call raised `AttributeError`
 - **2026-09-23** **32b7686** [feat](incident): admin-only `deleteSocialMediaLink` mutation removes a feed link (the ownership check in `delete_social_media_link` is bypassed for admins)

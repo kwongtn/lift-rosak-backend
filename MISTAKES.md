@@ -220,6 +220,13 @@ backend is authoritative.
 
 ## operation
 
+### [2026-09-24] operation: `LineAdmin` change form loaded every `CalendarIncident` — FIXED (2026-09-24)
+
+**Problem**: Opening `/admin/operation/line/<id>/change/` was very slow. `LineAdmin` declared no `fields`/`exclude`, so Django auto-rendered the `Line.calendar_incidents` M2M as a `<select multiple>` that fetched every `CalendarIncident` row; its default `blank=False` also made the field required, so a Line could not be saved without tagging incidents.
+**Root Cause**: A model M2M with no admin exclusion is editable by default; the related model grows without bound, so the widget's query cost grows with it.
+**Fix**: `LineAdmin.exclude = ("calendar_incidents",)` — the field is gone from the form (no incident query, no required validation). The relation is still edited from `CalendarIncidentAdmin` via `filter_horizontal = ("lines", …)`. Regression test `operation/tests.py::LineAdminConfigTests`.
+**Prevention**: When a Line/Station/Vehicle admin gains a M2M to a high-cardinality model, exclude it or use `autocomplete_fields`; never let a default M2M widget pull an unbounded table.
+
 ### [2026-08-24] operation: Write API imports non-existent `operation.schema.enums`
 
 **Problem**: Commented `operation/schema/inputs.py` does `from operation.schema.enums import AssetType` but module does not exist — enums live in `operation/enums.py`. `StationInput.internal_representation` is a `StationLine` field misplaced on `Station`; no `VehicleInput` exists at all (`docs/APPS.md:298`, `docs/components/operation.md:80`).

@@ -40,6 +40,7 @@ Total commits: 34
 ### Operation (1 commits)
 
 - **7c813fe** [feat](operation): per-line pulse fields and DataLoaders
+- (uncommitted) [fix](operation): exclude `calendar_incidents` from `LineAdmin` change form (slow page loaded every incident; field no longer required)
 
 ### Spotting (1 commits)
 
