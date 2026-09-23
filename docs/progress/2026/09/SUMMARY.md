@@ -1,17 +1,17 @@
 # Monthly Summary - September 2026
 
-Total commits: 32
+Total commits: 33
 
 ## Commit Type Distribution
 
-- feat: 23
+- feat: 24
 - fix: 5
 - test: 2
 - chore: 2
 
 ## By Module/Feature
 
-### Incident (17 commits)
+### Incident (18 commits)
 
 - **67a830c** [feat](incident): complete insiden reporting backend
 - **b9bd6fd** [feat](incident): add public publicSocialMediaLinks GraphQL query with line filter
@@ -35,6 +35,7 @@ Total commits: 32
 - (this commit) [feat](incident): filter the public feed by service day and expose total counts
 - (this commit) [feat](incident): expose a per-status breakdown on each hourly history bucket
 - (this commit) [docs](incident): name the reused `operation.schema.scalars.PassengerStatusCount` in the hourly-bucket docs (docs-only follow-up to `22baa99`)
+- **32b7686** [feat](incident): admin-only `deleteSocialMediaLink` mutation removes a feed link
 
 ### Operation (1 commits)
 

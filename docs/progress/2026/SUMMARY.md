@@ -1,12 +1,12 @@
 # Yearly Summary - 2026
 
-Total commits: 104
+Total commits: 105
 
 ## Monthly Breakdown
 
-### 2026-09 (32 commits)
+### 2026-09 (33 commits)
 
-#### Incident (17 commits)
+#### Incident (18 commits)
 
 - **67a830c** [feat](incident): complete insiden reporting backend
 - **b9bd6fd** [feat](incident): add public publicSocialMediaLinks GraphQL query with line filter
@@ -28,6 +28,7 @@ Total commits: 104
 - (this commit) [fix](incident): return every hour of the service day in the status history
 - (this commit) [feat](incident): filter the public feed by service day and expose total counts
 - (this commit) [feat](incident): expose a per-status breakdown on each hourly history bucket
+- **32b7686** [feat](incident): admin-only `deleteSocialMediaLink` mutation removes a feed link
 
 #### Operation (1 commits)
 
@@ -156,6 +157,7 @@ Total commits: 104
 
 ### Major Features & Refactors
 
+- **2026-09-23** **32b7686** [feat](incident): admin-only `deleteSocialMediaLink` mutation removes a feed link (the ownership check in `delete_social_media_link` is bypassed for admins)
 - **2026-09-23** (this commit) [docs](incident): `LineStatusHourBucket.statusCounts` documented as reusing the existing `operation.schema.scalars.PassengerStatusCount` type (the feature itself landed in `22baa99`)
 - **2026-09-22** (this commit) [fix](incident): `lineStatusHistory` returns the full 24-bucket service day (03:00 → 02:00) instead of stopping at the current hour; a line with no report still returns `[]` for the "No data" state
 - **2026-09-22** (this commit) [chore](common): `seed_demo_data` generates hundreds of varied reports from a ~150-user pool (seeded RNG, delete-then-recreate idempotency, guaranteed multi-status lines inside the pulse window)
