@@ -12,7 +12,8 @@ from telegram.error import BadRequest
 from common.enums import TemporaryMediaStatus, TemporaryMediaType
 from incident.enums import SocialMediaLinkStatus
 from incident.services import IncidentServiceError, SocialMediaLinkWrite
-from operation.models import Line
+from operation.enums import VehicleStatus
+from operation.models import Line, Vehicle, VehicleLine, VehicleType
 from telegram_provider.enums import MessageDirection
 from telegram_provider.handlers import (
     approve,
@@ -28,6 +29,7 @@ from telegram_provider.tasks import cleanup_telegram_logs
 from telegram_provider.utils import (
     PerChatRateLimiter,
     TelegramBotNotReady,
+    get_daily_updates,
     retry_on_error,
     send_message,
 )
@@ -213,6 +215,41 @@ class SpottingTodayHandlerTests(TestCase):
         update.message.reply_html.assert_awaited_once_with(
             text="Invalid date format. Please use yyyy-mm-dd format (e.g., 2026-08-17)"
         )
+
+
+class GetDailyUpdatesTests(TestCase):
+    """Real-DB coverage for utils.get_daily_updates' out-of-service exclusion.
+
+    Regression for the stale ``VehicleStatus.NOT_IN_SERVICE`` reference: the
+    operation enum names the status ``OUT_OF_SERVICE``, so the default digest
+    path used to raise AttributeError instead of rendering.
+    """
+
+    def setUp(self):
+        self.line = Line.objects.create(
+            code="KJL",
+            display_name="Kelana Jaya Line",
+            display_color="#FF0000",
+            telegram_channel_id="123456",
+        )
+        vehicle_type = VehicleType.objects.create(display_name="Innovia Metro 300")
+        self.vehicle = Vehicle.objects.create(
+            identification_no="Set 40",
+            vehicle_type=vehicle_type,
+            status=VehicleStatus.OUT_OF_SERVICE,
+        )
+        VehicleLine.objects.create(vehicle=self.vehicle, line=self.line)
+
+    def test_default_excludes_out_of_service_vehicle(self):
+        output = get_daily_updates(line_id=self.line.id)
+
+        self.assertNotIn("Set 40", output)
+        self.assertIn("Not Spotted", output)
+
+    def test_include_not_in_service_lists_out_of_service_vehicle(self):
+        output = get_daily_updates(line_id=self.line.id, include_not_in_service=True)
+
+        self.assertIn("Set 40", output)
 
 
 class PerChatRateLimiterTests(TestCase):

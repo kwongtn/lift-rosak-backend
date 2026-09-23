@@ -235,7 +235,7 @@ def get_daily_updates(
 
     if not include_not_in_service:
         query_prefix = query_prefix.exclude(
-            vehicle__status=VehicleStatus.NOT_IN_SERVICE
+            vehicle__status=VehicleStatus.OUT_OF_SERVICE
         )
 
     base_criteria = Q(vehicle__id__in=spotted_today_vehicle_ids)
