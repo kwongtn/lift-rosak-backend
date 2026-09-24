@@ -75,3 +75,11 @@ Total commits: 34
 ### Rosak (1 commits)
 
 - **0ff57ec** [chore](rosak): refresh GraphQL schema snapshot for media fields
+
+### Python (1 commits)
+
+- **bc45bf1** [chore](python): upgrade runtime to Python 3.13
+
+### Compose (1 commits)
+
+- **2acbbc2** [fix](compose): mount firebase credentials into celerybeat

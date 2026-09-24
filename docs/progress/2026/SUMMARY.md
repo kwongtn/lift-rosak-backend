@@ -68,6 +68,14 @@ Total commits: 106
 
 - **0ff57ec** [chore](rosak): refresh GraphQL schema snapshot for media fields
 
+#### Python (1 commits)
+
+- **bc45bf1** [chore](python): upgrade runtime to Python 3.13
+
+#### Compose (1 commits)
+
+- **2acbbc2** [fix](compose): mount firebase credentials into celerybeat
+
 ### 2026-08 (73 commits)
 
 #### Incident (29 commits)
@@ -160,6 +168,8 @@ Total commits: 106
 
 ### Major Features & Refactors
 
+- **2026-09-24** **bc45bf1** [chore](python): runtime upgraded to Python 3.13 (base image + `requires-python` pins, plus a `rosak/test_python_runtime.py` guard that fails the gate on a silent downgrade)
+- **2026-09-24** **2acbbc2** [fix](compose): celerybeat re-declares the firebase credential mount its explicit `volumes:` list had dropped (it crash-looped with `ImproperlyConfigured` on recreation)
 - **2026-09-24** (uncommitted) [fix](operation): `LineAdmin` excludes the `calendar_incidents` M2M — the change form no longer loads every CalendarIncident, and the field is no longer required
 - **2026-09-24** **42d8b12** [feat](telegram): `/spotting_today` service-day cutoff — pre-3am counts as the previous day by default; `--use-actual-date` (12am) and `--cutoff=HHMM` override; explicit dates never shift
 - **2026-09-24** **6075118** [fix](telegram): `/spotting_today` excludes the operation status `OUT_OF_SERVICE` — the not-in-service flag referenced a non-existent `VehicleStatus.NOT_IN_SERVICE`, so every digest call raised `AttributeError`

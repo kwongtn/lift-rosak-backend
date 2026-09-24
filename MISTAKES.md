@@ -364,7 +364,25 @@ backend is authoritative.
 
 ---
 
+## compose
+
+### [2026-09-24] compose: celerybeat override dropped the firebase credential mount
+
+**Problem**: `celerybeat` crash-looped on container recreation with `ImproperlyConfigured: GOOGLE_APPLICATION_CREDENTIALS points at '/google-application-credential.json' which is not a file`.
+**Root Cause**: `celerybeat` declares its own explicit `volumes:` list, which replaces the `*app` YAML anchor's list rather than merging into it (YAML merge does not deep-merge sequences), so the firebase credential bind the anchor provides was dropped for this service.
+**Fix**: Mirror the `app` service's mount (`${HOME}/.firebase/rosak-7223b-firebase-adminsdk-8hcki-f2e0ee7994.json:/google-application-credential.json`) in `celerybeat`. Commit `2acbbc2` `fix(compose): mount firebase credentials into celerybeat` (2026-09-24).
+**Prevention**: When overriding `volumes`/`environment` (or any sequence) on a service that uses a YAML anchor, re-declare every entry the anchor provides; anchors do not deep-merge sequences.
+
+---
+
 ## rosak (project)
+
+### [2026-09-24] rosak: test discovery breaks when a `rosak/tests.py` module shadows the `rosak/tests/` package
+
+**Problem**: Adding `rosak/tests.py` to hold the Python-runtime guard tests made `manage.py test` abort during discovery with `ImportError: 'tests' module incorrectly imported from '/code/rosak/tests'. Expected '/code/rosak'` and run 0 tests, because `rosak/tests/` (a package holding 11 project-level tests) already existed alongside it.
+**Root Cause**: Python resolves `rosak.tests` to the `rosak/tests/` package, so the new module's `__file__` does not match the path discovery expects for that name; a module and a package cannot share the `rosak.tests` name.
+**Fix**: Place the guard tests at `rosak/test_python_runtime.py` instead, a distinct `test_*.py` module name discovery collects without colliding. Commit `bc45bf1` `chore(python): upgrade runtime to Python 3.13` (2026-09-24).
+**Prevention**: Never add a `tests.py` module next to an existing `tests/` package; use a distinct `test_*.py` module name within the package's parent.
 
 ### [2026-08-24] rosak: Single async GraphQL endpoint — `DEBUG=True` swaps Redis for `DummyCache` + disables introspection guard
 
