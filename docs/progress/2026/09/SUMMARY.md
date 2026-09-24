@@ -72,9 +72,10 @@ Total commits: 34
 
 - **6fd0d1a** [fix](ci): publish full commit hash for version endpoint
 
-### Rosak (1 commits)
+### Rosak (2 commits)
 
 - **0ff57ec** [chore](rosak): refresh GraphQL schema snapshot for media fields
+- **6a8f25e** [fix](rosak): treat a missing firebase account as non-admin
 
 ### Python (1 commits)
 

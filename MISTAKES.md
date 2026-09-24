@@ -384,6 +384,13 @@ backend is authoritative.
 
 ## rosak (project)
 
+### [2026-09-24] rosak: has_admin_claim 500s when the Firebase account no longer exists
+
+**Problem**: a `common.User` whose Firebase account was deleted upstream made every conditional-admin path raise `UserNotFoundError` (`No user record found for the provided user ID: …`) — a 500 instead of a permission denial, across `IsAdmin` + 12 resolvers.
+**Root Cause**: `has_admin_claim` awaited `auth.get_user` without handling the not-found case; the DB row and the Firebase account can drift apart.
+**Fix**: catch only `auth.UserNotFoundError` and return False; other Firebase errors still propagate. Commit `6a8f25e`.
+**Prevention**: external-identity lookups must have an explicit missing-record branch that fails closed (deny), and the catch must stay narrow so credential/network errors are not masked.
+
 ### [2026-09-24] rosak: test discovery breaks when a `rosak/tests.py` module shadows the `rosak/tests/` package
 
 **Problem**: Adding `rosak/tests.py` to hold the Python-runtime guard tests made `manage.py test` abort during discovery with `ImportError: 'tests' module incorrectly imported from '/code/rosak/tests'. Expected '/code/rosak'` and run 0 tests, because `rosak/tests/` (a package holding 11 project-level tests) already existed alongside it.
