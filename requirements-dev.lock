@@ -11,7 +11,7 @@
 
 amqp==5.3.1
     # via kombu
-anyio==4.3.0
+anyio==4.15.1
     # via httpx
     # via watchfiles
 asgiref==3.8.1
@@ -23,8 +23,8 @@ asttokens==3.0.0
     # via stack-data
 billiard==4.2.1
     # via celery
-boto3==1.43.62
-botocore==1.43.62
+boto3==1.43.101
+botocore==1.43.101
     # via boto3
     # via s3transfer
 cachecontrol==0.14.4
@@ -86,10 +86,10 @@ django==5.2.17
     # via django-timezone-field
     # via djangorestframework
     # via strawberry-graphql-django
-django-admin-rangefilter==0.14.0
+django-admin-rangefilter==0.15.0
 django-advanced-filters==2.0.0
 django-asgi-lifespan==0.5.2
-django-cachalot==2.9.0
+django-cachalot==2.9.1
 django-celery-beat==2.9.0
 django-celery-results==2.6.0
 django-choices-field==4.0.0
@@ -108,11 +108,11 @@ django-simple-history==3.12.0
 django-storages==1.14.6
 django-timezone-field==7.1
     # via django-celery-beat
-djangorestframework==3.17.1
+djangorestframework==3.18.1
 dotmap==1.3.30
 executing==2.2.0
     # via stack-data
-firebase-admin==7.5.0
+firebase-admin==7.7.0
 google-api-core==2.33.0
     # via firebase-admin
     # via google-cloud-core
@@ -138,7 +138,7 @@ google-resumable-media==2.7.2
 googleapis-common-protos==1.69.2
     # via google-api-core
     # via grpcio-status
-granian==2.7.9
+granian==2.8.3
 graphql-core==3.2.6
     # via strawberry-graphql
 grpcio==1.83.0
@@ -147,7 +147,7 @@ grpcio==1.83.0
     # via grpcio-status
 grpcio-status==1.83.0
     # via google-api-core
-h11==0.14.0
+h11==0.16.0
     # via httpcore
 h2==4.4.0
     # via httpx
@@ -155,7 +155,7 @@ hiredis==3.1.0
     # via redis
 hpack==4.2.0
     # via h2
-httpcore==1.0.4
+httpcore==1.0.9
     # via httpx
 httpx==0.28.1
     # via firebase-admin
@@ -198,17 +198,17 @@ packaging==24.2
     # via strawberry-graphql
 parso==0.8.4
     # via jedi
-pendulum==3.0.0
+pendulum==3.2.0
 pexpect==4.9.0
     # via ipython
 pillow==12.3.0
     # via django-colorfield
     # via pillow-heif
-pillow-heif==1.5.0
+pillow-heif==1.8.0
 platformdirs==4.3.7
     # via jupyter-core
-polars==1.43.2
-polars-runtime-32==1.43.2
+polars==1.44.2
+polars-runtime-32==1.44.2
     # via polars
 promise==2.3
 prompt-toolkit==3.0.50
@@ -223,10 +223,10 @@ protobuf==6.33.6
     # via googleapis-common-protos
     # via grpcio-status
     # via proto-plus
-psutil==7.0.0
+psutil==7.2.2
     # via django-health-check
     # via ipykernel
-psycopg2-binary==2.9.12
+psycopg2-binary==2.9.13
 ptyprocess==0.7.0
     # via pexpect
 pure-eval==0.2.3
@@ -238,7 +238,7 @@ pyasn1-modules==0.4.2
     # via google-auth
 pycparser==2.22
     # via cffi
-pygments==2.19.1
+pygments==2.21.0
     # via ipython
     # via ipython-pygments-lexers
 pyjwt==2.10.1
@@ -253,7 +253,6 @@ python-dateutil==2.9.0.post0
     # via pendulum
     # via python-crontab
     # via strawberry-graphql
-    # via time-machine
 python-memcached==1.62
     # via celery
 python-telegram-bot==22.8
@@ -273,15 +272,13 @@ rsa==4.9
 ruff==0.16.4
 s3transfer==0.19.2
     # via boto3
-sentry-sdk==2.66.1
+sentry-sdk==2.70.0
 setuptools==78.1.0
 simplejson==3.20.1
     # via django-advanced-filters
 six==1.17.0
     # via promise
     # via python-dateutil
-sniffio==1.3.1
-    # via anyio
 sqlparse==0.5.3
     # via django
     # via django-debug-toolbar
@@ -290,8 +287,6 @@ stack-data==0.6.3
 strawberry-graphql==0.323.2
     # via strawberry-graphql-django
 strawberry-graphql-django==0.82.1
-time-machine==2.16.0
-    # via pendulum
 tornado==6.4.2
     # via ipykernel
     # via jupyter-client
@@ -303,6 +298,7 @@ traitlets==5.14.3
     # via jupyter-core
     # via matplotlib-inline
 typing-extensions==4.16.0
+    # via anyio
     # via cross-web
     # via django-choices-field
     # via grpcio
@@ -323,7 +319,7 @@ vine==5.1.0
     # via amqp
     # via celery
     # via kombu
-watchfiles==1.2.0
+watchfiles==1.3.0
     # via granian
 wcwidth==0.2.13
     # via prompt-toolkit

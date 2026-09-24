@@ -37,7 +37,7 @@ dependencies = [
     "granian[reload,uvloop]>=2.7.9",
     "httpcore>=1.0.4",
     "imgurpython @ git+https://github.com/kwongtn/imgurpython.git@master",
-    "pendulum>=3.0.0",
+    "pendulum>=3.2.0",
     "pillow-heif>=1.5.0",
     "pillow>=12.3.0",
     "polars>=1.43.0",
