@@ -93,6 +93,7 @@ services:
     <<: *app
     volumes:
       - .:/code
+      - ${HOME}/.firebase/rosak-7223b-firebase-adminsdk-8hcki-f2e0ee7994.json:/google-application-credential.json
     env_file:
       - secrets.dev.env
     depends_on:
