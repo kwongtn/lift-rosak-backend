@@ -57,7 +57,7 @@ dependencies = [
     # psycopg = {extras = ["binary", "pool"], version = "3.*"}
 ]
 readme = "README.md"
-requires-python = ">= 3.12"
+requires-python = ">= 3.13"
 license = "GNU AGPLv3"
 
 [build-system]
