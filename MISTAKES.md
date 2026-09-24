@@ -449,6 +449,17 @@ backend is authoritative.
 **Fix**: _Workaround._ Runnable tests live in the app modules (`operation/tests.py`, `incident/tests.py`, `rosak/tests/…`) and are run with app labels (`manage.py test operation incident rosak`). The `tests/` suite needs pytest installed or an `__init__.py` conversion before it can join the gate.
 **Prevention**: Put new DB/schema tests where `manage.py test` actually collects them (app `tests.py` or `rosak/tests/`), or install pytest before relying on `tests/`. Don't quote a passing pytest suite as verification when the environment cannot run it.
 
+---
+
+## tests
+
+### [2026-09-24] tests: reaching the real Firebase Admin check; patch target depends on the import style
+
+**Problem**: 7 tests failed (`ValueError: Invalid uid: "<MagicMock …>"` in 5 `LinkHandlerTests`; `GraphQLError('No user record found for the provided user ID: test-user-sml.')` in 2 `SocialMediaLinkTests`) because they invoked `rosak.permissions.has_admin_claim`, which calls `firebase_admin.auth.get_user` against the live project.
+**Root Cause**: the tests never mocked the admin check (their siblings do); a DB-only `firebase_id` or a `MagicMock` uid reaches the real SDK.
+**Fix**: patch the name where it is looked up — `rosak.permissions.has_admin_claim` for function-local imports (`handlers.submit_link`), the consumer module (`incident.schema.mutations.interactions.has_admin_claim`) for module-level imports. Commit `51f2f69`.
+**Prevention**: any test exercising a resolver/handler with conditional-admin logic must patch the admin check at the module it resolves from; a `MagicMock` user must never reach `has_admin_claim` unmocked.
+
 ### Sources
 
 - `docs/APPS.md` — Known Defects & Traps table and Beat schedule / Dependency graph sections.

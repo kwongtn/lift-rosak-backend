@@ -87,3 +87,7 @@ Total commits: 34
 ### Deps (1 commits)
 
 - **fc72187** [chore](deps): refresh pinned dependencies
+
+### Test (1 commits)
+
+- **51f2f69** [test]: mock the firebase admin check in the 7 failing tests
