@@ -53,6 +53,12 @@ async def has_admin_claim(user) -> bool:
     if not user:
         return False
 
-    firebase_user = await sync_to_async(auth.get_user)(user.firebase_id)
+    try:
+        firebase_user = await sync_to_async(auth.get_user)(user.firebase_id)
+    except auth.UserNotFoundError:
+        # The Firebase account is gone (deleted upstream while the local row
+        # remains) — treat as a non-admin instead of raising a 500.
+        return False
+
     claims = firebase_user.custom_claims or {}
     return bool(claims.get("admin", False))
