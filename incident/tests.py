@@ -839,6 +839,8 @@ class SocialMediaLinkTests(TestCase):
         self.assertTrue(SocialMediaLink.objects.filter(pk=link.id).exists())
 
     def test_submit_social_media_link_title_null_coerced_via_graphql(self):
+        from unittest.mock import AsyncMock, patch
+
         query = """
             mutation SubmitSocialMediaLink($input: SocialMediaLinkInput!) {
                 submitSocialMediaLink(input: $input) {
@@ -846,20 +848,25 @@ class SocialMediaLinkTests(TestCase):
                 }
             }
         """
-        result = execute_graphql(
-            query,
-            variables={
-                "input": {
-                    "url": "https://www.facebook.com/groups/developerkaki/permalink/2951657628513464",
-                    "title": None,
-                    "lineIds": [],
-                    "vehicleIds": [],
-                    "stationIds": [],
-                    "categoryIds": [],
-                }
-            },
-            user=self.user,
-        )
+        with patch(
+            "incident.schema.mutations.interactions.has_admin_claim",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            result = execute_graphql(
+                query,
+                variables={
+                    "input": {
+                        "url": "https://www.facebook.com/groups/developerkaki/permalink/2951657628513464",
+                        "title": None,
+                        "lineIds": [],
+                        "vehicleIds": [],
+                        "stationIds": [],
+                        "categoryIds": [],
+                    }
+                },
+                user=self.user,
+            )
         self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
         self.assertTrue(result.data["submitSocialMediaLink"]["ok"])
         from incident.models import SocialMediaLink
@@ -871,6 +878,8 @@ class SocialMediaLinkTests(TestCase):
         self.assertEqual(link.title, "")
 
     def test_submit_social_media_link_title_omitted_coerced_via_graphql(self):
+        from unittest.mock import AsyncMock, patch
+
         query = """
             mutation SubmitSocialMediaLink($input: SocialMediaLinkInput!) {
                 submitSocialMediaLink(input: $input) {
@@ -878,19 +887,24 @@ class SocialMediaLinkTests(TestCase):
                 }
             }
         """
-        result = execute_graphql(
-            query,
-            variables={
-                "input": {
-                    "url": "https://www.facebook.com/groups/developerkaki/permalink/2951657628513465",
-                    "lineIds": [],
-                    "vehicleIds": [],
-                    "stationIds": [],
-                    "categoryIds": [],
-                }
-            },
-            user=self.user,
-        )
+        with patch(
+            "incident.schema.mutations.interactions.has_admin_claim",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            result = execute_graphql(
+                query,
+                variables={
+                    "input": {
+                        "url": "https://www.facebook.com/groups/developerkaki/permalink/2951657628513465",
+                        "lineIds": [],
+                        "vehicleIds": [],
+                        "stationIds": [],
+                        "categoryIds": [],
+                    }
+                },
+                user=self.user,
+            )
         self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
         self.assertTrue(result.data["submitSocialMediaLink"]["ok"])
         from incident.models import SocialMediaLink

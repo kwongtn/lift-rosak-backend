@@ -851,6 +851,12 @@ class LinkHandlerTests(TestCase):
                     new_callable=AsyncMock,
                 )
             )
+            # submit_link imports has_admin_claim function-locally, so it is
+            # patched on rosak.permissions rather than telegram_provider.handlers.
+            mocks["admin"] = stack.enter_context(
+                patch("rosak.permissions.has_admin_claim", new_callable=AsyncMock)
+            )
+            mocks["admin"].return_value = False
             yield mocks
 
     def _make_update(self, text, reply_to_message=object()):
@@ -935,6 +941,7 @@ class LinkHandlerTests(TestCase):
         mocks["submit"].assert_awaited_once()
         call_kwargs = mocks["submit"].await_args.kwargs
         self.assertIs(call_kwargs["user"], self.user)
+        self.assertFalse(call_kwargs["is_admin"])
         self.assertEqual(
             call_kwargs["write"],
             SocialMediaLinkWrite(
