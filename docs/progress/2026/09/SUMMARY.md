@@ -83,3 +83,7 @@ Total commits: 34
 ### Compose (1 commits)
 
 - **2acbbc2** [fix](compose): mount firebase credentials into celerybeat
+
+### Deps (1 commits)
+
+- **fc72187** [chore](deps): refresh pinned dependencies

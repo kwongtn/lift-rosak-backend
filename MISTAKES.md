@@ -373,6 +373,13 @@ backend is authoritative.
 **Fix**: Mirror the `app` service's mount (`${HOME}/.firebase/rosak-7223b-firebase-adminsdk-8hcki-f2e0ee7994.json:/google-application-credential.json`) in `celerybeat`. Commit `2acbbc2` `fix(compose): mount firebase credentials into celerybeat` (2026-09-24).
 **Prevention**: When overriding `volumes`/`environment` (or any sequence) on a service that uses a YAML anchor, re-declare every entry the anchor provides; anchors do not deep-merge sequences.
 
+### [2026-09-24] compose: recreating the three credential-mounting services at once fails on Docker Desktop/WSL2
+
+**Problem**: `docker compose up -d` recreating `app` + `celeryworker` + `celerybeat` together intermittently fails with `OCI runtime create failed: ... error mounting ...: not a directory: Are you trying to mount a directory onto a file (or vice-versa)?`; the affected containers exit 127/1 and the stack comes up half-dead.
+**Root Cause**: Docker Desktop's WSL2 bind-mount backend races when the same host file (`~/.firebase/rosak-...json`) is bind-mounted into several containers created in parallel.
+**Fix**: Recreate sequentially: `docker compose up -d --no-deps app`, then `--no-deps celeryworker`, then `--no-deps celerybeat`, and `docker compose restart web` afterwards (nginx caches the resolved upstream IP and exits if `app` is unresolvable at startup).
+**Prevention**: Same; avoid single-command recreation of the app family on this setup.
+
 ---
 
 ## rosak (project)

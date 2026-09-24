@@ -168,6 +168,7 @@ Total commits: 106
 
 ### Major Features & Refactors
 
+- **2026-09-24** **fc72187** [chore](deps): pinned dependencies refreshed; `pendulum` 3.0.0 to 3.2.0 (now a cp313 wheel) with 15 further same-major bumps, `redis` held at 5.2.1
 - **2026-09-24** **bc45bf1** [chore](python): runtime upgraded to Python 3.13 (base image + `requires-python` pins, plus a `rosak/test_python_runtime.py` guard that fails the gate on a silent downgrade)
 - **2026-09-24** **2acbbc2** [fix](compose): celerybeat re-declares the firebase credential mount its explicit `volumes:` list had dropped (it crash-looped with `ImproperlyConfigured` on recreation)
 - **2026-09-24** (uncommitted) [fix](operation): `LineAdmin` excludes the `calendar_incidents` M2M — the change form no longer loads every CalendarIncident, and the field is no longer required
