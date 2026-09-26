@@ -19,6 +19,7 @@ from incident.enums import (
     CalendarIncidentSeverity,
     CalendarIncidentStatus,
     IncidentSeverity,
+    IngestPlatform,
     PassengerStatus,
     SocialMediaLinkStatus,
 )
@@ -393,6 +394,42 @@ class SocialMediaLink(TimeStampedModel):
         "common.Vote",
         related_query_name="social_media_link",
     )
+
+    # --- Automated official-post ingestion (services/official_posts.py) -----
+    # Nullable so every community-submitted link predating ingestion keeps
+    # working; the partial constraint below only applies where both are set.
+    platform = TextChoicesField(
+        choices_enum=IngestPlatform,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    # Provider post id as a string: X snowflakes exceed 32-bit int in practice,
+    # so they are stored verbatim and ordered numerically in the service layer.
+    post_id = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        default=None,
+        db_index=True,
+    )
+    # Post time, NOT ingest time (that is ``created``).
+    posted_at = models.DateTimeField(null=True, blank=True, default=None)
+    is_automated = models.BooleanField(default=False, db_index=True)
+    source_handle = models.CharField(max_length=64, blank=True, default="")
+    # Untouched provider payload, kept for export fidelity. No raw-audit table.
+    raw_payload = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = [
+            # Structural idempotency backstop for re-scrape; the service also
+            # re-reads on IntegrityError (no advisory lock, unlike feed_links).
+            models.UniqueConstraint(
+                fields=["platform", "post_id"],
+                condition=Q(platform__isnull=False, post_id__isnull=False),
+                name="socialmedialink_unique_platform_post",
+            ),
+        ]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if self.url:

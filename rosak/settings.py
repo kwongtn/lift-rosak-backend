@@ -506,3 +506,18 @@ TELEGRAM_TLD = os.environ.get("TELEGRAM_TLD", None)
 TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")
 TELEGRAM_CLEANUP_DAYS = os.environ.get("TELEGRAM_CLEANUP_DAYS", 30)
 TELEGRAM_HTTPX_TIMEOUT = os.environ.get("TELEGRAM_HTTPX_TIMEOUT", 30)
+
+# Official X/Twitter post ingestion (incident/services/official_posts.py).
+# Ships disabled: the X API free tier cannot read, so a paid Basic tier (or
+# higher) plus this flag is what actually starts ingestion. The token is
+# never logged, never echoed and never exposed over GraphQL.
+X_API_BEARER_TOKEN = os.environ.get("X_API_BEARER_TOKEN", "")
+OFFICIAL_POST_INGESTION_ENABLED = bool(
+    strtobool(os.getenv("OFFICIAL_POST_INGESTION_ENABLED", "false"))
+)
+OFFICIAL_POST_HANDLES = [
+    h.strip()
+    for h in os.environ.get("OFFICIAL_POST_HANDLES", "askrapidkl,myrapidkl").split(",")
+    if h.strip()
+]
+OFFICIAL_POST_FETCH_LIMIT = int(os.environ.get("OFFICIAL_POST_FETCH_LIMIT", "10"))

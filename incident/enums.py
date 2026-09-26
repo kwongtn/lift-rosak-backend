@@ -39,6 +39,13 @@ class SocialMediaLinkStatus(models.TextChoices):
     PENDING_APPROVAL = "pending_approval"
 
 
+class IngestPlatform(models.TextChoices):
+    # Source platform of an automatically ingested post stored on
+    # SocialMediaLink. One member only — a second platform is a new enum
+    # member plus its own fetch function, never a speculative placeholder.
+    X = "x"
+
+
 class PassengerStatus(models.TextChoices):
     NORMAL = "NORMAL"
     BUSY = "BUSY"

@@ -19,3 +19,16 @@ class FeedLinkValidationError(IncidentServiceError):
 
 class LineStatusValidationError(IncidentServiceError):
     """A line-status query parameter is out of range (e.g. dayStartHour)."""
+
+
+class OfficialPostFetchError(IncidentServiceError):
+    """An official post could not be fetched or decoded.
+
+    Raised on a non-2xx response, a timeout or an unparseable payload. The
+    message is sanitized upstream: never the raw response body, never the
+    bearer token.
+    """
+
+
+class OfficialPostIngestError(IncidentServiceError):
+    """An official post cannot be ingested (e.g. the system author is missing)."""

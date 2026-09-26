@@ -23,6 +23,8 @@ from .errors import (
     FeedLinkValidationError,
     IncidentNotEditableError,
     IncidentServiceError,
+    OfficialPostFetchError,
+    OfficialPostIngestError,
 )
 from .feed_links import (
     FeedLinkResult,
@@ -39,6 +41,15 @@ from .incidents import (
     reject_incident,
     submit_incident,
     update_incident,
+)
+from .official_posts import (
+    IngestSummary,
+    RawPost,
+    fetch_user_posts,
+    get_system_author,
+    ingest_posts,
+    latest_post_id,
+    load_fixture_posts,
 )
 from .page_title import fetch_page_title
 from .social_links import (
@@ -66,6 +77,10 @@ __all__ = [
     "IncidentNotEditableError",
     "IncidentServiceError",
     "IncidentWrite",
+    "IngestSummary",
+    "OfficialPostFetchError",
+    "OfficialPostIngestError",
+    "RawPost",
     "SocialMediaLinkWrite",
     "UpdateResult",
     "approve_chronology",
@@ -77,8 +92,13 @@ __all__ = [
     "delete_incident",
     "delete_social_media_link",
     "fetch_page_title",
+    "fetch_user_posts",
     "get_incident",
+    "get_system_author",
+    "ingest_posts",
     "is_author",
+    "latest_post_id",
+    "load_fixture_posts",
     "mark_social_media_link_completed",
     "may_edit",
     "reject_chronology_deletion",
