@@ -116,7 +116,28 @@ def _json_serializable_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def send_message(chat_id: int | str, text: str, **kwargs: Any) -> Message | None:
+def _outbound_message_payload(message: Message) -> dict[str, Any]:
+    """Shape a sent ``Message`` the way an inbound webhook payload records it.
+
+    ``payload["message"]`` is otherwise only ever written by
+    ``views.TelegramInbound`` from PTB's raw ``Update.de_json``, and
+    ``handlers.submit_link`` looks its audit row up through it. Mirroring the
+    same block — ``message_id`` plus ``chat.id``, the two keys every
+    reply-based lookup matches on — is what lets an **outbound** notification
+    be resolved by a later ``/approve`` reply with no handler change. Read the
+    values off the PTB object with ``getattr`` defaults so a partial/None
+    message can never raise out of the audit write.
+    """
+    chat = getattr(message, "chat", None)
+    return {
+        "message_id": getattr(message, "message_id", None),
+        "chat": {"id": getattr(chat, "id", chat)},
+    }
+
+
+async def send_message(
+    chat_id: int | str, text: str, *, return_log: bool = False, **kwargs: Any
+) -> Message | tuple[Message, TelegramLogs] | None:
     """Send a Telegram message through governed egress.
 
     Writes one OUTBOUND ``TelegramLogs`` audit row up front, then attempts
@@ -125,6 +146,15 @@ async def send_message(chat_id: int | str, text: str, **kwargs: Any) -> Message 
     once retries are exhausted the row keeps ``sent_at=None`` as the
     dead-letter record and the admin chat receives a best-effort direct
     notification. Returns the sent ``Message``, or ``None`` on failure.
+
+    ``return_log`` is a keyword-only opt-in for callers that need the audit
+    row — a notification a human can later act on by reply. On success it
+    also stamps the sent message into ``log.payload["message"]`` (see
+    :func:`_outbound_message_payload`) and returns ``(message, log)``. The
+    default path is unchanged: it returns the bare ``Message`` and does not
+    touch the payload, so every existing caller behaves exactly as before.
+    ``return_log`` is consumed here and never forwarded to PTB or written to
+    the audit payload.
     """
     app = await get_ptb_application()
     log = await TelegramLogs.objects.acreate(
@@ -158,8 +188,10 @@ async def send_message(chat_id: int | str, text: str, **kwargs: Any) -> Message 
         else:
             log.sent_at = timezone.now()
             log.retry_count = attempt - 1
+            if return_log:
+                log.payload["message"] = _outbound_message_payload(message)
             await log.asave()
-            return message
+            return (message, log) if return_log else message
 
     # Dead-lettered (sent_at stays None). Best-effort admin ping — a direct
     # bot call, deliberately NOT recursing into send_message.

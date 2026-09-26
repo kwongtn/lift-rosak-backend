@@ -584,6 +584,9 @@ class SendMessageTests(TestCase):
         log.sent_at = None
         log.retry_count = 0
         log.last_error = ""
+        # A real dict so the return_log stamping is observable; a bare
+        # MagicMock would swallow the __setitem__ and assert nothing.
+        log.payload = {}
         return log
 
     def test_success_writes_single_outbound_audit_row_and_returns_message(self):
@@ -729,6 +732,97 @@ class SendMessageTests(TestCase):
                 asyncio.run(send_message("111005", "never sent"))
 
         mock_acreate.assert_not_awaited()
+
+    def test_return_log_stamps_the_sent_message_and_returns_the_pair(self):
+        sentinel_message = MagicMock(name="sent_message")
+        sentinel_message.message_id = 4242
+        sentinel_message.chat.id = -100999
+        fake_app = self._fake_app(send_return_value=sentinel_message)
+        log = self._log()
+
+        with (
+            patch(
+                "telegram_provider.utils.get_ptb_application",
+                new_callable=AsyncMock,
+                return_value=fake_app,
+            ),
+            patch(
+                "telegram_provider.utils.TelegramLogs.objects.acreate",
+                new_callable=AsyncMock,
+                return_value=log,
+            ) as mock_acreate,
+            patch("telegram_provider.utils.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = asyncio.run(
+                send_message("111006", "approve me", parse_mode="HTML", return_log=True)
+            )
+
+        message, returned_log = result
+        self.assertIs(message, sentinel_message)
+        self.assertIs(returned_log, log)
+        # The stamp is what handlers.approve's reply lookup matches on: the
+        # same payload["message"] shape an inbound /submit_link log carries.
+        self.assertEqual(
+            log.payload["message"], {"message_id": 4242, "chat": {"id": -100999}}
+        )
+        self.assertIsNotNone(log.sent_at)
+        # return_log is consumed by send_message itself: never forwarded to
+        # PTB, never written into the audited payload.
+        fake_app.bot.send_message.assert_awaited_once_with(
+            chat_id="111006", text="approve me", parse_mode="HTML"
+        )
+        self.assertNotIn("return_log", mock_acreate.await_args.kwargs["payload"])
+
+    def test_default_path_returns_the_bare_message_and_stamps_nothing(self):
+        sentinel_message = MagicMock(name="sent_message")
+        fake_app = self._fake_app(send_return_value=sentinel_message)
+        log = self._log()
+
+        with (
+            patch(
+                "telegram_provider.utils.get_ptb_application",
+                new_callable=AsyncMock,
+                return_value=fake_app,
+            ),
+            patch(
+                "telegram_provider.utils.TelegramLogs.objects.acreate",
+                new_callable=AsyncMock,
+                return_value=log,
+            ),
+            patch("telegram_provider.utils.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = asyncio.run(send_message("111007", "plain send"))
+
+        # Unchanged for every existing caller: a Message, not a tuple.
+        self.assertIs(result, sentinel_message)
+        self.assertNotIn("message", log.payload)
+
+    def test_return_log_on_a_dead_lettered_send_still_returns_none(self):
+        fake_app = self._fake_app(send_side_effect=RuntimeError("down"))
+        log = self._log()
+
+        with override_settings(TELEGRAM_ADMIN_CHAT_ID=""):
+            with (
+                patch(
+                    "telegram_provider.utils.get_ptb_application",
+                    new_callable=AsyncMock,
+                    return_value=fake_app,
+                ),
+                patch(
+                    "telegram_provider.utils.TelegramLogs.objects.acreate",
+                    new_callable=AsyncMock,
+                    return_value=log,
+                ),
+                patch("telegram_provider.utils.asyncio.sleep", new_callable=AsyncMock),
+            ):
+                result = asyncio.run(
+                    send_message("111008", "undeliverable", return_log=True)
+                )
+
+        # A partial message must never look like a delivered one to a caller
+        # that is about to build a join row out of it.
+        self.assertIsNone(result)
+        self.assertNotIn("message", log.payload)
 
 
 class ErrorHandlerTests(TestCase):
@@ -1630,3 +1724,81 @@ class ApproveHandlerTests(TestCase):
             text="Link is not awaiting approval."
         )
         self.link.asave.assert_not_awaited()
+
+    def test_admin_reply_to_an_outbound_notification_resolves_by_payload_stamp(self):
+        """The Phase 2 case: the replied-to message is an *outbound* one.
+
+        ``incident.tasks`` sends the notification through
+        ``send_message(..., return_log=True)``, which stamps
+        ``payload["message"] = {"message_id", "chat": {"id"}}`` — the same block
+        ``submit_link`` writes for inbound messages. This pins the exact filter
+        ``approve`` applies so the two stay in step: dropping the chat key, or
+        stamping only ``message_id``, breaks reply-approval silently.
+        """
+        update = self._make_update(self.source)
+
+        with self._mock_handlers() as mocks:
+            mocks["temp_media"].objects.filter.return_value.afirst = AsyncMock(
+                return_value=None
+            )
+            link_qs = mocks["link_log"].objects.filter.return_value
+            link_qs.select_related.return_value = link_qs
+            link_qs.afirst = AsyncMock(return_value=self.link_log)
+            asyncio.run(approve(update, MagicMock()))
+
+        self.assertEqual(
+            mocks["link_log"].objects.filter.call_args.kwargs,
+            {
+                "telegram_log__payload__message__message_id": self.source.message_id,
+                "telegram_log__payload__message__chat__id": self.source.chat.id,
+            },
+        )
+        self.assertEqual(self.link.status, SocialMediaLinkStatus.LIVE)
+        self.link.asave.assert_awaited_once_with(update_fields=["status"])
+        update.message.reply_html.assert_awaited_once_with(
+            text="Approved. Link is now live."
+        )
+
+    def test_outbound_notification_from_another_chat_is_not_approved(self):
+        """message_id is only unique per chat, so the chat key is the guard
+        that stops one channel's notification approving another chat's link."""
+        other_chat_source = MagicMock(name="reply_to_message")
+        other_chat_source.message_id = self.source.message_id
+        other_chat_source.chat = MagicMock()
+        other_chat_source.chat.id = 999999
+        update = self._make_update(other_chat_source)
+
+        with self._mock_handlers() as mocks:
+            mocks["temp_media"].objects.filter.return_value.afirst = AsyncMock(
+                return_value=None
+            )
+            link_qs = mocks["link_log"].objects.filter.return_value
+            link_qs.select_related.return_value = link_qs
+            link_qs.afirst = AsyncMock(return_value=None)
+            asyncio.run(approve(update, MagicMock()))
+
+        self.assertEqual(
+            mocks["link_log"].objects.filter.call_args.kwargs[
+                "telegram_log__payload__message__chat__id"
+            ],
+            999999,
+        )
+        update.message.reply_html.assert_awaited_once_with(
+            text="No media awaiting review found for this message."
+        )
+        self.link.asave.assert_not_awaited()
+
+    def test_non_admin_cannot_approve_an_outbound_notification(self):
+        update = self._make_update(self.source)
+
+        with self._mock_handlers() as mocks:
+            mocks["admin"].return_value = False
+            asyncio.run(approve(update, MagicMock()))
+
+        update.message.reply_html.assert_awaited_once_with(
+            text="You are not authorised to approve media."
+        )
+        # Refused before any lookup: an unauthorised reply resolves nothing.
+        mocks["link_log"].objects.filter.assert_not_called()
+        self.link.asave.assert_not_awaited()
+        self.assertEqual(self.link.status, SocialMediaLinkStatus.PENDING_APPROVAL)

@@ -85,7 +85,7 @@
 
 ## incident
 
-### [2026-09-26] incident: auto-ingested official posts are publicly visible before approval — INTERIM BY DESIGN
+### [2026-09-26] incident: auto-ingested official posts are publicly visible before approval — FIXED (2026-09-26)
 
 **Problem**: `incident.tasks.ingest_official_posts` writes `SocialMediaLink` rows with
 `status=PENDING_APPROVAL`, but `get_public_social_media_links` returns `PENDING_APPROVAL`
@@ -97,14 +97,17 @@ the one source that does not need approval.
 `PENDING_APPROVAL`) with no "auto-approved" member, and the public feed filters on
 `completed`, not on a provenance distinction. Ingestion had to pick a status at insert time
 and picked the moderation-first one.
-**Fix**: _None yet — deliberate interim behaviour._ `is_automated` / `platform` /
-`source_post_id` are on the model and the service, so Phase 2 (notifications) can
-distinguish provenance without a migration; a third status member (or a feed filter keyed
-on `is_automated`) is the eventual fix.
-**Prevention**: Do **not** "fix" this by filtering `PENDING_APPROVAL` out of
-`get_public_social_media_links` — the community submit path relies on pending links being
-visible. Any change to that queryset must special-case `is_automated`. If you are reviewing
-this and the interim behaviour is still in place, that is expected, not a regression.
+**Fix**: the feed filter keyed on `is_automated` — the option this entry predicted.
+`get_public_social_media_links` now applies
+`exclude(is_automated=True, status=SocialMediaLinkStatus.PENDING_APPROVAL)`, placed after
+the `status` filter and before `total_count` so the count and the page agree. No migration
+and no third status member were needed. Approval is reachable two ways: the console queue
+(`{settings.FRONTEND_BASE_URL}/console/insiden/links`, linked from the notification) and
+replying `/approve` to the Telegram notification, which resolves through
+`TelegramSocialMediaLinkLog`. Covered by `PublicFeedApprovalGateTests`.
+**Prevention**: The "do not hide pending rows wholesale" warning below still stands — the
+`exclude()` is scoped to `is_automated` precisely so the community submit path keeps its
+visible pending rows. Any future change to that queryset must preserve that distinction.
 
 ### [2026-09-16] incident: `update_social_media_link` silently detached links when `incident_id` omitted — FIXED (2026-09-16) (uncommitted)
 
@@ -315,6 +318,30 @@ backend is authoritative.
 **Fix**: Use `VehicleStatus.OUT_OF_SERVICE`; added `telegram_provider/tests.py::GetDailyUpdatesTests` (real ORM) covering default exclusion and `include_not_in_service=True` inclusion.
 **Prevention**: Give every enum-attribute reference at least one real-query test — `AttributeError` on a `TextChoices` member is invisible to mocks; confirm which app owns the model before reusing an enum member name.
 
+### [2026-09-26] telegram_provider: an outbound audit row with no `payload["message"]` is silently un-approvable — TRAP
+
+**Problem**: `handlers.approve` resolves a replied-to message by JSONB lookup on
+`telegram_log__payload__message__message_id` + `__chat__id`. That block is written by
+`views.TelegramInbound` for **inbound** rows, so an admin replying `/approve` to one of
+the official-post notifications got the generic "No media awaiting review found for this
+message." — indistinguishable from replying to an ordinary chat message, with no error
+anywhere and no hint that the notification was real.
+**Root Cause**: `TelegramLogs.payload` is a free-form `JSONField` with no constraint, and
+`send_message` created its OUTBOUND row *before* the send, so at the moment the row
+existed its payload had no `message` block at all. Nothing in the code asserted that an
+outbound row is reply-resolvable, so the gap was invisible.
+**Fix**: `send_message` gained the keyword-only `return_log=False`; when set it stamps
+`payload["message"]` (`message_id` + `chat.id`, mirroring the inbound shape) before
+`asave()` and returns `(message, log)`, which `incident.tasks._notify_new_link` joins to the
+`SocialMediaLink` via `TelegramSocialMediaLinkLog`. The default path deliberately does **not**
+stamp, so existing callers are unchanged — which means the trap is now opt-in and silent by
+design. Tests: `SendMessageTests` (stamp on / bare `Message` off / `None` when dead-lettered)
+and `ApproveHandlerTests` (an outbound notification publishes, another chat's reply does not).
+**Prevention**: Any new feature that says "reply to this message to act on it" must call
+`send_message(..., return_log=True)` and persist the returned log. If a reply-based handler
+ever reports "not found" for a message the bot demonstrably sent, check
+`TelegramLogs.payload->'message'` on that row before suspecting the handler.
+
 ---
 
 ## chartography
@@ -487,6 +514,15 @@ backend is authoritative.
 **Root Cause**: the tests never mocked the admin check (their siblings do); a DB-only `firebase_id` or a `MagicMock` uid reaches the real SDK.
 **Fix**: patch the name where it is looked up — `rosak.permissions.has_admin_claim` for function-local imports (`handlers.submit_link`), the consumer module (`incident.schema.mutations.interactions.has_admin_claim`) for module-level imports. Commit `51f2f69`.
 **Prevention**: any test exercising a resolver/handler with conditional-admin logic must patch the admin check at the module it resolves from; a `MagicMock` user must never reach `has_admin_claim` unmocked.
+
+### [2026-09-26] tests: `async_to_sync` sees the `TestCase` transaction; `asyncio.run` does not — TRAP
+
+**Problem**: While testing the official-post notification, a handler test written the obvious way silently asserted nothing. `asyncio.run(handlers.approve(update))` inside a `TestCase` found the `SocialMediaLink` it had just created **empty** — or rather, could not see it at all — because the async ORM calls ran on a different DB connection than the one holding the test transaction. Rewriting the same test as `async_to_sync(handlers.approve)(update)` made it pass with no other change. In the other direction, a `MagicMock` patched over an async function fails with a `TypeError`/coroutine error, because `async_to_sync` awaits the *call result* — the mock must be an `AsyncMock` or a real `async def`, or the patch must be a coroutine function.
+**Root Cause**: `async_to_sync` runs the coroutine on the calling thread and keeps async-ORM work on that thread's connection, so `TestCase`'s wrapping transaction applies. `asyncio.run` instead drives the loop from a plain thread and the sync-ORM bridge dispatches async ORM work onto a shared executor thread, which opens its own connection — outside the test transaction and therefore blind to rows the test wrote. A second, related trap: a sync `Model.objects.create` inside an async helper raises `SynchronousOnlyOperation`; async code must use `acreate`/`asave` even when it looks like test scaffolding.
+**Fix**: Patch the symbol *where it is imported* (e.g. `incident.tasks.send_message`, not `telegram_provider.utils.send_message`) with a real coroutine function, and use `acreate` for any row it writes. Use `async_to_sync` — never `asyncio.run` — to enter real async code from a `TestCase`.
+**Prevention**: In this repo, any test of an `async def` handler, resolver or task should enter through `async_to_sync`. If a query inside async code "finds nothing" that the test just created, suspect the connection, not the filter — assert against a known-id lookup before rewriting the query.
+
+---
 
 ### Sources
 

@@ -507,6 +507,13 @@ TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")
 TELEGRAM_CLEANUP_DAYS = os.environ.get("TELEGRAM_CLEANUP_DAYS", 30)
 TELEGRAM_HTTPX_TIMEOUT = os.environ.get("TELEGRAM_HTTPX_TIMEOUT", 30)
 
+# Base URL of the Angular SPA, for links we hand to a human (currently the
+# official-post approval notification's console deep link). There is no
+# frontend config in the API today, so this is the single place that knows it.
+FRONTEND_BASE_URL = os.environ.get(
+    "FRONTEND_BASE_URL", "https://community.mlptf.org.my"
+)
+
 # Official X/Twitter post ingestion (incident/services/official_posts.py).
 # Ships disabled: the X API free tier cannot read, so a paid Basic tier (or
 # higher) plus this flag is what actually starts ingestion. The token is

@@ -1,11 +1,17 @@
 import copy
+import html
 import json
+from contextlib import ExitStack
 from datetime import UTC, date, datetime, timedelta
 from io import StringIO
+from itertools import count
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
+from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import async_to_sync
+from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.core.cache import cache
 from django.core.management import call_command
@@ -47,13 +53,19 @@ from incident.services.official_posts import (
     load_fixture_posts,
 )
 from incident.services.urls import canonicalize_url
-from incident.tasks import ingest_official_posts
+from incident.tasks import TELEGRAM_MAX_TEXT_LENGTH, ingest_official_posts
 from operation.models import Line, Station, Vehicle, VehicleType
 from rosak.context import ContextLoaders
 from rosak.schema import schema
+from telegram_provider.enums import MessageDirection
+from telegram_provider.models import TelegramLogs, TelegramSocialMediaLinkLog
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 SAMPLE_FIXTURE = FIXTURES_DIR / "x_user_tweets_sample.json"
+
+#: Distinguishes "no scripted outcome left" from a scripted ``None`` (a
+#: dead-lettered send) in :func:`fake_sender`.
+_UNSCRIPTED = object()
 
 
 def execute_graphql(query: str, variables=None, user=None):
@@ -68,6 +80,42 @@ def execute_graphql(query: str, variables=None, user=None):
     return async_to_sync(schema.execute)(
         query, variable_values=variables, context_value=context
     )
+
+
+def fake_sender(outcomes=None):
+    """Build an async stand-in for the ``send_message`` the task imported.
+
+    ``async_to_sync`` awaits the *result* of the callable, so the patch target
+    must be a coroutine function — a ``MagicMock`` returning a tuple would
+    raise ``TypeError: object tuple can't be used in 'await' expression``.
+    Each entry of ``outcomes`` is consumed one call at a time: an exception
+    instance is raised, ``None`` is a dead-lettered send. Unscripted calls
+    succeed and return a real (unsent) ``TelegramLogs`` row alongside a
+    message, so the join table can be asserted on for real.
+    """
+    calls: list[dict] = []
+    pending = list(outcomes) if outcomes is not None else None
+    ids = count(90000)
+
+    async def sender(**kwargs):
+        calls.append(kwargs)
+        outcome = pending.pop(0) if pending else _UNSCRIPTED
+        if isinstance(outcome, BaseException):
+            raise outcome
+        if outcome is _UNSCRIPTED:
+            message = SimpleNamespace(
+                message_id=next(ids), chat=SimpleNamespace(id=kwargs["chat_id"])
+            )
+            # acreate, not create: this body is a coroutine and a synchronous
+            # ORM call inside one raises SynchronousOnlyOperation.
+            return message, await TelegramLogs.objects.acreate(
+                direction=MessageDirection.OUTBOUND,
+                payload={"chat_id": kwargs["chat_id"], "text": kwargs["text"]},
+            )
+        return outcome
+
+    sender.calls = calls
+    return sender
 
 
 class IncidentModelTests(TestCase):
@@ -1701,6 +1749,313 @@ class OfficialPostBoundedFetchTests(TestCase):
         # One tweets page per call, so the cached id was reused instead of a
         # second username lookup — but the page fetch itself still happens.
         self.assertEqual(len(pages), 2)
+
+
+class OfficialPostNotificationTests(TestCase):
+    """Phase 2 egress: one admin notification per newly ingested row (5.5).
+
+    The seam patched is ``incident.tasks.send_message`` — the symbol the task
+    imported — so no Telegram call is ever attempted. ``TELEGRAM_ADMIN_CHAT_ID``
+    defaults to a real-looking id here; the one test that must not notify
+    blanks it.
+    """
+
+    def setUp(self):
+        self.author = get_system_author()
+        self.posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+        self.addCleanup(cache.clear)
+
+    def _ingest(self, sender=None, *, posts=None, **extra_settings):
+        """Run the beat task with HTTP stubbed; ``sender=None`` uses the real
+        ``send_message`` (only the PTB application is then faked)."""
+        task_settings = {
+            "OFFICIAL_POST_INGESTION_ENABLED": True,
+            "X_API_BEARER_TOKEN": "t",
+            "OFFICIAL_POST_HANDLES": ["askrapidkl"],
+            "TELEGRAM_ADMIN_CHAT_ID": "-1001234",
+            **extra_settings,
+        }
+        with ExitStack() as stack:
+            stack.enter_context(override_settings(**task_settings))
+            stack.enter_context(
+                mock.patch(
+                    "incident.tasks.fetch_user_posts",
+                    return_value=self.posts if posts is None else posts,
+                )
+            )
+            if sender is not None:
+                stack.enter_context(mock.patch("incident.tasks.send_message", sender))
+            return ingest_official_posts()
+
+    @staticmethod
+    def _notified(result):
+        """How many notifications went out for the single tracked handle.
+
+        ``notified`` is a per-handle stat; the task's top-level totals only sum
+        ``INGEST_COUNTERS``, so it is read from the handle's own entry.
+        """
+        return result["handles"]["askrapidkl"]["notified"]
+
+    def test_fires_once_per_new_link_and_never_for_a_re_scrape(self):
+        sender = fake_sender()
+
+        first = self._ingest(sender)
+
+        self.assertEqual(first["created"], 2)
+        self.assertEqual(self._notified(first), 2)
+        self.assertEqual(len(sender.calls), 2)
+        for call in sender.calls:
+            self.assertEqual(call["chat_id"], "-1001234")
+            self.assertEqual(call["parse_mode"], "HTML")
+            self.assertIs(call["return_log"], True)
+
+        second = self._ingest(sender)
+
+        self.assertEqual(second["created"], 0)
+        self.assertEqual(second["skipped"], 2)
+        self.assertEqual(self._notified(second), 0)
+        # Unchanged: a re-scrape is silent, it never re-notifies.
+        self.assertEqual(len(sender.calls), 2)
+        self.assertEqual(TelegramSocialMediaLinkLog.objects.count(), 2)
+
+    def test_message_carries_handle_time_verbatim_text_permalink_and_console_url(self):
+        sender = fake_sender()
+        self._ingest(sender)
+
+        link = SocialMediaLink.objects.get(post_id=self.posts[0].post_id)
+        text = sender.calls[0]["text"]
+
+        self.assertIn("@askrapidkl", text)
+        # The post's own time, rendered from posted_at — not the ingest time.
+        self.assertIn(f"{link.posted_at:%Y-%m-%d %H:%M}", text)
+        self.assertIn(link.url, text)
+        self.assertIn(f"{settings.FRONTEND_BASE_URL}/console/insiden/links", text)
+        # Verbatim text, HTML-escaped (the fixture contains a bare `&`).
+        self.assertIn(html.escape(link.description, quote=False), text)
+        # Never the provider blob.
+        self.assertNotIn("public_metrics", text)
+
+    def test_dynamic_values_are_html_escaped_for_telegram(self):
+        # Telegram's HTML parser rejects &quot; / &#x27; outright, so quote
+        # escaping must stay off while the markup characters are escaped.
+        nasty = '<b>bold</b> & "quoted" <script>alert(1)</script>'
+        post = RawPost(
+            platform=IngestPlatform.X,
+            post_id="1791552500000000002",
+            handle="askrapidkl",
+            text=nasty,
+            posted_at=datetime(2026, 9, 26, 5, 0, tzinfo=UTC),
+            url="https://x.com/askrapidkl/status/1791552500000000002",
+            has_media=False,
+            raw={"id": "1791552500000000002", "text": nasty},
+        )
+        sender = fake_sender()
+
+        self._ingest(sender, posts=[post])
+
+        text = sender.calls[0]["text"]
+        self.assertNotIn("<script>", text)
+        self.assertNotIn("<b>bold</b>", text)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", text)
+        self.assertIn("&amp; ", text)
+        self.assertIn('"quoted"', text)
+        self.assertNotIn("&quot;", text)
+
+    def test_a_long_post_is_truncated_to_fit_telegrams_limit(self):
+        long_text = "Gangguan laluan utama. " * 400
+        post = RawPost(
+            platform=IngestPlatform.X,
+            post_id="1791552500000000003",
+            handle="askrapidkl",
+            text=long_text,
+            posted_at=datetime(2026, 9, 26, 5, 0, tzinfo=UTC),
+            url="https://x.com/askrapidkl/status/1791552500000000003",
+            has_media=False,
+            raw={"id": "1791552500000000003"},
+        )
+        sender = fake_sender()
+
+        self._ingest(sender, posts=[post])
+
+        text = sender.calls[0]["text"]
+        self.assertLessEqual(len(text), TELEGRAM_MAX_TEXT_LENGTH)
+        # Truncated, and honest about being truncated; the actionable tail
+        # (permalink + console link) survives.
+        self.assertIn("…[truncated]", text)
+        self.assertTrue(text.endswith("to publish it."))
+        self.assertIn(post.url, text)
+
+    def test_no_notification_and_no_join_row_when_admin_chat_id_is_empty(self):
+        sender = fake_sender()
+
+        result = self._ingest(sender, TELEGRAM_ADMIN_CHAT_ID="")
+
+        self.assertEqual(result["created"], 2)
+        self.assertEqual(self._notified(result), 0)
+        self.assertEqual(sender.calls, [])
+        self.assertEqual(TelegramSocialMediaLinkLog.objects.count(), 0)
+
+    def test_a_dead_lettered_send_does_not_abort_the_remaining_notifications(self):
+        sender = fake_sender(outcomes=[None])
+
+        result = self._ingest(sender)
+
+        self.assertEqual(result["created"], 2)
+        self.assertEqual(self._notified(result), 1)
+        self.assertEqual(len(sender.calls), 2)
+        # Only the delivered one is joinable, so /approve can only find that one.
+        self.assertEqual(TelegramSocialMediaLinkLog.objects.count(), 1)
+
+    def test_a_raising_send_is_contained_and_logged_sanitized(self):
+        sender = fake_sender(
+            outcomes=[RuntimeError("bot down"), RuntimeError("bot down")]
+        )
+
+        with self.assertLogs("incident.tasks", level="WARNING") as logs:
+            result = self._ingest(sender)
+
+        self.assertEqual(result["created"], 2)
+        self.assertEqual(self._notified(result), 0)
+        self.assertEqual(len(sender.calls), 2)
+        self.assertEqual(TelegramSocialMediaLinkLog.objects.count(), 0)
+        self.assertTrue(any("bot down" in line for line in logs.output))
+        # The failure is per link, not per handle: the rows still exist.
+        self.assertEqual(SocialMediaLink.objects.count(), 2)
+
+    def test_the_join_row_is_found_by_the_lookup_approve_performs(self):
+        """End to end over the real seam: the stamp ``send_message`` writes is
+        exactly what ``handlers.approve`` filters on, so replying ``/approve``
+        to the notification resolves the link."""
+        message_id = 90210
+        bot = AsyncMock()
+        bot.bot.send_message = AsyncMock(
+            return_value=SimpleNamespace(
+                message_id=message_id, chat=SimpleNamespace(id=-1001234)
+            )
+        )
+
+        # No sender patched: the real send_message runs, and only the PTB
+        # application is faked. async_to_sync from sync code keeps the async ORM
+        # writes on this thread's connection, inside the TestCase transaction.
+        with patch(
+            "telegram_provider.utils.get_ptb_application",
+            new_callable=AsyncMock,
+            return_value=bot,
+        ):
+            result = self._ingest()
+
+        self.assertEqual(self._notified(result), 2)
+        logs = TelegramLogs.objects.filter(direction=MessageDirection.OUTBOUND)
+        self.assertEqual(logs.count(), 2)
+        first_log = logs.order_by("id").first()
+        self.assertEqual(
+            first_log.payload["message"],
+            {"message_id": message_id, "chat": {"id": -1001234}},
+        )
+
+        link = SocialMediaLink.objects.get(post_id=self.posts[0].post_id)
+        join = TelegramSocialMediaLinkLog.objects.get(social_media_link=link)
+        self.assertEqual(join.telegram_log_id, first_log.id)
+
+        # Byte-for-byte the filter telegram_provider.handlers.approve applies.
+        resolved = TelegramSocialMediaLinkLog.objects.filter(
+            telegram_log__payload__message__message_id=message_id,
+            telegram_log__payload__message__chat__id=-1001234,
+        ).first()
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved.social_media_link_id, link.id)
+        # message_id alone is not enough — the handler is chat-scoped.
+        self.assertFalse(
+            TelegramSocialMediaLinkLog.objects.filter(
+                telegram_log__payload__message__message_id=message_id,
+                telegram_log__payload__message__chat__id=1,
+            ).exists()
+        )
+
+
+class PublicFeedApprovalGateTests(TestCase):
+    """Auto-ingested posts are gated on approval; community links are not (5.4)."""
+
+    query = """
+        query Feed($first: Int) {
+            publicSocialMediaLinks(first: $first) {
+                totalCount
+                edges { node { id } }
+            }
+        }
+    """
+
+    def setUp(self):
+        self.community_author = User.objects.create(firebase_id="feed-gate-community")
+        self.system_author = get_system_author()
+
+    def _link(self, slug, *, user=None, **kwargs):
+        return SocialMediaLink.objects.create(
+            url=f"https://example.com/{slug}",
+            title=slug,
+            user=user or self.community_author,
+            **kwargs,
+        )
+
+    def _feed(self, **variables):
+        result = execute_graphql(self.query, variables=variables)
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        return result.data["publicSocialMediaLinks"]
+
+    def test_pending_auto_posts_are_hidden_and_everything_else_still_surfaces(self):
+        hidden = self._link(
+            "auto-pending",
+            status=SocialMediaLinkStatus.PENDING_APPROVAL,
+            is_automated=True,
+            user=self.system_author,
+        )
+        live_auto = self._link(
+            "auto-live",
+            status=SocialMediaLinkStatus.LIVE,
+            is_automated=True,
+            user=self.system_author,
+        )
+        community_pending = self._link(
+            "community-pending", status=SocialMediaLinkStatus.PENDING_APPROVAL
+        )
+        community_live = self._link("community-live", status=SocialMediaLinkStatus.LIVE)
+
+        feed = self._feed()
+
+        ids = [edge["node"]["id"] for edge in feed["edges"]]
+        self.assertNotIn(str(hidden.id), ids)
+        self.assertIn(str(live_auto.id), ids)
+        # Community links keep today's behaviour: pending is still public.
+        self.assertIn(str(community_pending.id), ids)
+        self.assertIn(str(community_live.id), ids)
+        # totalCount counts the filtered set, not the unfiltered table.
+        self.assertEqual(feed["totalCount"], 3)
+        self.assertEqual(SocialMediaLink.objects.count(), 4)
+
+    def test_an_explicit_status_filter_cannot_resurrect_a_pending_auto_post(self):
+        self._link(
+            "auto-pending",
+            status=SocialMediaLinkStatus.PENDING_APPROVAL,
+            is_automated=True,
+            user=self.system_author,
+        )
+
+        query = """
+            query Feed($status: SocialMediaLinkStatus) {
+                publicSocialMediaLinks(first: 10, status: $status) {
+                    totalCount
+                    edges { node { id } }
+                }
+            }
+        """
+        result = execute_graphql(
+            query, variables={"status": "PENDING_APPROVAL"}, user=None
+        )
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        feed = result.data["publicSocialMediaLinks"]
+        self.assertEqual(feed["edges"], [])
+        self.assertEqual(feed["totalCount"], 0)
 
 
 class IngestOfficialPostsCommandTests(TestCase):

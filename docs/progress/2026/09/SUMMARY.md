@@ -1,18 +1,19 @@
 # Monthly Summary - September 2026
 
-Total commits: 36
+Total commits: 37
 
 ## Commit Type Distribution
 
-- feat: 26
+- feat: 27
 - fix: 6
 - test: 2
 - chore: 2
 
 ## By Module/Feature
 
-### Incident (20 commits)
+### Incident (21 commits)
 
+- (this commit) [feat](incident): official-post Phase 2 — Telegram the admin per newly ingested post (reply `/approve`-able via `send_message(return_log=True)` + `TelegramSocialMediaLinkLog`), and exclude automated `PENDING_APPROVAL` posts from the public feed (+ docs: corrected the stale "outbound is ungoverned" claims in APPS.md and the component docs)
 - **c23e7bc** [feat](incident): official post ingestion foundation
 - (this commit) [feat](incident): scheduled official-post ingestion task, backfill command and tests (+ docs: beat table 8 → 9 jobs, ingestion service paragraph, "pending is public" trap)
 - **67a830c** [feat](incident): complete insiden reporting backend

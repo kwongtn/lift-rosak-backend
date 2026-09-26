@@ -15,6 +15,7 @@ from incident.enums import (
     CalendarIncidentSeverity,
     CalendarIncidentStatus,
     PassengerStatus,
+    SocialMediaLinkStatus,
 )
 from incident.models import (
     CalendarIncident,
@@ -280,10 +281,13 @@ async def get_public_social_media_links(
     (id as tiebreaker) so keyset cursors never skip/duplicate. ``mine`` returns
     only the caller's own links (status-independent); anonymous ``mine`` returns
     an empty page. ``status`` optionally narrows the feed to one approval status;
-    omitted, both LIVE and PENDING_APPROVAL are returned (unchanged default).
-    ``current_service_day_only`` keeps only links created within the current
-    service day (03:00 rollover, see ``service_day_start``). ``totalCount`` is
-    the size of the whole filtered set, unaffected by the ``after`` cursor.
+    omitted, both LIVE and PENDING_APPROVAL are returned (unchanged default) —
+    except for automatically ingested posts, which are excluded while
+    ``PENDING_APPROVAL`` so an official announcement only becomes public once
+    an admin approves it. ``current_service_day_only`` keeps only links created
+    within the current service day (03:00 rollover, see ``service_day_start``).
+    ``totalCount`` is the size of the whole filtered set, unaffected by the
+    ``after`` cursor.
     """
 
     if mine is not None and mine.value:
@@ -311,6 +315,16 @@ async def get_public_social_media_links(
 
     if status is not None:
         queryset = queryset.filter(status=status.value)
+
+    # Approval gates publication for automatically ingested posts: an
+    # unapproved official post is not public. Scoped to is_automated on
+    # purpose — a *community* link awaiting approval keeps today's behaviour
+    # and still surfaces (with its pending icon), so hiding pending rows
+    # wholesale would silently hide hand-submitted reports too. Applied before
+    # the count so totalCount and the page both agree with what is published.
+    queryset = queryset.exclude(
+        is_automated=True, status=SocialMediaLinkStatus.PENDING_APPROVAL
+    )
 
     if current_service_day_only:
         queryset = queryset.filter(created__gte=service_day_start(timezone.now()))
