@@ -187,6 +187,13 @@ backend is authoritative.
 **Fix**: _Not fixed (pre-existing)._ Scope the assertion by `content_type` (and ideally `user`).
 **Prevention**: Always filter `Vote` assertions by `content_type`; never treat `object_id` alone as identifying a vote.
 
+### [2026-09-26] incident: an exported `posted_at` is naive **local** time, not the post's UTC time — TRAP
+
+**Problem**: `manage.py export_official_posts` writes `posted_at` as the stored column's own `isoformat()`. With `USE_TZ = False` and `TIME_ZONE = "Asia/Kuala_Lumpur"` that column holds naive local wall time, so a post the X API reported as `2026-09-26T03:15:00Z` is exported as `2026-09-26T11:15:00` — a true instant, but with no offset, in a file whose whole purpose is to leave this system.
+**Root Cause**: Ingestion stores an aware UTC value through the ORM, which drops the tzinfo and shifts to local (the same conversion the Phase 1 tests work around with `timezone.make_naive`). The export is the first surface that *republishes* that value outside the app, so a long-internal ambiguity becomes an external one. The `--since`/`--until` window is unaffected: its bounds stay aware and Django's adapter converts them into the same storage frame, so a UTC calendar day really is a UTC calendar day.
+**Fix**: _By design, documented._ The exported value is the stored column verbatim (spec §6.1), and the command docstring plus `test_date_bounds_are_whole_utc_days_not_local_ones` both say so. A consumer that needs UTC must re-anchor with `settings.TIME_ZONE`; do not "fix" the export by re-interpreting the stored value, which would shift it twice.
+**Prevention**: Whenever a value crosses the app boundary (export, GraphQL, webhook), decide explicitly between "the stored value" and "the same instant in UTC", and pin the choice with a docstring and a test. If `USE_TZ` ever flips to `True`, re-check this command: the exported strings gain an offset and any published dataset shifts with them.
+
 ### [2026-09-22] incident: `lineStatusHistory` stopped at the current hour — the chart lost its later labels — FIXED (2026-09-22)
 
 **Problem**: `bucket_hourly` walked from the service-day start to `now.replace(minute=0, …)` inclusive, so the bucket count grew through the day. A browser measurement at ~17:00 found only 15 hour labels (`03`–`17`) on the front page's "Reports by hour — today" chart instead of the 24 the service day (03:00 → 02:00) should always show; the frontend was faithfully rendering what the API returned.

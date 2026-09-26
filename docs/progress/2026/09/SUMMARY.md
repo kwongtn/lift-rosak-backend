@@ -13,6 +13,7 @@ Total commits: 37
 
 ### Incident (21 commits)
 
+- (this commit) [feat](incident): official-post Phase 3 — `export_official_posts` writes the ingested archive as JSONL/CSV (streamed, stable order, `raw_payload` opt-in, `--dry-run`, optional private `push_to_hub`); 28 tests, + docs (naive-local `posted_at` trap)
 - (this commit) [feat](incident): official-post Phase 2 — Telegram the admin per newly ingested post (reply `/approve`-able via `send_message(return_log=True)` + `TelegramSocialMediaLinkLog`), and exclude automated `PENDING_APPROVAL` posts from the public feed (+ docs: corrected the stale "outbound is ungoverned" claims in APPS.md and the component docs)
 - **c23e7bc** [feat](incident): official post ingestion foundation
 - (this commit) [feat](incident): scheduled official-post ingestion task, backfill command and tests (+ docs: beat table 8 → 9 jobs, ingestion service paragraph, "pending is public" trap)

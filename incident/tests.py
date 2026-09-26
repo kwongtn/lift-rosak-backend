@@ -1,12 +1,16 @@
 import copy
+import csv
 import html
 import json
+import os
+import sys
+import tempfile
 from contextlib import ExitStack
 from datetime import UTC, date, datetime, timedelta
 from io import StringIO
 from itertools import count
 from pathlib import Path
-from types import SimpleNamespace
+from types import GeneratorType, SimpleNamespace
 from unittest import mock
 from unittest.mock import AsyncMock, patch
 
@@ -2248,3 +2252,592 @@ class IngestOfficialPostsCommandTests(TestCase):
         from incident.management.commands.ingest_official_posts import Command
 
         return Command()
+
+
+class ExportOfficialPostsFixture:
+    """Shared rows for the export tests: two accounts, plus a community link.
+
+    Kept out of the TestCase itself so both export test classes build the exact
+    same archive — the fixture posts carry the shipped BM text, which is what
+    the verbatim-text assertions read.
+    """
+
+    OTHER_HANDLE = "myrapidkl"
+
+    @classmethod
+    def build(cls, author):
+        posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+        ingest_posts(posts, handle="askrapidkl", author=author)
+        # A second tracked account, dated a day earlier: --handle and the date
+        # window each have something to narrow.
+        ingest_posts(
+            [
+                RawPost(
+                    platform=IngestPlatform.X,
+                    post_id="1791552500000000001",
+                    handle=cls.OTHER_HANDLE,
+                    text="Gangguan pada laluan utama",
+                    posted_at=datetime(2026, 9, 25, 12, 0, tzinfo=UTC),
+                    url=f"https://x.com/{cls.OTHER_HANDLE}/status/1791552500000000001",
+                    has_media=False,
+                    raw={"id": "1791552500000000001"},
+                )
+            ],
+            handle=cls.OTHER_HANDLE,
+            author=author,
+        )
+        # A hand-submitted link: same table, never part of the operator's
+        # archive, so every export must leave it out.
+        community = SocialMediaLink.objects.create(
+            url="https://twitter.com/kwong/status/1234567890",
+            title="community submission",
+            description="submitted by a commuter, not ingested",
+            user=author,
+        )
+        return posts, community
+
+
+class ExportOfficialPostsCommandTests(TestCase):
+    """The export command (6.2): mapping, filtering, CSV/JSONL, dry run."""
+
+    def setUp(self):
+        self.author = get_system_author()
+        self.fixture_posts, self.community = ExportOfficialPostsFixture.build(
+            self.author
+        )
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.tmppath = Path(self.tmpdir.name)
+
+    # --- helpers -------------------------------------------------------
+
+    def _run(self, *args):
+        out, err = StringIO(), StringIO()
+        call_command("export_official_posts", *args, stdout=out, stderr=err)
+        return out.getvalue(), err.getvalue()
+
+    def _records(self, *args):
+        """Run the command to stdout and parse the JSONL back into records."""
+        out, _ = self._run(*args)
+        return [json.loads(line) for line in out.splitlines() if line.strip()]
+
+    def _read(self, path: Path) -> str:
+        # newline="" is what the csv docs require for reading a written file.
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            return handle.read()
+
+    def _store(self, **fields) -> SocialMediaLink:
+        """Create one automated row directly (for cases ingestion can't make)."""
+        defaults = {
+            "user": self.author,
+            "is_automated": True,
+            "platform": IngestPlatform.X,
+        }
+        return SocialMediaLink.objects.create(**{**defaults, **fields})
+
+    def _command(self):
+        from incident.management.commands.export_official_posts import Command
+
+        return Command()
+
+    # --- row mapping ---------------------------------------------------
+
+    def test_one_post_maps_to_the_exact_expected_columns(self):
+        records = self._records("--handle", "askrapidkl")
+        self.assertEqual(len(records), 2)
+
+        first = records[0]
+        stored = SocialMediaLink.objects.get(post_id="1791552310047416320")
+        # Column order is part of the dataset contract, so it is asserted, not
+        # just the key set.
+        self.assertEqual(
+            list(first),
+            ["post_id", "posted_at", "handle", "text", "permalink"],
+        )
+        self.assertEqual(first["post_id"], "1791552310047416320")
+        self.assertEqual(first["handle"], "askrapidkl")
+        self.assertEqual(first["permalink"], stored.url)
+        self.assertEqual(
+            first["permalink"],
+            "https://x.com/askrapidkl/status/1791552310047416320",
+        )
+        # Verbatim, byte for byte: against the stored column and against the
+        # fixture payload ingestion read, not a re-typed literal that could
+        # drift from either.
+        self.assertEqual(first["text"], stored.description)
+        self.assertEqual(first["text"], self.fixture_posts[0].text)
+        self.assertIn("Gangguan di LRT Aliran Utama", first["text"])
+        # ISO-8601 of the stored post time.
+        self.assertEqual(first["posted_at"], stored.posted_at.isoformat())
+        self.assertEqual(first["posted_at"], "2026-09-26T11:15:00")
+
+    def test_a_row_without_a_post_time_keeps_a_null_posted_at(self):
+        self._store(
+            url="https://x.com/askrapidkl/status/1791552900000000001",
+            title="no post time",
+            description="posted_at could not be parsed",
+            post_id="1791552900000000001",
+            posted_at=None,
+            source_handle="askrapidkl",
+        )
+
+        records = self._records("--handle", "askrapidkl")
+        undated = next(r for r in records if r["post_id"] == "1791552900000000001")
+        self.assertIsNone(undated["posted_at"])
+        self.assertIn('"posted_at": null', json.dumps(undated))
+
+    def test_posted_at_order_wins_over_post_id(self):
+        # Ids and post times deliberately disagree: the newer post has the
+        # smaller id, so ordering by id alone would reverse the archive.
+        self._store(
+            url="https://x.com/askrapidkl/status/1791552600000000001",
+            title="newer",
+            description="posted 27 Sep",
+            post_id="1791552600000000001",
+            posted_at=datetime(2026, 9, 27, 10, 0, tzinfo=UTC),
+            source_handle="askrapidkl",
+        )
+        self._store(
+            url="https://x.com/askrapidkl/status/1791552700000000002",
+            title="older",
+            description="posted 26 Sep",
+            post_id="1791552700000000002",
+            posted_at=datetime(2026, 9, 26, 10, 0, tzinfo=UTC),
+            source_handle="askrapidkl",
+        )
+
+        ids = [record["post_id"] for record in self._records()]
+
+        self.assertEqual(
+            ids,
+            [
+                "1791552500000000001",  # 25 Sep, the other account
+                "1791552310047416320",  # 26 Sep 03:15Z
+                "1791552408821972992",  # 26 Sep 05:42Z
+                "1791552700000000002",  # 26 Sep 10:00Z — the LARGER id, first
+                "1791552600000000001",  # 27 Sep 10:00Z — the SMALLER id, last
+            ],
+        )
+
+    def test_equal_posted_at_falls_back_to_post_id(self):
+        same = datetime(2026, 9, 28, 8, 0, tzinfo=UTC)
+        # Created in reverse id order, so insertion order cannot explain the
+        # result.
+        for post_id in ("1791552800000000002", "1791552800000000001"):
+            self._store(
+                url=f"https://x.com/askrapidkl/status/{post_id}",
+                title="tie",
+                description="same post time",
+                post_id=post_id,
+                posted_at=same,
+                source_handle="askrapidkl",
+            )
+
+        ids = [record["post_id"] for record in self._records("--handle", "askrapidkl")]
+
+        self.assertEqual(
+            ids,
+            [
+                "1791552310047416320",  # 26 Sep, from the shipped fixture
+                "1791552408821972992",
+                "1791552800000000001",  # the tie pair, smaller id first
+                "1791552800000000002",
+            ],
+        )
+
+    def test_the_same_rows_export_to_the_same_bytes_twice(self):
+        first = self._run()[0]
+        second = self._run()[0]
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(first.splitlines()), 3)
+
+    # --- filtering -----------------------------------------------------
+
+    def test_since_until_and_handle_narrow_the_export(self):
+        # The fixture pair is on 26 Sep; the other account is on 25 Sep.
+        self.assertEqual(
+            [r["post_id"] for r in self._records("--since", "2026-09-26")],
+            ["1791552310047416320", "1791552408821972992"],
+        )
+        self.assertEqual(
+            [r["post_id"] for r in self._records("--until", "2026-09-25")],
+            ["1791552500000000001"],
+        )
+        self.assertEqual(
+            [r["post_id"] for r in self._records("--handle", "myrapidkl")],
+            ["1791552500000000001"],
+        )
+        # A leading '@' is tolerated, as on the ingest command.
+        self.assertEqual(
+            [r["post_id"] for r in self._records("--handle", "@askrapidkl")],
+            ["1791552310047416320", "1791552408821972992"],
+        )
+        self.assertEqual(
+            len(self._records("--since", "2026-09-01", "--until", "2026-09-30")), 3
+        )
+
+    def test_date_bounds_are_whole_utc_days_not_local_ones(self):
+        # 16:30Z is already 27 Sep in Asia/Kuala_Lumpur, and the project stores
+        # naive local time (USE_TZ = False). A local-day reading of the window
+        # would file this post under the 27th; the UTC-day reading keeps it on
+        # the 26th.
+        self._store(
+            url="https://x.com/askrapidkl/status/1791552600000000009",
+            title="late utc",
+            description="26 Sep 16:30Z",
+            post_id="1791552600000000009",
+            posted_at=datetime(2026, 9, 26, 16, 30, tzinfo=UTC),
+            source_handle="askrapidkl",
+        )
+
+        on_the_26th = [r["post_id"] for r in self._records("--until", "2026-09-26")]
+        on_the_27th = [r["post_id"] for r in self._records("--since", "2026-09-27")]
+
+        self.assertIn("1791552600000000009", on_the_26th)
+        self.assertEqual(on_the_27th, [])
+
+    def test_community_rows_are_never_exported(self):
+        records = self._records()
+        texts = [record["text"] for record in records]
+
+        self.assertEqual(len(records), 3)
+        self.assertNotIn(self.community.description, texts)
+        self.assertNotIn(self.community.url, [r["permalink"] for r in records])
+        self.assertNotIn(self.community.title, texts)
+        # It is still there — the export hides it, it does not delete it.
+        self.assertTrue(SocialMediaLink.objects.filter(pk=self.community.pk).exists())
+
+    def test_a_handle_nobody_posted_under_exports_nothing(self):
+        out, err = self._run("--handle", "nosuchaccount")
+
+        self.assertEqual(out, "")
+        self.assertIn("rows=0", err)
+
+    # --- CSV -----------------------------------------------------------
+
+    def test_csv_escapes_commas_quotes_and_newlines_and_round_trips(self):
+        nasty = 'Gangguan di "LRT Aliran Utama",\nper MSI Kelana Jaya'
+        self._store(
+            url="https://x.com/askrapidkl/status/1791553000000000001",
+            title="nasty",
+            description=nasty,
+            post_id="1791553000000000001",
+            posted_at=datetime(2026, 9, 29, 5, 0, tzinfo=UTC),
+            source_handle="askrapidkl",
+        )
+        target = self.tmppath / "export.csv"
+
+        out, err = self._run(
+            "--format", "csv", "--handle", "askrapidkl", "--output", str(target)
+        )
+
+        # A path means the rows land in the file and stdout carries the summary.
+        self.assertIn("rows=3", out)
+        self.assertEqual(err, "")
+        text = self._read(target)
+        # The stdlib writer did the escaping, not the test: embedded quotes are
+        # doubled and the comma/newline live inside one quoted cell.
+        self.assertIn('"Gangguan di ""LRT Aliran Utama"",', text)
+        # …and it reads back identically.
+        rows = list(csv.reader(StringIO(text, newline="")))
+        self.assertEqual(
+            rows[0], ["post_id", "posted_at", "handle", "text", "permalink"]
+        )
+        self.assertEqual(len(rows), 4)  # header + the two fixture posts + this one
+        nasty_row = next(row for row in rows[1:] if row[0] == "1791553000000000001")
+        self.assertEqual(nasty_row[3], nasty)
+
+    def test_csv_writes_its_header_even_with_no_rows(self):
+        target = self.tmppath / "empty.csv"
+
+        out, err = self._run(
+            "--format", "csv", "--handle", "nosuchaccount", "--output", str(target)
+        )
+
+        self.assertIn("rows=0", out)
+        self.assertEqual(err, "")
+        rows = list(csv.reader(StringIO(self._read(target), newline="")))
+        self.assertEqual(
+            rows, [["post_id", "posted_at", "handle", "text", "permalink"]]
+        )
+
+    # --- JSONL ---------------------------------------------------------
+
+    def test_jsonl_writes_one_valid_object_per_row(self):
+        out, _ = self._run()
+
+        lines = out.splitlines()
+        self.assertEqual(len(lines), 3)
+        for line in lines:
+            # Would raise on a malformed line — a piped consumer must not be
+            # handed half a record.
+            self.assertIsInstance(json.loads(line), dict)
+
+    def test_include_raw_toggles_the_raw_payload_column(self):
+        plain = self._records("--handle", "askrapidkl")
+        self.assertNotIn("raw_payload", plain[0])
+
+        with_raw = self._records("--handle", "askrapidkl", "--include-raw")
+        self.assertEqual(
+            list(with_raw[0]),
+            ["post_id", "posted_at", "handle", "text", "permalink", "raw_payload"],
+        )
+        stored = SocialMediaLink.objects.get(post_id="1791552310047416320")
+        self.assertEqual(with_raw[0]["raw_payload"], stored.raw_payload)
+        # A native object, not a JSON string.
+        self.assertIsInstance(with_raw[0]["raw_payload"], dict)
+
+    def test_raw_payload_is_json_encoded_in_a_csv_cell(self):
+        self._store(
+            url="https://x.com/askrapidkl/status/1791553000000000002",
+            title="raw",
+            description="raw in csv",
+            post_id="1791553000000000002",
+            posted_at=datetime(2026, 9, 29, 5, 0, tzinfo=UTC),
+            source_handle="askrapidkl",
+            raw_payload={"id": "1791553000000000002", "text": "raw, in csv"},
+        )
+        target = self.tmppath / "raw.csv"
+
+        self._run(
+            "--format",
+            "csv",
+            "--include-raw",
+            "--handle",
+            "askrapidkl",
+            "--output",
+            str(target),
+        )
+
+        rows = list(csv.reader(StringIO(self._read(target), newline="")))
+        self.assertEqual(
+            rows[0],
+            [
+                "post_id",
+                "posted_at",
+                "handle",
+                "text",
+                "permalink",
+                "raw_payload",
+            ],
+        )
+        cell = next(row[5] for row in rows[1:] if row[0] == "1791553000000000002")
+        self.assertEqual(
+            json.loads(cell), {"id": "1791553000000000002", "text": "raw, in csv"}
+        )
+
+    def test_raw_payload_is_not_selected_when_it_is_not_exported(self):
+        from incident.management.commands.export_official_posts import (
+            EXPORT_COLUMNS,
+            _row_fields,
+        )
+
+        self.assertNotIn("raw_payload", _row_fields(EXPORT_COLUMNS))
+        self.assertEqual(
+            _row_fields(EXPORT_COLUMNS + ("raw_payload",))[-1], "raw_payload"
+        )
+
+    # --- output & dry run -----------------------------------------------
+
+    def test_stdout_export_keeps_the_summary_off_the_data_stream(self):
+        out, err = self._run()
+
+        # Every stdout line is a record, so the export stays pipeable.
+        for line in out.splitlines():
+            json.loads(line)
+        self.assertNotIn("rows=", out)
+        self.assertIn("rows=3", err)
+        self.assertIn("format=jsonl", err)
+
+    def test_dry_run_reports_the_count_and_writes_nothing(self):
+        target = self.tmppath / "dry.jsonl"
+
+        out, _ = self._run("--dry-run", "--output", str(target))
+
+        self.assertFalse(target.exists())
+        self.assertIn("rows=3", out)
+        self.assertIn("dry_run=True", out)
+
+    def test_dry_run_emits_no_rows_and_no_csv_header(self):
+        out, _ = self._run("--dry-run")
+
+        self.assertNotIn("{", out)
+        self.assertEqual(len(out.strip().splitlines()), 1)
+        self.assertNotIn("post_id,", self._run("--dry-run", "--format", "csv")[0])
+
+    def test_dry_run_counts_the_same_rows_a_real_run_would_write(self):
+        target = self.tmppath / "counted.jsonl"
+
+        self._run("--dry-run", "--handle", "myrapidkl", "--output", str(target))
+        self._run("--handle", "myrapidkl", "--output", str(target))
+
+        self.assertEqual(len(self._read(target).splitlines()), 1)
+
+    # --- streaming & refusals -------------------------------------------
+
+    def test_records_stream_from_a_cursor_instead_of_a_list(self):
+        from incident.management.commands.export_official_posts import EXPORT_COLUMNS
+
+        command = self._command()
+        queryset = command._queryset(handles=[], since=None, until=None)
+
+        records = command._iter_records(queryset, EXPORT_COLUMNS)
+
+        # A generator, so a long archive is never a list in memory. The whole
+        # set still comes out.
+        self.assertIsInstance(records, GeneratorType)
+        self.assertEqual(len(list(records)), 3)
+
+    def test_unknown_format_is_refused(self):
+        with self.assertRaises(CommandError) as caught:
+            self._run("--format", "tsv")
+
+        self.assertIn("tsv", str(caught.exception))
+
+    def test_malformed_date_and_a_reversed_window_are_refused(self):
+        with self.assertRaises(CommandError) as caught:
+            self._run("--since", "26-09-2026")
+        self.assertIn("YYYY-MM-DD", str(caught.exception))
+
+        with self.assertRaises(CommandError) as caught:
+            self._run("--since", "2026-09-05", "--until", "2026-09-01")
+        self.assertIn("is before", str(caught.exception))
+
+    def test_an_unwritable_destination_raises_command_error(self):
+        with self.assertRaises(CommandError) as caught:
+            self._run("--output", str(self.tmppath / "missing" / "dir" / "out.jsonl"))
+
+        self.assertIn("could not be written", str(caught.exception))
+
+
+class ExportOfficialPostsHubPushTests(TestCase):
+    """The optional ``--push-to-hub`` path (6.2), with ``datasets`` faked."""
+
+    def setUp(self):
+        self.author = get_system_author()
+        ExportOfficialPostsFixture.build(self.author)
+
+    def _run(self, *args):
+        out, err = StringIO(), StringIO()
+        call_command("export_official_posts", *args, stdout=out, stderr=err)
+        return out.getvalue(), err.getvalue()
+
+    def _fake_datasets(self):
+        """Stand in for the optional ``datasets`` package.
+
+        ``from datasets import Dataset`` resolves straight out of
+        ``sys.modules``, so replacing that one entry is the whole seam — no
+        install, no network, and the assertions can see both the records handed
+        over and the ``push_to_hub`` call.
+        """
+        pushed = mock.Mock(name="dataset")
+        dataset_class = mock.Mock(
+            name="Dataset", from_dict=mock.Mock(return_value=pushed)
+        )
+        return SimpleNamespace(Dataset=dataset_class), dataset_class, pushed
+
+    def _read(self, path: Path) -> str:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            return handle.read()
+
+    def test_push_to_hub_sends_the_expected_records_to_a_private_dataset(self):
+        module, dataset_class, pushed = self._fake_datasets()
+        repo_id = "rosak/rapidkl-official-posts"
+
+        with (
+            mock.patch.dict(sys.modules, {"datasets": module}),
+            mock.patch.dict(os.environ, {"HF_TOKEN": "hf_secret_token_value"}),
+        ):
+            _, err = self._run("--push-to-hub", repo_id, "--handle", "askrapidkl")
+
+        # from_dict gets the dataset schema: one key per column, one list of
+        # values each, in column order.
+        records = dataset_class.from_dict.call_args.args[0]
+        self.assertEqual(
+            list(records),
+            ["post_id", "posted_at", "handle", "text", "permalink"],
+        )
+        self.assertEqual(
+            records["post_id"], ["1791552310047416320", "1791552408821972992"]
+        )
+        self.assertEqual(records["handle"], ["askrapidkl", "askrapidkl"])
+        self.assertIn("Gangguan di LRT Aliran Utama", records["text"][0])
+        # Private by default, the repo explicit, and the token passed on but
+        # never printed.
+        pushed.push_to_hub.assert_called_once_with(
+            repo_id, token="hf_secret_token_value", private=True
+        )
+        self.assertNotIn("hf_secret_token_value", err)
+        self.assertIn(f"push_to_hub={repo_id}", err)
+
+    def test_push_to_hub_can_carry_the_raw_column(self):
+        module, dataset_class, _ = self._fake_datasets()
+
+        with mock.patch.dict(sys.modules, {"datasets": module}):
+            self._run(
+                "--push-to-hub",
+                "rosak/rapidkl-official-posts",
+                "--handle",
+                "askrapidkl",
+                "--include-raw",
+            )
+
+        handed_over = dataset_class.from_dict.call_args.args[0]
+        self.assertEqual(
+            list(handed_over),
+            [
+                "post_id",
+                "posted_at",
+                "handle",
+                "text",
+                "permalink",
+                "raw_payload",
+            ],
+        )
+        # A native object, not the JSON string a CSV cell would carry.
+        self.assertIsInstance(handed_over["raw_payload"][0], dict)
+
+    def test_push_also_writes_the_requested_output_file(self):
+        module, _, pushed = self._fake_datasets()
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        target = Path(tmpdir.name) / "export.jsonl"
+
+        with mock.patch.dict(sys.modules, {"datasets": module}):
+            out, _ = self._run(
+                "--push-to-hub", "rosak/rapidkl-official-posts", "--output", str(target)
+            )
+
+        pushed.push_to_hub.assert_called_once()
+        # The push and the file are independent sinks, and one pass over the
+        # queryset feeds both.
+        self.assertIn("rows=3", out)
+        self.assertEqual(len(self._read(target).splitlines()), 3)
+
+    def test_a_missing_datasets_package_raises_an_actionable_command_error(self):
+        # ``sys.modules[name] = None`` is the documented way to make an import
+        # fail: CPython raises ModuleNotFoundError (an ImportError) instead of
+        # searching the filesystem, so this works whether or not the package
+        # happens to be installed.
+        with mock.patch.dict(sys.modules, {"datasets": None}):
+            with self.assertRaises(CommandError) as caught:
+                self._run("--push-to-hub", "rosak/rapidkl-official-posts")
+
+        message = str(caught.exception)
+        self.assertIn("--push-to-hub requires the 'datasets' package", message)
+        self.assertIn("pip install datasets", message)
+        self.assertIn("HF_TOKEN", message)
+
+    def test_dry_run_never_pushes(self):
+        module, dataset_class, pushed = self._fake_datasets()
+
+        with mock.patch.dict(sys.modules, {"datasets": module}):
+            out, _ = self._run(
+                "--dry-run", "--push-to-hub", "rosak/rapidkl-official-posts"
+            )
+
+        dataset_class.from_dict.assert_not_called()
+        pushed.push_to_hub.assert_not_called()
+        self.assertIn("rows=3", out)
+        self.assertIn("push_to_hub=rosak/rapidkl-official-posts", out)
