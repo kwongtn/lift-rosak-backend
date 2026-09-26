@@ -85,6 +85,27 @@
 
 ## incident
 
+### [2026-09-26] incident: auto-ingested official posts are publicly visible before approval — INTERIM BY DESIGN
+
+**Problem**: `incident.tasks.ingest_official_posts` writes `SocialMediaLink` rows with
+`status=PENDING_APPROVAL`, but `get_public_social_media_links` returns `PENDING_APPROVAL`
+rows **alongside** `LIVE` ones in the anonymous public feed. So every post the 5-minute beat
+pulls from the tracked X accounts appears on the public front page the moment it is
+ingested, with no human ever approving it. That defeats the point of the approval queue for
+the one source that does not need approval.
+**Root Cause**: `SocialMediaLinkStatus` is a strict 2-state vocabulary (`LIVE`,
+`PENDING_APPROVAL`) with no "auto-approved" member, and the public feed filters on
+`completed`, not on a provenance distinction. Ingestion had to pick a status at insert time
+and picked the moderation-first one.
+**Fix**: _None yet — deliberate interim behaviour._ `is_automated` / `platform` /
+`source_post_id` are on the model and the service, so Phase 2 (notifications) can
+distinguish provenance without a migration; a third status member (or a feed filter keyed
+on `is_automated`) is the eventual fix.
+**Prevention**: Do **not** "fix" this by filtering `PENDING_APPROVAL` out of
+`get_public_social_media_links` — the community submit path relies on pending links being
+visible. Any change to that queryset must special-case `is_automated`. If you are reviewing
+this and the interim behaviour is still in place, that is expected, not a regression.
+
 ### [2026-09-16] incident: `update_social_media_link` silently detached links when `incident_id` omitted — FIXED (2026-09-16) (uncommitted)
 
 **Problem**: Editing a `SocialMediaLink` through `update_social_media_link` severed its incident

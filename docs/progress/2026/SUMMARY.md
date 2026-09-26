@@ -1,13 +1,15 @@
 # Yearly Summary - 2026
 
-Total commits: 106
+Total commits: 108
 
 ## Monthly Breakdown
 
-### 2026-09 (34 commits)
+### 2026-09 (36 commits)
 
-#### Incident (18 commits)
+#### Incident (20 commits)
 
+- **c23e7bc** [feat](incident): official post ingestion foundation
+- (this commit) [feat](incident): scheduled official-post ingestion task, backfill command and tests (+ docs: beat table 8 → 9 jobs, ingestion service paragraph, "pending is public" trap)
 - **67a830c** [feat](incident): complete insiden reporting backend
 - **b9bd6fd** [feat](incident): add public publicSocialMediaLinks GraphQL query with line filter
 - **1533846** [feat](incident): allow admin to fully edit SocialMediaLink before completion
@@ -168,6 +170,8 @@ Total commits: 106
 
 ### Major Features & Refactors
 
+- **2026-09-26** (this commit) [feat](incident): scheduled official-post ingestion — `incident.tasks.ingest_official_posts` on a 5-minute beat (`expires` 240 / `time_limit` 180), the `ingest_official_posts` management command for backfill (`--handle/--since/--until/--limit/--fixture/--dry-run`), and 5 test classes; 323-test full suite OK
+- **2026-09-26** **c23e7bc** [feat](incident): official post ingestion foundation — `IngestPlatform` + `SocialMediaLink` ingestion fields with a partial unique constraint on `(platform, post_id)`, the bounded `services/official_posts.py` X API client, and the `system:official-ingest` service user
 - **2026-09-24** **6a8f25e** [fix](rosak): `has_admin_claim` returns False (deny) when Firebase reports `UserNotFoundError`, instead of 500ing `IsAdmin` and the 12 conditional-admin resolvers
 - **2026-09-24** **51f2f69** [test]: the 7 pre-existing failures no longer reach the live Firebase Admin API; 5 `telegram_provider.LinkHandlerTests` patch `rosak.permissions.has_admin_claim` (function-local import) and 2 `incident.SocialMediaLinkTests` patch `incident.schema.mutations.interactions.has_admin_claim` (module-level import)
 - **2026-09-24** **fc72187** [chore](deps): pinned dependencies refreshed; `pendulum` 3.0.0 to 3.2.0 (now a cp313 wheel) with 15 further same-major bumps, `redis` held at 5.2.1

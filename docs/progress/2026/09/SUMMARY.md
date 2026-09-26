@@ -1,18 +1,20 @@
 # Monthly Summary - September 2026
 
-Total commits: 34
+Total commits: 36
 
 ## Commit Type Distribution
 
-- feat: 24
+- feat: 26
 - fix: 6
 - test: 2
 - chore: 2
 
 ## By Module/Feature
 
-### Incident (18 commits)
+### Incident (20 commits)
 
+- **c23e7bc** [feat](incident): official post ingestion foundation
+- (this commit) [feat](incident): scheduled official-post ingestion task, backfill command and tests (+ docs: beat table 8 → 9 jobs, ingestion service paragraph, "pending is public" trap)
 - **67a830c** [feat](incident): complete insiden reporting backend
 - **b9bd6fd** [feat](incident): add public publicSocialMediaLinks GraphQL query with line filter
 - **1533846** [feat](incident): allow admin to fully edit SocialMediaLink before completion

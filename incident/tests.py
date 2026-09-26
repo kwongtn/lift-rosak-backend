@@ -1,10 +1,17 @@
 import copy
-from datetime import date, datetime, timedelta
+import json
+from datetime import UTC, date, datetime, timedelta
+from io import StringIO
+from pathlib import Path
+from unittest import mock
 
 from asgiref.sync import async_to_sync
 from django.contrib.gis.geos import Point
+from django.core.cache import cache
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from dotmap import DotMap
 from graphql import GraphQLError
@@ -15,7 +22,9 @@ from incident.enums import (
     CalendarIncidentChronologyIndicator,
     CalendarIncidentSeverity,
     IncidentSeverity,
+    IngestPlatform,
     PassengerStatus,
+    SocialMediaLinkStatus,
 )
 from incident.models import (
     CalendarIncident,
@@ -23,13 +32,28 @@ from incident.models import (
     CalendarIncidentChronology,
     CalendarIncidentMedia,
     LineStatusReport,
+    SocialMediaLink,
     StationIncident,
     VehicleIncident,
 )
+from incident.services import official_posts
 from incident.services.line_status import load_line_status_history
+from incident.services.official_posts import (
+    RawPost,
+    fetch_user_posts,
+    get_system_author,
+    ingest_posts,
+    latest_post_id,
+    load_fixture_posts,
+)
+from incident.services.urls import canonicalize_url
+from incident.tasks import ingest_official_posts
 from operation.models import Line, Station, Vehicle, VehicleType
 from rosak.context import ContextLoaders
 from rosak.schema import schema
+
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+SAMPLE_FIXTURE = FIXTURES_DIR / "x_user_tweets_sample.json"
 
 
 def execute_graphql(query: str, variables=None, user=None):
@@ -1313,3 +1337,559 @@ class LineStatusReportStationsTests(TestCase):
             [{"id": str(self.station.id), "displayName": "KLCC"}],
         )
         self.assertEqual(stations_by_report[str(untagged.id)], [])
+
+
+class OfficialPostFixtureParsingTests(TestCase):
+    """Spec 4.8.1 — a saved API payload maps to RawPost without a token."""
+
+    def test_saved_payload_yields_verbatim_text_posted_at_and_permalink(self):
+        posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+
+        self.assertEqual(len(posts), 2)
+        first = posts[0]
+        self.assertEqual(first.platform, IngestPlatform.X)
+        self.assertEqual(first.handle, "askrapidkl")
+        self.assertEqual(first.post_id, "1791552310047416320")
+        self.assertEqual(
+            first.url,
+            "https://x.com/askrapidkl/status/1791552310047416320",
+        )
+        # Verbatim means byte-for-byte: compare against the file's own bytes, not
+        # a hand-copied literal that could drift from the fixture.
+        saved = json.loads(SAMPLE_FIXTURE.read_text(encoding="utf-8"))["data"]
+        self.assertEqual(first.text, saved[0]["text"])
+        self.assertIn("Gangguan di LRT Aliran Utama", first.text)
+        self.assertEqual(
+            first.posted_at,
+            datetime(2026, 9, 26, 3, 15, tzinfo=UTC),
+        )
+        self.assertEqual(
+            posts[1].url,
+            "https://x.com/askrapidkl/status/1791552408821972992",
+        )
+        self.assertEqual(
+            posts[1].posted_at, datetime(2026, 9, 26, 5, 42, 31, tzinfo=UTC)
+        )
+
+    def test_has_media_reflects_the_payload_and_raw_is_kept_untouched(self):
+        posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+
+        self.assertTrue(posts[0].has_media)
+        self.assertFalse(posts[1].has_media)
+        self.assertEqual(posts[0].raw["public_metrics"]["like_count"], 226)
+
+    def test_unknown_fixture_path_raises_a_sanitized_fetch_error(self):
+        with self.assertRaises(official_posts.OfficialPostFetchError) as caught:
+            load_fixture_posts("/nonexistent-official-posts.json")
+
+        self.assertIn("could not be read", str(caught.exception))
+
+
+class OfficialPostIngestTests(TestCase):
+    """Idempotency, cross-account dedup and the field mapping (4.8.2 – 4.8.4)."""
+
+    def setUp(self):
+        # The system author is seeded by migration 0027's data migration; a
+        # missing seed must fail loudly, so this is not mocked.
+        self.author = get_system_author()
+        self.posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+
+    def test_same_posts_twice_yield_one_row_each_and_no_second_creation(self):
+        first = ingest_posts(self.posts, handle="askrapidkl", author=self.author)
+
+        self.assertEqual(first.fetched, 2)
+        self.assertEqual(first.created, 2)
+        self.assertEqual(first.skipped, 0)
+        self.assertEqual(first.duplicate_urls, 0)
+        self.assertEqual(len(first.created_ids), 2)
+
+        second = ingest_posts(self.posts, handle="askrapidkl", author=self.author)
+
+        self.assertEqual(second.created, 0)
+        self.assertEqual(second.skipped, 2)
+        self.assertEqual(second.created_ids, ())
+        self.assertEqual(
+            SocialMediaLink.objects.filter(platform=IngestPlatform.X).count(), 2
+        )
+
+    def test_same_url_under_a_second_handle_is_a_duplicate_url_not_a_twin(self):
+        ingest_posts(self.posts, handle="askrapidkl", author=self.author)
+        existing = SocialMediaLink.objects.get(post_id=self.posts[0].post_id)
+
+        # Same permalink, arriving attributed to the other tracked account with a
+        # different post_id: post-id dedup alone would let it through, so the
+        # normalized_url check is what stops the twin.
+        # A post_id the store has never seen, so the (platform, post_id) check
+        # passes and the normalized_url check is what has to catch it.
+        cross_account = RawPost(
+            platform=IngestPlatform.X,
+            post_id="1791552500000000001",
+            handle="myrapidkl",
+            text=self.posts[0].text,
+            posted_at=self.posts[0].posted_at,
+            url=self.posts[0].url,
+            has_media=False,
+            raw={"id": "1791552500000000001"},
+        )
+
+        summary = ingest_posts([cross_account], handle="myrapidkl", author=self.author)
+
+        self.assertEqual(summary.duplicate_urls, 1)
+        self.assertEqual(summary.created, 0)
+        self.assertEqual(SocialMediaLink.objects.count(), 2)
+        # The existing row is left alone: not rewritten, not re-attributed.
+        existing.refresh_from_db()
+        self.assertEqual(existing.source_handle, "askrapidkl")
+        self.assertEqual(existing.post_id, self.posts[0].post_id)
+
+    def test_row_is_verbatim_mapped_and_pending_approval(self):
+        # Long text so the CharField(256) title truncation is observable while
+        # description keeps every character.
+        bm_text = "⚠️ Gangguan di LRT Aliran Utama.\n\n" + "per MSI " * 80
+        posted_at = datetime(2024, 5, 1, 8, 30, tzinfo=UTC)
+        post = RawPost(
+            platform=IngestPlatform.X,
+            post_id="1791552310047416320",
+            handle="askrapidkl",
+            text=bm_text,
+            posted_at=posted_at,
+            url="https://x.com/askrapidkl/status/1791552310047416320",
+            has_media=True,
+            raw={"id": "1791552310047416320", "text": bm_text},
+        )
+
+        ingest_posts([post], handle="askrapidkl", author=self.author)
+
+        link = SocialMediaLink.objects.get(platform=IngestPlatform.X)
+        self.assertEqual(link.description, bm_text)
+        self.assertEqual(link.title, bm_text[:256])
+        self.assertEqual(len(link.title), 256)
+        self.assertIs(link.is_automated, True)
+        self.assertEqual(link.status, SocialMediaLinkStatus.PENDING_APPROVAL)
+        self.assertEqual(link.user, self.author)
+        # USE_TZ=False, so the aware input is stored as naive local time.
+        self.assertEqual(link.posted_at, timezone.make_naive(posted_at))
+        # posted_at is post time; created is ingest time.
+        self.assertNotEqual(link.posted_at, link.created)
+        self.assertEqual(link.source_handle, "askrapidkl")
+        self.assertEqual(link.post_id, "1791552310047416320")
+        self.assertEqual(link.raw_payload, post.raw)
+        self.assertEqual(
+            link.normalized_url,
+            canonicalize_url("https://x.com/askrapidkl/status/1791552310047416320"),
+        )
+
+    def test_latest_post_id_returns_the_highest_numeric_snowflake(self):
+        self.assertIsNone(latest_post_id("askrapidkl"))
+        ingest_posts(self.posts, handle="askrapidkl", author=self.author)
+
+        # The fixture's newest id is numerically the larger one, and a plain
+        # lexicographic Max() would pick the smaller.
+        self.assertEqual(latest_post_id("askrapidkl"), "1791552408821972992")
+        self.assertIsNone(latest_post_id("myrapidkl"))
+
+    def test_dry_run_counts_creations_but_writes_nothing(self):
+        summary = ingest_posts(
+            self.posts, handle="askrapidkl", author=self.author, dry_run=True
+        )
+
+        self.assertEqual(summary.fetched, 2)
+        self.assertEqual(summary.created, 2)
+        self.assertEqual(summary.created_ids, ())
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+
+
+class OfficialPostTaskGuardTests(TestCase):
+    """The two env guards (4.8.5) — no request, no row, no crash."""
+
+    @override_settings(OFFICIAL_POST_INGESTION_ENABLED=False, X_API_BEARER_TOKEN="t")
+    def test_disabled_flag_makes_no_request_and_writes_nothing(self):
+        with (
+            # _get_json is the service module's only HTTP seam and
+            # fetch_user_posts is what the task resolves it through; both are
+            # asserted untouched.
+            mock.patch.object(
+                official_posts, "_get_json", side_effect=AssertionError("HTTP called")
+            ) as get_json,
+            mock.patch(
+                "incident.tasks.fetch_user_posts",
+                side_effect=AssertionError("fetch called"),
+            ) as fetch,
+            self.assertLogs("incident.tasks", level="INFO") as logs,
+        ):
+            result = ingest_official_posts()
+
+        self.assertEqual(result, {"skipped": "disabled"})
+        fetch.assert_not_called()
+        get_json.assert_not_called()
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.assertTrue(any("disabled" in line for line in logs.output))
+
+    @override_settings(OFFICIAL_POST_INGESTION_ENABLED=True, X_API_BEARER_TOKEN="")
+    def test_enabled_without_a_token_is_a_clean_no_op(self):
+        with (
+            mock.patch.object(
+                official_posts, "_get_json", side_effect=AssertionError("HTTP called")
+            ) as get_json,
+            mock.patch(
+                "incident.tasks.fetch_user_posts",
+                side_effect=AssertionError("fetch called"),
+            ) as fetch,
+            self.assertLogs("incident.tasks", level="WARNING") as logs,
+        ):
+            result = ingest_official_posts()
+
+        self.assertEqual(result, {"skipped": "no_token"})
+        get_json.assert_not_called()
+        fetch.assert_not_called()
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.assertTrue(any("X_API_BEARER_TOKEN" in line for line in logs.output))
+
+    @override_settings(
+        OFFICIAL_POST_INGESTION_ENABLED=True,
+        X_API_BEARER_TOKEN="t",
+        OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"],
+    )
+    def test_one_handle_failing_does_not_stop_the_others(self):
+        posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+
+        with mock.patch(
+            "incident.tasks.fetch_user_posts",
+            side_effect=[
+                official_posts.OfficialPostFetchError("X API error: HTTP 429"),
+                posts,
+            ],
+        ) as fetch:
+            result = ingest_official_posts()
+
+        # The error reason is sanitized upstream, so it is safe to log and return.
+        failed = result["handles"]["askrapidkl"]
+        self.assertEqual(failed["error"], "X API error: HTTP 429")
+        self.assertEqual(failed["created"], 0)
+        self.assertIn("duration_ms", failed)
+        # The other handle still ran and still wrote its rows.
+        self.assertNotIn("error", result["handles"]["myrapidkl"])
+        self.assertEqual(result["handles"]["myrapidkl"]["created"], 2)
+        self.assertEqual(result["created"], 2)
+        self.assertEqual(fetch.call_count, 2)
+        # since_id is the incremental filter, read from that handle's own rows.
+        self.assertIsNone(fetch.call_args_list[0].kwargs["since_id"])
+        self.assertEqual(SocialMediaLink.objects.count(), 2)
+
+
+class OfficialPostBoundedFetchTests(TestCase):
+    """The pagination walk is bounded by ``limit`` *and* by a page cap (4.8.6)."""
+
+    def setUp(self):
+        # The user-id lookup is cached under a namespaced key; a cache hit would
+        # skip the first call and change what the side_effect chain means.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def _paged_api(self, posts_per_page, pages):
+        """A _get_json stand-in: one user lookup, then ``pages`` tweet pages."""
+
+        def fake_get_json(url, *, params, headers, context):
+            if "by/username" in url:
+                return {"data": {"id": "424242"}}
+            index = fake_get_json.calls
+            fake_get_json.calls += 1
+            if index >= pages:
+                return {"data": []}
+            start = index * posts_per_page
+            data = [
+                {
+                    "id": str(1791552310047416320 + start + offset),
+                    "text": f"post {start + offset}",
+                    "created_at": "2026-09-26T03:15:00.000Z",
+                }
+                for offset in range(posts_per_page)
+            ]
+            # Every page but the last carries a token, so only the caps stop the
+            # walk — that is what the assertions below prove.
+            payload = {"data": data, "meta": {"result_count": len(data)}}
+            if index < pages - 1:
+                payload["meta"]["next_token"] = f"token-{index}"
+            return payload
+
+        fake_get_json.calls = 0
+        return fake_get_json
+
+    def _tweet_pages(self, http):
+        """The tweets-endpoint calls among a patched ``_get_json``'s calls."""
+        return [call for call in http.call_args_list if "tweets" in call.args[0]]
+
+    def test_walk_stops_at_limit_across_pages(self):
+        with mock.patch.object(
+            official_posts, "_get_json", side_effect=self._paged_api(2, pages=10)
+        ) as http:
+            posts = fetch_user_posts("askrapidkl", limit=3)
+            pages = self._tweet_pages(http)
+
+        # limit=3 over 2-post pages: the second page is truncated, not a third
+        # request.
+        self.assertEqual(len(posts), 3)
+        self.assertEqual(len(pages), 2)
+        # max_results never exceeds what is still outstanding.
+        self.assertEqual(pages[0].kwargs["params"]["max_results"], 3)
+        self.assertEqual(pages[1].kwargs["params"]["max_results"], 1)
+        self.assertEqual(pages[1].kwargs["params"]["pagination_token"], "token-0")
+
+    def test_walk_stops_at_the_hard_page_cap_not_at_exhaustion(self):
+        with mock.patch.object(
+            official_posts, "_get_json", side_effect=self._paged_api(1, pages=10_000)
+        ) as http:
+            posts = fetch_user_posts("askrapidkl", limit=10_000)
+            pages = self._tweet_pages(http)
+
+        # Every page carries a next_token, so only the cap stops the walk.
+        self.assertEqual(len(pages), official_posts._MAX_PAGES)
+        self.assertEqual(len(posts), official_posts._MAX_PAGES)
+
+    def test_since_id_start_time_and_end_time_reach_the_request(self):
+        captured = []
+
+        def fake_get_json(url, *, params, headers, context):
+            captured.append((url, dict(params), dict(headers)))
+            if "by/username" in url:
+                return {"data": {"id": "424242"}}
+            return {"data": []}
+
+        with mock.patch.object(official_posts, "_get_json", side_effect=fake_get_json):
+            fetch_user_posts(
+                "askrapidkl",
+                since_id="1791552310047416320",
+                start_time=datetime(2026, 9, 1, tzinfo=UTC),
+                end_time=datetime(2026, 9, 2, 23, 59, 59, tzinfo=UTC),
+                limit=5,
+                exclude_retweets=True,
+            )
+
+        tweets_url, params, headers = captured[-1]
+        self.assertIn("/2/users/424242/tweets", tweets_url)
+        self.assertEqual(params["since_id"], "1791552310047416320")
+        self.assertEqual(params["start_time"], "2026-09-01T00:00:00+00:00")
+        self.assertEqual(params["end_time"], "2026-09-02T23:59:59+00:00")
+        self.assertEqual(params["exclude"], "retweets")
+        self.assertEqual(params["max_results"], 5)
+        self.assertEqual(headers["Authorization"], "Bearer ")
+
+    # DEBUG=True swaps the default cache for DummyCache (AGENTS.md "local-vs-prod
+    # gotcha"), which discards every write — so the cache assertion below needs a
+    # real backend to mean anything.
+    @override_settings(
+        CACHES={
+            "default": {
+                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                "LOCATION": "official-post-tests",
+            }
+        }
+    )
+    def test_user_id_is_resolved_once_per_handle(self):
+        # The second call is served entirely from the cache, so the lookup does
+        # not happen again — one extra HTTP request per account, not per tick.
+        api = self._paged_api(1, pages=1)
+        with mock.patch.object(official_posts, "_get_json", side_effect=api) as http:
+            fetch_user_posts("askrapidkl", limit=1)
+            fetch_user_posts("askrapidkl", limit=1)
+            looked_up = [
+                call for call in http.call_args_list if "by/username" in call.args[0]
+            ]
+            pages = self._tweet_pages(http)
+
+        self.assertEqual(len(looked_up), 1)
+        # One tweets page per call, so the cached id was reused instead of a
+        # second username lookup — but the page fetch itself still happens.
+        self.assertEqual(len(pages), 2)
+
+
+class IngestOfficialPostsCommandTests(TestCase):
+    """The manual backfill command (4.8.7)."""
+
+    def setUp(self):
+        self.author = get_system_author()
+
+    def _run(self, *args):
+        out, err = StringIO(), StringIO()
+        call_command("ingest_official_posts", *args, stdout=out, stderr=err)
+        return out.getvalue(), err.getvalue()
+
+    def test_fixture_imports_posts_and_reports_the_summary(self):
+        out, _ = self._run("--fixture", str(SAMPLE_FIXTURE))
+
+        self.assertIn("handle=askrapidkl", out)
+        self.assertIn("fetched=2", out)
+        self.assertIn("created=2", out)
+        self.assertIn("skipped=0", out)
+        self.assertIn("duplicate_urls=0", out)
+        self.assertIn("dry_run=False", out)
+        self.assertEqual(
+            SocialMediaLink.objects.filter(
+                platform=IngestPlatform.X, status=SocialMediaLinkStatus.PENDING_APPROVAL
+            ).count(),
+            2,
+        )
+
+    def test_rerunning_the_same_fixture_is_idempotent(self):
+        self._run("--fixture", str(SAMPLE_FIXTURE))
+        out, _ = self._run("--fixture", str(SAMPLE_FIXTURE))
+
+        self.assertIn("created=0", out)
+        self.assertIn("skipped=2", out)
+        self.assertEqual(SocialMediaLink.objects.count(), 2)
+
+    def test_dry_run_writes_nothing(self):
+        out, _ = self._run("--fixture", str(SAMPLE_FIXTURE), "--dry-run")
+
+        self.assertIn("dry_run=True", out)
+        self.assertIn("created=2", out)
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+
+    def test_unknown_fixture_path_raises_command_error(self):
+        with self.assertRaises(CommandError) as caught:
+            self._run("--fixture", "/nonexistent-official-posts.json")
+
+        self.assertIn("could not be read", str(caught.exception))
+
+    def test_several_handles_with_one_fixture_is_refused(self):
+        with self.assertRaises(CommandError) as caught:
+            self._run(
+                "--handle",
+                "askrapidkl",
+                "--handle",
+                "myrapidkl",
+                "--fixture",
+                str(SAMPLE_FIXTURE),
+            )
+
+        self.assertIn("cannot be attributed to", str(caught.exception))
+
+    def test_explicit_handle_overrides_the_fixture_sidecar(self):
+        out, _ = self._run("--handle", "myrapidkl", "--fixture", str(SAMPLE_FIXTURE))
+
+        self.assertIn("handle=myrapidkl", out)
+        links = SocialMediaLink.objects.order_by("post_id")
+        self.assertEqual(links.count(), 2)
+        for link in links:
+            self.assertEqual(link.source_handle, "myrapidkl")
+            # The permalink follows the handle it was attributed to, even though
+            # the payload's sidecar key said otherwise.
+            self.assertIn("/myrapidkl/status/", link.url)
+
+    def test_limit_caps_a_fixture(self):
+        out, _ = self._run("--fixture", str(SAMPLE_FIXTURE), "--limit", "1")
+
+        self.assertIn("fetched=1", out)
+        self.assertEqual(SocialMediaLink.objects.count(), 1)
+
+    def test_fixture_rejects_a_window(self):
+        with self.assertRaises(CommandError) as caught:
+            self._run("--fixture", str(SAMPLE_FIXTURE), "--since", "2026-09-01")
+
+        self.assertIn("cannot be combined with --fixture", str(caught.exception))
+
+    def test_malformed_date_raises_command_error(self):
+        with self.assertRaises(CommandError) as caught:
+            self._run("--since", "01-09-2026")
+
+        self.assertIn("YYYY-MM-DD", str(caught.exception))
+
+    def test_window_bounds_are_whole_utc_days(self):
+        command = self._call_command_class()
+
+        self.assertEqual(
+            command._parse_date("2026-09-01", "--since"),
+            datetime(2026, 9, 1, 0, 0, tzinfo=UTC),
+        )
+        self.assertEqual(
+            command._parse_date("2026-09-02", "--until", end_of_day=True),
+            datetime(2026, 9, 2, 23, 59, 59, 999999, tzinfo=UTC),
+        )
+
+    def test_until_before_since_is_refused(self):
+        with self.assertRaises(CommandError) as caught:
+            self._run("--since", "2026-09-05", "--until", "2026-09-01")
+
+        self.assertIn("is before", str(caught.exception))
+
+    @override_settings(X_API_BEARER_TOKEN="t")
+    def test_live_fetch_failure_raises_command_error_and_sanitizes(self):
+        with (
+            mock.patch.object(
+                official_posts,
+                "_get_json",
+                side_effect=official_posts.OfficialPostFetchError(
+                    "X API error: HTTP 401"
+                ),
+            ),
+            self.assertRaises(CommandError) as caught,
+        ):
+            self._run("--handle", "askrapidkl", "--since", "2026-09-01")
+
+        self.assertIn("HTTP 401", str(caught.exception))
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+
+    @override_settings(X_API_BEARER_TOKEN="t")
+    def test_windowed_live_run_uses_start_end_time_and_warns_on_the_api_window(self):
+        posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+        with mock.patch.object(
+            official_posts, "fetch_user_posts", return_value=posts
+        ) as fetch:
+            out, err = self._run(
+                "--handle",
+                "askrapidkl",
+                "--since",
+                "2020-01-01",
+                "--until",
+                "2020-01-31",
+            )
+
+        # A windowed run must not also pass since_id: the API window is the
+        # limit, and asking for both is how a backfill silently under-fetches.
+        self.assertEqual(
+            fetch.call_args.kwargs["start_time"], datetime(2020, 1, 1, tzinfo=UTC)
+        )
+        self.assertEqual(
+            fetch.call_args.kwargs["end_time"],
+            datetime(2020, 1, 31, 23, 59, 59, 999999, tzinfo=UTC),
+        )
+        self.assertNotIn("since_id", fetch.call_args.kwargs)
+        self.assertIn("created=2", out)
+        # The oldest post the endpoint returned is still newer than --since.
+        self.assertIn("3,200 posts", err)
+
+    def test_reachable_window_prints_no_limit_warning(self):
+        posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+        with mock.patch.object(official_posts, "fetch_user_posts", return_value=posts):
+            # The window starts after every post the endpoint served, so nothing
+            # older than --since exists and there is nothing to warn about.
+            _, err = self._run(
+                "--handle",
+                "askrapidkl",
+                "--since",
+                "2026-09-27",
+                "--until",
+                "2026-09-28",
+            )
+
+        self.assertEqual(err, "")
+
+    def test_empty_window_warns_that_the_api_window_is_the_limit(self):
+        with mock.patch.object(official_posts, "fetch_user_posts", return_value=[]):
+            out, err = self._run(
+                "--handle",
+                "askrapidkl",
+                "--since",
+                "2019-01-01",
+                "--until",
+                "2019-12-31",
+            )
+
+        self.assertIn("created=0", out)
+        self.assertIn("served no post for this window", err)
+        self.assertIn("3,200 posts", err)
+
+    def _call_command_class(self):
+        from incident.management.commands.ingest_official_posts import Command
+
+        return Command()

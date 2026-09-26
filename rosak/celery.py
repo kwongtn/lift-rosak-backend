@@ -62,6 +62,15 @@ if "incident" in settings.INSTALLED_APPS:
         "task": "incident.tasks.purge_rejected_incidents",
         "schedule": crontab(hour="3", minute="30"),
     }
+    # Poll the tracked official X accounts. Ships inert: the task itself checks
+    # OFFICIAL_POST_INGESTION_ENABLED and X_API_BEARER_TOKEN and no-ops without
+    # them. expires < the 5-minute period so a wedged run is not re-dispatched
+    # on top of itself; time_limit caps a hung fetch.
+    beat_schedule["ingest_official_posts"] = {
+        "task": "incident.tasks.ingest_official_posts",
+        "schedule": crontab(minute="*/5"),
+        "options": {"expires": 240, "time_limit": 180},
+    }
 
 app.conf.beat_schedule = beat_schedule
 
