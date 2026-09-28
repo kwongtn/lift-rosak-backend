@@ -208,6 +208,13 @@ backend is authoritative.
 **Fix**: _By design, documented._ The settings comment and the `docs/APPS.md` beat table both state that toggling requires restarting `celerybeat`. Verify with `docker compose exec app python -c "from rosak.celery import beat_schedule; print('ingest_official_posts' in beat_schedule)"` after the restart.
 **Prevention**: Every new env-gated beat entry must state the restart requirement in its settings comment and the APPS.md beat table; never verify a schedule toggle by looking at the worker alone.
 
+### [2026-09-28] incident: the webhook read `includes` from the wrong envelope level — every real delivery was dropped — FIXED (2026-09-28)
+
+**Problem**: A correctly signed `post.create` delivery to `POST /webhooks/x-api` answered `200 {"events": 1, "ingested": 0, "unresolved": 1}`. The whole ingest path was dead in production while the test suite was green.
+**Root Cause**: `services/x_webhooks.py::_usernames_by_id` read `payload["includes"]["users"]` at the **top level**, but X nests the expansion on the event object — `ActivityStreamResponse.data.includes`, per X's published OpenAPI schema (the `data` object carries `event_type` / `event_uuid` / `filter` / `includes` / `payload` / `tag`). With no expansion found, the resolver fell through to the reverse user-id lookup, which fails offline, so the post was correctly reported as `unresolved` — and correctly dropped. The bug was in the test helper *and* the parser: `xaa_post_create_payload` built the payload with the same wrong top-level shape, so the fixture agreed with the bug. The failure is silent by construction — the defensive `unresolved` counter that protects against inventing a permalink is exactly what hid it.
+**Fix**: New `_expansion_containers` yields `data` first, then the payload itself, and `_usernames_by_id` merges with `setdefault` so the nested (authoritative) entry wins and a top-level duplicate is ignored. Tolerant of missing/non-dict/non-list shapes. The test helper now defaults to the real nested location, so the whole suite exercises the shape X sends. Commit `fix(incident): read the X includes expansion from data` (2026-09-28). `_create_items`'s `data.payload` / `data.filter` were audited against the same schema and are correct.
+**Prevention**: Build third-party webhook test payloads by transcribing a real captured body (or the vendor's own OpenAPI schema), never by inventing a shape — a hand-built fixture validates the parser against itself. When a parser has a defensive fallback, assert the *primary* path with a test that fails if the fallback is reached (here: patch the network lookup to raise).
+
 ---
 
 ## spotting

@@ -186,6 +186,9 @@ def _create_items(payload: Mapping[str, Any]) -> list[tuple[dict[str, Any], str]
     """
     data = payload.get("data")
     if isinstance(data, dict):
+        # ``event_type``, ``payload`` and ``filter`` all sit directly on the
+        # event object (``ActivityStreamResponse.data``) — only the expansion
+        # needed the deeper handling in ``_usernames_by_id``.
         event_type = str(data.get("event_type") or "")
         if event_type != EVENT_POST_CREATE:
             logger.debug("ignoring X webhook event_type=%r", event_type)
@@ -208,6 +211,23 @@ def _create_items(payload: Mapping[str, Any]) -> list[tuple[dict[str, Any], str]
     return []
 
 
+def _expansion_containers(payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+    """Where an ``includes`` expansion may live, most-current first.
+
+    The Activity API puts it *inside* the event object — ``ActivityStreamResponse
+    .data.includes`` (an ``Expansions`` object, per X's own OpenAPI schema) — and
+    the webhook delivery uses the same envelope. A top-level ``includes`` does not
+    exist in that shape; reading only there silently resolved nothing and dropped
+    every real delivery. The top-level read is kept as a defensive fallback for a
+    differently-shaped delivery, and is searched *after* the nested one so it can
+    never shadow it.
+    """
+    data = payload.get("data")
+    if isinstance(data, dict):
+        return (data, payload)
+    return (payload,)
+
+
 def _usernames_by_id(payload: Mapping[str, Any]) -> dict[str, str]:
     """``includes.users`` flattened to ``{user id: username}``.
 
@@ -215,18 +235,22 @@ def _usernames_by_id(payload: Mapping[str, Any]) -> dict[str, str]:
     only source trusted for attribution: an expansion is delivered inside the
     signed body, so it cannot be forged without the signing secret.
     """
-    includes = payload.get("includes")
-    users = includes.get("users") if isinstance(includes, dict) else None
-    if not isinstance(users, list):
-        return {}
     mapping: dict[str, str] = {}
-    for user in users:
-        if not isinstance(user, dict):
+    for container in _expansion_containers(payload):
+        includes = container.get("includes")
+        users = includes.get("users") if isinstance(includes, dict) else None
+        if not isinstance(users, list):
             continue
-        user_id = str(user.get("id") or "").strip()
-        username = str(user.get("username") or "").strip().lstrip("@")
-        if user_id and username:
-            mapping[user_id] = username
+        for user in users:
+            if not isinstance(user, dict):
+                continue
+            user_id = str(user.get("id") or "").strip()
+            username = str(user.get("username") or "").strip().lstrip("@")
+            # setdefault, not assignment: the first container searched is the
+            # current envelope, so a stale top-level entry for the same id is
+            # ignored rather than overriding the real expansion.
+            if user_id and username:
+                mapping.setdefault(user_id, username)
     return mapping
 
 

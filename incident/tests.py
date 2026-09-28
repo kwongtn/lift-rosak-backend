@@ -62,6 +62,7 @@ from incident.services.official_posts import (
 )
 from incident.services.urls import canonicalize_url
 from incident.services.x_webhooks import (
+    _usernames_by_id,
     crc_response_token,
     has_signing_secret,
     ingest_webhook_payload,
@@ -2975,11 +2976,20 @@ def xaa_post_create_payload(
     event_type: str = "post.create",
     filter_user_id: str | None = None,
     created_at: str = WEBHOOK_CREATED_AT,
+    nested_includes: bool = True,
+    top_level_includes: bool = False,
+    top_level_username: str | None = None,
 ) -> dict:
     """A current-shaped Activity API ``post.create`` delivery.
 
     ``username=None`` drops the ``includes.users`` expansion, which is what
     forces the reverse (user-id → handle) lookup path.
+
+    ``nested_includes`` puts the expansion where X actually puts it — on the
+    event object, ``data.includes`` — and is the default so the suite exercises
+    the real envelope. ``top_level_includes`` reproduces the defensive fallback
+    for a differently-shaped delivery, and ``top_level_username`` gives it a
+    conflicting value for the precedence test.
     """
     event_filter: dict = {}
     if filter_user_id is not None:
@@ -2997,9 +3007,21 @@ def xaa_post_create_payload(
         },
     }
     payload = {"data": event}
-    if username is not None:
-        payload["includes"] = {
+    if username is not None and nested_includes:
+        event["includes"] = {
             "users": [{"id": author_id, "username": username, "name": "RapidKL"}]
+        }
+    if top_level_includes:
+        payload["includes"] = {
+            "users": [
+                {
+                    "id": author_id,
+                    "username": (
+                        username if top_level_username is None else top_level_username
+                    ),
+                    "name": "RapidKL",
+                }
+            ]
         }
     return payload
 
@@ -3338,6 +3360,85 @@ class XWebhookHandleResolutionTests(TestCase):
         self.assertEqual(result.unresolved, 0)
         link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
         self.assertEqual(link.source_handle, "askrapidkl")
+
+    def test_the_nested_includes_expansion_resolves_the_handle_with_no_network(self):
+        # Regression: X puts the expansion on the event object (data.includes).
+        # Reading only the top level resolved nothing, so a real delivery made a
+        # reverse lookup, failed offline, and was counted unresolved — the whole
+        # ingest path was dead in production while the tests passed.
+        payload = xaa_post_create_payload()
+        self.assertIn("includes", payload["data"])
+
+        with mock.patch(
+            "incident.services.x_webhooks.resolve_handle_for_user_id",
+            side_effect=AssertionError("network must not be used"),
+        ):
+            result = ingest_webhook_payload(payload)
+
+        self.assertEqual(result.events, 1)
+        self.assertEqual(result.ingested, 1)
+        self.assertEqual(result.unresolved, 0)
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.assertEqual(link.source_handle, "askrapidkl")
+
+    def test_a_top_level_includes_expansion_is_still_accepted(self):
+        # The defensive fallback: a differently-shaped delivery must keep working.
+        with mock.patch(
+            "incident.services.x_webhooks.resolve_handle_for_user_id",
+            side_effect=AssertionError("network must not be used"),
+        ):
+            result = ingest_webhook_payload(
+                xaa_post_create_payload(nested_includes=False, top_level_includes=True)
+            )
+
+        self.assertEqual(result.ingested, 1)
+        self.assertEqual(result.unresolved, 0)
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.assertEqual(link.source_handle, "askrapidkl")
+
+    def test_the_nested_includes_wins_over_a_top_level_one(self):
+        payload = xaa_post_create_payload(
+            username="askrapidkl",
+            nested_includes=True,
+            top_level_includes=True,
+            top_level_username="askrapidkl_old",
+        )
+
+        self.assertEqual(_usernames_by_id(payload), {WEBHOOK_AUTHOR_ID: "askrapidkl"})
+
+        result = ingest_webhook_payload(payload)
+
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.assertEqual(link.source_handle, "askrapidkl")
+        self.assertEqual(result.ingested, 1)
+
+    def test_a_malformed_includes_expansion_is_tolerated(self):
+        # Anything unparseable must degrade to the reverse lookup, not raise.
+        for includes in (
+            {},
+            {"users": None},
+            {"users": "askrapidkl"},
+            "askrapidkl",
+            None,
+        ):
+            with self.subTest(includes=includes):
+                payload = xaa_post_create_payload(username=None)
+                payload["data"]["includes"] = includes
+                self.assertEqual(_usernames_by_id(payload), {})
+
+    def test_an_incomplete_user_expansion_is_skipped(self):
+        payload = xaa_post_create_payload(username=None)
+        payload["data"]["includes"] = {
+            "users": [
+                "not-a-dict",
+                {"username": "askrapidkl"},
+                {"id": WEBHOOK_AUTHOR_ID},
+                {"id": "  ", "username": "askrapidkl"},
+                {"id": WEBHOOK_AUTHOR_ID, "username": " @askrapidkl "},
+            ]
+        }
+
+        self.assertEqual(_usernames_by_id(payload), {WEBHOOK_AUTHOR_ID: "askrapidkl"})
 
     @override_settings(OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"])
     def test_without_the_expansion_the_filter_user_id_drives_the_reverse_lookup(self):

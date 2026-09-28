@@ -1,18 +1,19 @@
 # Monthly Summary - September 2026
 
-Total commits: 38
+Total commits: 39
 
 ## Commit Type Distribution
 
 - feat: 28
-- fix: 6
+- fix: 7
 - test: 2
 - chore: 2
 
 ## By Module/Feature
 
-### Incident (23 commits)
+### Incident (24 commits)
 
+- (this commit) [fix](incident): read the X `includes` expansion from `data` — the receiver read the expansion at the top level, so every real `post.create` delivery resolved no handle and was counted `unresolved` (ingested path dead in production, tests green because the fixture shared the bug); new `_expansion_containers` searches the nested location first and falls back to the top level, the test helper now defaults to the real XAA envelope, +5 regression tests (nested resolves with no network, top-level fallback, nested-wins precedence, malformed shapes) and a MISTAKES entry
 - (this commit) [feat](incident): receive X Activity API webhook deliveries — `GET/POST /webhooks/x-api` (CRC challenge, HMAC-SHA256 over raw bytes, `post.create` → `SocialMediaLink`, queued Telegram notification, idempotent on redelivery) + the `x_webhook` management command for registration/subscriptions; 70 new tests, + docs (attribution rules, env matrix, CRC troubleshooting) and a MISTAKES entry for the debug-toolbar/Redis-cache test traps
 - (this commit) [feat](incident): make official-post polling opt-in via `OFFICIAL_POST_POLLING_ENABLED` — webhooks are the primary path
 - (this commit) [feat](incident): official-post Phase 3 — `export_official_posts` writes the ingested archive as JSONL/CSV (streamed, stable order, `raw_payload` opt-in, `--dry-run`, optional private `push_to_hub`); 28 tests, + docs (naive-local `posted_at` trap)
