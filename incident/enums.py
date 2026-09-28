@@ -37,6 +37,13 @@ class CalendarIncidentStatus(models.TextChoices):
 class SocialMediaLinkStatus(models.TextChoices):
     LIVE = "live"
     PENDING_APPROVAL = "pending_approval"
+    # A moderation decision: the row exists, but it must never appear in the
+    # public feed — not by default and not through an explicit ``status``
+    # filter, which is why the public-feed resolver excludes it after the
+    # optional narrowing. Admins still see it in the console (they need it to
+    # un-hide it) and the owner still sees their own submission under ``mine``;
+    # everyone else sees nothing.
+    HIDDEN = "hidden"
 
 
 class IngestPlatform(models.TextChoices):

@@ -818,6 +818,7 @@ type SocialMediaLinkScalar {
   created: DateTime!
   completed: Boolean!
   completedAt: DateTime
+  isAutomated: Boolean!
   user: UserScalar!
   categories: [CalendarIncidentCategoryScalar!]!
   lines: [Line!]!
@@ -832,6 +833,7 @@ type SocialMediaLinkScalar {
 enum SocialMediaLinkStatus {
   LIVE
   PENDING_APPROVAL
+  HIDDEN
 }
 
 type Source {

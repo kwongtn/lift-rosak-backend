@@ -284,13 +284,15 @@ async def get_public_social_media_links(
     omitted, both LIVE and PENDING_APPROVAL are returned (unchanged default) —
     except for automatically ingested posts, which are excluded while
     ``PENDING_APPROVAL`` so an official announcement only becomes public once
-    an admin approves it. ``current_service_day_only`` keeps only links created
-    within the current service day (03:00 rollover, see ``service_day_start``).
-    ``totalCount`` is the size of the whole filtered set, unaffected by the
-    ``after`` cursor.
+    an admin approves it. ``HIDDEN`` rows are never returned on this public
+    feed, not even when asked for by name. ``current_service_day_only`` keeps
+    only links created within the current service day (03:00 rollover, see
+    ``service_day_start``). ``totalCount`` is the size of the whole filtered
+    set, unaffected by the ``after`` cursor.
     """
 
-    if mine is not None and mine.value:
+    mine_requested = mine is not None and mine.value
+    if mine_requested:
         user = info.context.user
         if not user:
             return SocialMediaLinkConnection(
@@ -315,6 +317,18 @@ async def get_public_social_media_links(
 
     if status is not None:
         queryset = queryset.filter(status=status.value)
+
+    # Moderation gate: a HIDDEN row is never public. Applied *after* the
+    # optional status narrowing, so ``status: HIDDEN`` returns an empty page
+    # instead of resurrecting what the moderation decision removed — the same
+    # defeat-by-exclusion shape as the automated-pending gate below, and before
+    # the count so totalCount and the page always agree.
+    #
+    # Deliberately not applied to ``mine``: that page is the owner's own
+    # submission list, not a public feed, so a person can still see (and seek
+    # admin help with) a submission an admin has hidden from everyone else.
+    if not mine_requested:
+        queryset = queryset.exclude(status=SocialMediaLinkStatus.HIDDEN)
 
     # Approval gates publication for automatically ingested posts: an
     # unapproved official post is not public. Scoped to is_automated on

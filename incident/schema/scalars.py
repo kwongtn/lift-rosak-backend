@@ -119,6 +119,11 @@ class SocialMediaLinkScalar:
     created: datetime
     completed: bool
     completed_at: Optional[datetime]
+    # True for rows written by the official-post ingestion (polling or webhook);
+    # False for every hand-submitted link, including legacy rows predating
+    # ingestion. Exposed so the console/feed can badge a capture as official
+    # rather than inferring it from a status.
+    is_automated: bool
 
     @strawberry_django.field
     async def vote_score(self, info: Info) -> int:

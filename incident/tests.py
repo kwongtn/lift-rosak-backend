@@ -2147,6 +2147,244 @@ class PublicFeedApprovalGateTests(TestCase):
         self.assertEqual(feed["totalCount"], 0)
 
 
+class PublicFeedHiddenGateTests(TestCase):
+    """``HIDDEN`` is a moderation decision: never public, never resurrectable."""
+
+    feed_query = """
+        query Feed($first: Int, $status: SocialMediaLinkStatus, $mine: Boolean) {
+            publicSocialMediaLinks(first: $first, status: $status, mine: $mine) {
+                totalCount
+                edges { node { id status } }
+            }
+        }
+    """
+
+    def setUp(self):
+        self.community_author = User.objects.create(firebase_id="feed-hidden-community")
+        self.system_author = get_system_author()
+
+    def _link(self, slug, *, user=None, **kwargs):
+        return SocialMediaLink.objects.create(
+            url=f"https://example.com/{slug}",
+            title=slug,
+            user=user or self.community_author,
+            **kwargs,
+        )
+
+    def _feed(self, *, user=None, **variables):
+        result = execute_graphql(self.feed_query, variables=variables, user=user)
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        return result.data["publicSocialMediaLinks"]
+
+    def _ids(self, feed):
+        return [edge["node"]["id"] for edge in feed["edges"]]
+
+    def test_hidden_rows_never_reach_the_public_feed_and_nothing_else_changes(self):
+        hidden_auto = self._link(
+            "auto-hidden",
+            status=SocialMediaLinkStatus.HIDDEN,
+            is_automated=True,
+            user=self.system_author,
+        )
+        # Hidden is a moderation decision, not an ingestion artefact: a
+        # hand-submitted row is hidden by it too.
+        hidden_community = self._link(
+            "community-hidden", status=SocialMediaLinkStatus.HIDDEN
+        )
+        live_auto = self._link(
+            "auto-live",
+            status=SocialMediaLinkStatus.LIVE,
+            is_automated=True,
+            user=self.system_author,
+        )
+        community_pending = self._link(
+            "community-pending", status=SocialMediaLinkStatus.PENDING_APPROVAL
+        )
+        community_live = self._link("community-live", status=SocialMediaLinkStatus.LIVE)
+
+        feed = self._feed(first=10)
+
+        ids = self._ids(feed)
+        self.assertNotIn(str(hidden_auto.id), ids)
+        self.assertNotIn(str(hidden_community.id), ids)
+        # The other two states are untouched, and so is the automated-pending
+        # gate: a hidden row is excluded for a different, unconditional reason.
+        self.assertIn(str(live_auto.id), ids)
+        self.assertIn(str(community_pending.id), ids)
+        self.assertIn(str(community_live.id), ids)
+        # totalCount comes from the same queryset, so page and count agree.
+        self.assertEqual(feed["totalCount"], 3)
+        self.assertEqual(SocialMediaLink.objects.count(), 5)
+
+    def test_an_explicit_hidden_filter_cannot_resurrect_a_hidden_row(self):
+        self._link(
+            "auto-hidden",
+            status=SocialMediaLinkStatus.HIDDEN,
+            is_automated=True,
+            user=self.system_author,
+        )
+        self._link("community-hidden", status=SocialMediaLinkStatus.HIDDEN)
+
+        feed = self._feed(first=10, status="HIDDEN")
+
+        # The exclusion is applied after the narrowing, so asking for HIDDEN by
+        # name returns an empty page instead of what the gate removed.
+        self.assertEqual(feed["edges"], [])
+        self.assertEqual(feed["totalCount"], 0)
+        # Read gate, not a deletion: both rows are still stored for the console.
+        self.assertEqual(
+            SocialMediaLink.objects.filter(status=SocialMediaLinkStatus.HIDDEN).count(),
+            2,
+        )
+
+    def test_the_owner_still_sees_their_own_hidden_link_under_mine(self):
+        other_author = User.objects.create(firebase_id="feed-hidden-other")
+        mine = self._link(
+            "mine-hidden",
+            status=SocialMediaLinkStatus.HIDDEN,
+            user=self.community_author,
+        )
+        theirs = self._link(
+            "other-hidden", status=SocialMediaLinkStatus.HIDDEN, user=other_author
+        )
+
+        feed = self._feed(first=10, mine=True, user=self.community_author)
+
+        # ``mine`` is the owner's own submission list, not a public feed, so the
+        # moderation gate is deliberately not applied there.
+        ids = self._ids(feed)
+        self.assertIn(str(mine.id), ids)
+        self.assertNotIn(str(theirs.id), ids)
+        self.assertEqual(feed["totalCount"], 1)
+
+    def test_the_console_queue_still_returns_hidden_rows(self):
+        # An admin has to be able to *find* a hidden row in order to un-hide it,
+        # so the console query is deliberately left unfiltered.
+        hidden = self._link(
+            "auto-hidden",
+            status=SocialMediaLinkStatus.HIDDEN,
+            is_automated=True,
+            user=self.system_author,
+        )
+        query = """
+            query Console {
+                socialMediaLinks { id status isAutomated }
+            }
+        """
+        with patch(
+            "rosak.permissions.has_admin_claim",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            result = execute_graphql(query, user=self.community_author)
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        rows = {row["id"]: row for row in result.data["socialMediaLinks"]}
+        self.assertEqual(rows[str(hidden.id)]["status"], "HIDDEN")
+        self.assertIs(rows[str(hidden.id)]["isAutomated"], True)
+
+
+class SocialMediaLinkAutomatedFlagTests(TestCase):
+    """``isAutomated`` on the scalar, and who may set ``HIDDEN``."""
+
+    feed_query = """
+        query Feed($first: Int) {
+            publicSocialMediaLinks(first: $first) {
+                totalCount
+                edges { node { id status isAutomated } }
+            }
+        }
+    """
+
+    update_query = """
+        mutation Update($id: ID!, $input: SocialMediaLinkInput!) {
+            updateSocialMediaLink(socialMediaLinkId: $id, input: $input) { ok }
+        }
+    """
+
+    def setUp(self):
+        self.community_author = User.objects.create(firebase_id="automated-flag-user")
+        self.system_author = get_system_author()
+
+    def test_is_automated_is_resolvable_and_true_only_for_ingested_rows(self):
+        ingested = SocialMediaLink.objects.create(
+            url="https://example.com/ingested",
+            title="ingested",
+            user=self.system_author,
+            status=SocialMediaLinkStatus.LIVE,
+            is_automated=True,
+        )
+        submitted = SocialMediaLink.objects.create(
+            url="https://example.com/submitted",
+            title="submitted",
+            user=self.community_author,
+            status=SocialMediaLinkStatus.LIVE,
+        )
+
+        result = execute_graphql(self.feed_query, variables={"first": 10})
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        rows = {
+            edge["node"]["id"]: edge["node"]
+            for edge in result.data["publicSocialMediaLinks"]["edges"]
+        }
+        self.assertIs(rows[str(ingested.id)]["isAutomated"], True)
+        self.assertIs(rows[str(submitted.id)]["isAutomated"], False)
+        # Non-null in the wire contract, not a nullable best-effort field.
+        self.assertIn("isAutomated: Boolean!", str(schema))
+
+    def test_legacy_rows_default_to_not_automated(self):
+        link = SocialMediaLink.objects.create(
+            url="https://example.com/legacy",
+            title="legacy",
+            user=self.community_author,
+        )
+
+        self.assertIs(link.is_automated, False)
+
+    def test_an_admin_update_can_hide_a_link_but_a_submitter_cannot(self):
+        link = SocialMediaLink.objects.create(
+            url="https://example.com/to-hide",
+            title="to hide",
+            user=self.community_author,
+            status=SocialMediaLinkStatus.LIVE,
+        )
+        hide_input = {"url": link.url, "title": link.title, "status": "HIDDEN"}
+
+        with patch(
+            "incident.schema.mutations.interactions.has_admin_claim",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            result = execute_graphql(
+                self.update_query,
+                variables={"id": str(link.id), "input": hide_input},
+                user=self.community_author,
+            )
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        self.assertTrue(result.data["updateSocialMediaLink"]["ok"])
+        link.refresh_from_db()
+        self.assertEqual(link.status, SocialMediaLinkStatus.HIDDEN)
+
+        # A non-admin edit is still forced back into the approval queue, so
+        # HIDDEN remains an admin decision the submitter can neither set nor keep.
+        with patch(
+            "incident.schema.mutations.interactions.has_admin_claim",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            result = execute_graphql(
+                self.update_query,
+                variables={"id": str(link.id), "input": hide_input},
+                user=self.community_author,
+            )
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        link.refresh_from_db()
+        self.assertEqual(link.status, SocialMediaLinkStatus.PENDING_APPROVAL)
+
+
 class IngestOfficialPostsCommandTests(TestCase):
     """The manual backfill command (4.8.7)."""
 
