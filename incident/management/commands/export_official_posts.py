@@ -23,7 +23,9 @@ Semantics worth knowing before running it:
 * The columns are the HuggingFace dataset schema — ``post_id``, ``posted_at``,
   ``handle``, ``text``, ``permalink``, plus ``raw_payload`` under
   ``--include-raw`` — and their order is fixed, so exporting unchanged rows
-  twice is byte-identical (acceptance criterion 9). ``text`` is the stored
+  twice is byte-identical (acceptance criterion 9). ``handle`` comes from the
+  owning registry account (``SocMedAccount``): legacy rows with a null
+  ``socmed_account`` export ``""``. ``text`` is the stored
   ``description`` **verbatim**, and ``posted_at`` is that column's own
   ISO-8601 form (``null`` stays ``null``).
 * Rows stream out of the database via ``.iterator()``, so an export never
@@ -131,11 +133,19 @@ def _drain(writer: _RecordWriter, records: Iterable[dict[str, Any]]) -> int:
 def _row_fields(columns: tuple[str, ...]) -> tuple[str, ...]:
     """The model columns an export actually reads.
 
-    ``raw_payload`` is only selected when it is actually exported — a large
-    JSON blob per row should not be read out of the database just to be
-    dropped.
+    The ``handle`` column comes from the owning registry account, so the join
+    path ``socmed_account__handle`` is selected (the FK row is joined by
+    ``select_related``, and a null FK exports as ``""``). ``raw_payload`` is
+    only selected when it is actually exported — a large JSON blob per row
+    should not be read out of the database just to be dropped.
     """
-    fields = ["post_id", "posted_at", "source_handle", "description", "url"]
+    fields = [
+        "post_id",
+        "posted_at",
+        "socmed_account__handle",
+        "description",
+        "url",
+    ]
     if RAW_COLUMN in columns:
         fields.append(RAW_COLUMN)
     return tuple(fields)
@@ -351,7 +361,7 @@ class Command(BaseCommand):
         """
         queryset = SocialMediaLink.objects.filter(is_automated=True)
         if handles:
-            queryset = queryset.filter(source_handle__in=handles)
+            queryset = queryset.filter(socmed_account__handle__in=handles)
         if since is not None:
             queryset = queryset.filter(posted_at__gte=since)
         if until is not None:
@@ -360,7 +370,7 @@ class Command(BaseCommand):
             F("posted_at").asc(nulls_last=True),
             F("post_id").asc(nulls_last=True),
             "id",
-        )
+        ).select_related("socmed_account")
 
     def _iter_records(
         self, queryset, columns: tuple[str, ...]
@@ -373,12 +383,15 @@ class Command(BaseCommand):
         fields = _row_fields(columns)
         rows = queryset.only(*fields).iterator(chunk_size=EXPORT_CHUNK_SIZE)
         for row in rows:
+            # A legacy row with a null socmed_account exports an empty handle
+            # rather than crashing the archive.
+            handle = row.socmed_account.handle if row.socmed_account_id else ""
             record = {
                 "post_id": row.post_id,
                 "posted_at": (
                     row.posted_at.isoformat() if row.posted_at is not None else None
                 ),
-                "handle": row.source_handle,
+                "handle": handle,
                 # Verbatim BM post text, byte for byte as ingested.
                 "text": row.description,
                 "permalink": row.url,

@@ -101,3 +101,10 @@ Total commits: 41
 ### Test (1 commits)
 
 - **51f2f69** [test]: mock the firebase admin check in the 7 failing tests
+
+- **(uncommitted)** [feat](incident): `Agency` + `SocMedAccount` registry replaces `settings.OFFICIAL_POST_HANDLES`; `SocialMediaLink` FK's to the account (0029 seeds Prasarana/Unassigned + askrapidkl/myrapidkl with baked user payloads); `resolve_account`/`ensure_user_profile`/`sync_account_profiles` in `official_posts.py`, webhook attribution via `_users_by_id`/`_resolve_account`; tests/tasks/commands rewiring is a follow-up (suite red by design). Production core only — uncommitted.
+- **(uncommitted)** [feat](incident): poll/notify/export/webhook consumers rewired to the registry — `ingest_official_posts` iterates enabled `SocMedAccount` rows (empty registry → uniform zero-totals dict), `_ingest_account(SocMedAccount)` drives `fetch_user_posts(account, since_id=latest_post_id(account))`, notification text reads `link.socmed_account.handle` via `select_related`, ingest/export commands resolve handles through the registry (fixture dry-run writes nothing — no link rows, no account rows), and `x_webhook subscribe` uses `resolve_account`+`ensure_user_profile` instead of the deleted `_resolve_user_id`. `ruff`/`check`/`makemigrations --check` clean; dev-DB smoke verified FK handle export and the `polling_disabled` guard. Tests still red by design (follow-up agent).
+
+### Registry feature shipped (1 commits)
+
+- **(this commit)** [feat](incident): `Agency`/`SocMedAccount` registry + post identity — tests fully rewired (223 incident tests, 483 total, all OK) and the whole feature committed: production core + consumers + 0029 migration + tests + docs. Test-specific highlights: registry seed/behaviour suites, `is_enabled` poll gating, empty-registry zero-totals shape, `_users_by_id` full-object attribution, baked-id AAA/subscribe paths, bounded sweep-retry, and no `OFFICIAL_POST_HANDLES`/cache-pinned webhook tests (see `docs/progress/2026/09/28.md`).

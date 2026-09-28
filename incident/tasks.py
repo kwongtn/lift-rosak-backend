@@ -10,8 +10,8 @@ from django.utils.timezone import now
 from safedelete.models import HARD_DELETE
 
 from common.models import User
-from incident.enums import CalendarIncidentStatus
-from incident.models import CalendarIncident, SocialMediaLink
+from incident.enums import CalendarIncidentStatus, IngestPlatform
+from incident.models import CalendarIncident, SocialMediaLink, SocMedAccount
 from incident.services.errors import OfficialPostFetchError
 from incident.services.official_posts import (
     fetch_user_posts,
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 SOFT_DELETED_RETENTION = timedelta(days=90)
 REJECTED_RETENTION = timedelta(days=30)
 
-#: Per-handle counters reported by ``ingest_official_posts``; also the keys
+#: Per-account counters reported by ``ingest_official_posts``; also the keys
 #: summed into the task's totals dict.
 INGEST_COUNTERS = ("fetched", "created", "skipped", "duplicate_urls")
 
@@ -93,7 +93,8 @@ def _telegram_escape(value: str) -> str:
     message whose whole job is to be delivered. Every value here is either
     element text or a double-quoted ``href`` we generated, and none of them
     can contain a raw ``"``. Post text is third-party content and the handle
-    comes from an env var, so neither is trusted to be free of markup.
+    comes from the registry account (``link.socmed_account.handle``), so
+    neither is trusted to be free of markup.
     """
     return html.escape(value, quote=False)
 
@@ -114,15 +115,20 @@ def _format_posted_at(posted_at: datetime | None) -> str:
 def _build_notification_text(link: SocialMediaLink) -> str:
     """Compose the admin notification for one newly ingested ``link``.
 
-    Carries the handle, the post time, the **verbatim** post text, the
+    Carries the account handle, the post time, the **verbatim** post text, the
     permalink and the console queue URL — never ``raw_payload``, whose blob
-    shape is the provider's business. The text body is truncated so the whole
-    message stays inside Telegram's 4096-character limit *after* escaping, so
-    a post full of ``&`` cannot push the message over the edge.
+    shape is the provider's business. The handle comes from the owning registry
+    account (``link.socmed_account.handle``; ``""`` when a legacy row has no
+    account). The text body is truncated so the whole message stays inside
+    Telegram's 4096-character limit *after* escaping, so a post full of ``&``
+    cannot push the message over the edge.
     """
+    # Legacy/pre-ingestion rows may have a null socmed_account; nothing worth
+    # attributing to a registry handle, so the notification keeps an empty one.
+    handle = link.socmed_account.handle if link.socmed_account_id else ""
     head = (
         "<b>New official post — awaiting approval</b>\n"
-        f"<b>Handle:</b> @{_telegram_escape(link.source_handle)}\n"
+        f"<b>Handle:</b> @{_telegram_escape(handle)}\n"
         f"<b>Posted:</b> {_telegram_escape(_format_posted_at(link.posted_at))}\n\n"
     )
     tail = (
@@ -212,20 +218,24 @@ def _notify_created_links(handle: str, created_ids: tuple[int, ...]) -> int:
         return 0
 
     sent = 0
-    for link in SocialMediaLink.objects.filter(id__in=created_ids).order_by("id"):
+    for link in (
+        SocialMediaLink.objects.filter(id__in=created_ids)
+        .select_related("socmed_account")
+        .order_by("id")
+    ):
         if _notify_new_link(link):
             sent += 1
     return sent
 
 
-def _ingest_handle(handle: str, *, author: User) -> dict[str, Any]:
-    """Fetch and ingest one tracked handle, then report its counters.
+def _ingest_account(account: SocMedAccount, *, author: User) -> dict[str, Any]:
+    """Fetch and ingest one tracked registry account, then report its counters.
 
-    Isolated per handle so a fetch failure for one account cannot abort the
+    Isolated per account so a fetch failure for one account cannot abort the
     others: the sanitized reason (``OfficialPostFetchError`` never carries the
-    upstream body or the bearer token) is recorded on the handle's own entry and
-    the remaining handles still run. No retry and no sleep — the 5-minute beat
-    tick is the retry, and a sleep here would pin a worker.
+    upstream body or the bearer token) is recorded on the account's own entry
+    and the remaining accounts still run. No retry and no sleep — the 5-minute
+    beat tick is the retry, and a sleep here would pin a worker.
     """
     started = time.monotonic()
     stats: dict[str, Any] = dict.fromkeys(INGEST_COUNTERS, 0)
@@ -233,15 +243,20 @@ def _ingest_handle(handle: str, *, author: User) -> dict[str, Any]:
     try:
         # since_id keeps the read cheap: only genuinely new posts are billed.
         posts = fetch_user_posts(
-            handle,
-            since_id=latest_post_id(handle),
+            account,
+            since_id=latest_post_id(account),
             limit=settings.OFFICIAL_POST_FETCH_LIMIT,
         )
     except OfficialPostFetchError as exc:
-        logger.warning("Official post fetch failed for handle=%s: %s", handle, exc)
+        logger.warning(
+            "Official post fetch failed for handle=%s: %s", account.handle, exc
+        )
         stats["error"] = str(exc)
     else:
-        summary = ingest_posts(posts, handle=handle, author=author)
+        # Each RawPost carries its platform + handle, so the account they
+        # belong to is resolved (and, if the registry somehow lost it,
+        # re-created under Unassigned) inside the service.
+        summary = ingest_posts(posts, author=author)
         stats.update(
             fetched=summary.fetched,
             created=summary.created,
@@ -251,13 +266,13 @@ def _ingest_handle(handle: str, *, author: User) -> dict[str, Any]:
         # Phase 2: one notification per *newly created* row, after the rows
         # exist. Isolated inside _notify_created_links, so a Telegram failure
         # never costs us the ingest.
-        stats["notified"] = _notify_created_links(handle, summary.created_ids)
+        stats["notified"] = _notify_created_links(account.handle, summary.created_ids)
 
     stats["duration_ms"] = int((time.monotonic() - started) * 1000)
     logger.info(
         "Official post ingest handle=%s fetched=%s created=%s skipped=%s "
         "duplicate_urls=%s notified=%s duration_ms=%s",
-        handle,
+        account.handle,
         stats["fetched"],
         stats["created"],
         stats["skipped"],
@@ -289,7 +304,7 @@ def notify_official_post_links(link_ids: list[int]) -> int:
 
 @celery_app.task(name="incident.tasks.ingest_official_posts")
 def ingest_official_posts() -> dict[str, Any]:
-    """Ingest new official X posts for every tracked handle.
+    """Ingest new official X posts for every enabled registry account.
 
     Three env guards come first and all no-op without writing anything or making
     a request: ``OFFICIAL_POST_INGESTION_ENABLED`` (the kill switch — flipping it
@@ -300,7 +315,12 @@ def ingest_official_posts() -> dict[str, Any]:
     token is required; there is deliberately no fallback source). A missing
     system author is *not* swallowed — a misconfigured database should be loud.
 
-    Returns a totals dict, ``{"skipped": ...}`` when a guard tripped.
+    The tracked accounts come from the ``SocMedAccount`` registry, never a
+    settings list: enabled X accounts only (``is_enabled`` gates polling). An
+    empty registry returns a uniform-shape dict with all-zero totals so callers
+    can rely on ``{"handles": {...}, fetched: ..., created: ..., skipped: ...,
+    duplicate_urls: ...}`` — ``{"skipped": ...}`` only ever marks a tripped
+    guard.
     """
     if not settings.OFFICIAL_POST_INGESTION_ENABLED:
         logger.info(
@@ -325,8 +345,16 @@ def ingest_official_posts() -> dict[str, Any]:
         return {"skipped": "no_token"}
 
     author = get_system_author()
-    handles = list(settings.OFFICIAL_POST_HANDLES)
-    per_handle = {handle: _ingest_handle(handle, author=author) for handle in handles}
+    # The registry is the single source of truth for what to poll; handle
+    # order keeps the per-account log lines and the totals dict stable.
+    accounts = list(
+        SocMedAccount.objects.filter(
+            platform=IngestPlatform.X, is_enabled=True
+        ).order_by("handle")
+    )
+    per_handle = {
+        account.handle: _ingest_account(account, author=author) for account in accounts
+    }
 
     totals: dict[str, int] = {
         counter: sum(int(entry[counter]) for entry in per_handle.values())

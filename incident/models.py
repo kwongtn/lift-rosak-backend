@@ -342,6 +342,72 @@ class CalendarIncidentMedia(TimeStampedModel):
     )
 
 
+class Agency(TimeStampedModel):
+    """A transport operator whose official social accounts are tracked.
+
+    The DB registry is the single source of truth for which accounts the
+    official-post pipeline poll/webhook and follows: ``settings`` holds no
+    handle list. ``Unassigned`` is the target agency for auto-registered
+    accounts (see ``services/official_posts.resolve_account``) pending a human
+    mapping against a real operator.
+    """
+
+    name = models.CharField(max_length=128, unique=True)
+    short_name = models.CharField(max_length=32, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    website = models.URLField(blank=True, default="")
+
+    def __str__(self) -> str:
+        return self.short_name or self.name
+
+    class Meta:
+        verbose_name_plural = "agencies"
+        ordering = ("name",)
+
+
+class SocMedAccount(TimeStampedModel):
+    """One tracked social account on a platform, owned by an :class:`Agency`."""
+
+    agency = models.ForeignKey(
+        Agency,
+        on_delete=models.PROTECT,
+        related_name="socmed_accounts",
+    )
+    platform = TextChoicesField(choices_enum=IngestPlatform)
+    handle = models.CharField(max_length=64)
+    user_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    display_name = models.CharField(max_length=128, blank=True, default="")
+    # The entire provider user object (``GET /2/users/by/username/{handle}``'s
+    # ``data``), kept for export fidelity and offline re-seeding.
+    raw_payload = models.JSONField(default=dict, blank=True)
+    # Gates POLLING only: webhook webhooks ingest regardless, and
+    # ``ensure_user_profile`` / ``sync_account_profiles`` still resolve rows the
+    # polling side skips.
+    is_enabled = models.BooleanField(default=True, db_index=True)
+    # When the provider profile was last persisted (seeded by migration 0029,
+    # refreshed by ``ensure_user_profile`` / ``resolve_account``).
+    resolved_at = models.DateTimeField(null=True, blank=True, default=None)
+
+    def __str__(self) -> str:
+        return f"@{self.handle} ({self.platform})"
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["platform", "handle"],
+                name="socmedaccount_unique_platform_handle",
+            ),
+            # Empty ``user_id`` is the "not yet resolved" state; only rows that
+            # actually carry an id must be unique by it.
+            models.UniqueConstraint(
+                fields=["platform", "user_id"],
+                condition=Q(user_id__gt=""),
+                name="socmedaccount_unique_platform_user_id",
+            ),
+        ]
+        ordering = ("platform", "handle")
+
+
 class SocialMediaLink(TimeStampedModel):
     url = models.URLField()
     title = models.CharField(max_length=256, blank=True, default="")
@@ -398,11 +464,15 @@ class SocialMediaLink(TimeStampedModel):
     # --- Automated official-post ingestion (services/official_posts.py) -----
     # Nullable so every community-submitted link predating ingestion keeps
     # working; the partial constraint below only applies where both are set.
-    platform = TextChoicesField(
-        choices_enum=IngestPlatform,
+    # The registry account (incident.SocMedAccount) replaces the old denormalized
+    # ``platform`` + ``source_handle`` pair; platform lives on the account now.
+    socmed_account = models.ForeignKey(
+        "incident.SocMedAccount",
         null=True,
         blank=True,
         default=None,
+        on_delete=models.PROTECT,
+        related_name="links",
     )
     # Provider post id as a string: X snowflakes exceed 32-bit int in practice,
     # so they are stored verbatim and ordered numerically in the service layer.
@@ -416,7 +486,6 @@ class SocialMediaLink(TimeStampedModel):
     # Post time, NOT ingest time (that is ``created``).
     posted_at = models.DateTimeField(null=True, blank=True, default=None)
     is_automated = models.BooleanField(default=False, db_index=True)
-    source_handle = models.CharField(max_length=64, blank=True, default="")
     # Untouched provider payload, kept for export fidelity. No raw-audit table.
     raw_payload = models.JSONField(default=dict, blank=True)
 
@@ -425,9 +494,9 @@ class SocialMediaLink(TimeStampedModel):
             # Structural idempotency backstop for re-scrape; the service also
             # re-reads on IntegrityError (no advisory lock, unlike feed_links).
             models.UniqueConstraint(
-                fields=["platform", "post_id"],
-                condition=Q(platform__isnull=False, post_id__isnull=False),
-                name="socialmedialink_unique_platform_post",
+                fields=["socmed_account", "post_id"],
+                condition=Q(socmed_account__isnull=False, post_id__isnull=False),
+                name="socialmedialink_unique_account_post",
             ),
         ]
 

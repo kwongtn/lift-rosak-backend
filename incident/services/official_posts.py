@@ -8,12 +8,18 @@ table (decision D1).
 Two halves, both plain synchronous functions because they run inside a Celery
 worker rather than an async resolver:
 
-* fetching — one call to the official X API v2 (``GET /2/users/by/username/
-  {handle}`` for the id, then ``GET /2/users/{id}/tweets``). No public-scrape
+* fetching — the tracked accounts live in the DB registry (``Agency`` +
+  ``SocMedAccount``, seeded by migration 0029), not in settings. One call to
+  the official X API v2 (``GET /2/users/by/username/{handle}`` for a *missing*
+  ``user_id`` only, then ``GET /2/users/{id}/tweets``). No public-scrape
   fallback and no adapter protocol (decision D2). ``load_fixture_posts`` parses
-  a saved payload of the same shape so tests and offline dev never need a token.
-* ingesting — ``ingest_posts`` is idempotent per ``(platform, post_id)``, backed
-  by a partial unique constraint on the model plus a best-effort
+  a saved payload of the same shape so tests and offline dev never need a
+  token. The registry is the single source of truth: ``resolve_account`` is the
+  only way an ingest path decides *which* account a post belongs to, it never
+  calls the API, and the sole network lookup is ``ensure_user_profile`` (plus
+  the bounded ``sync_account_profiles`` sweep over rows with a missing id).
+* ingesting — ``ingest_posts`` is idempotent per ``(socmed_account, post_id)``,
+  backed by a partial unique constraint on the model plus a best-effort
   ``normalized_url`` check, and creates rows ``PENDING_APPROVAL`` because
   approval is the publish gate (decision D4). ``tweet_to_raw_post`` is also the
   single HTML-entity decode point for the post text, so both ingest paths (poll
@@ -35,14 +41,13 @@ from typing import Any
 
 import requests
 from django.conf import settings
-from django.core.cache import cache
 from django.db import IntegrityError, models, transaction
 from django.db.models import Max
 from django.db.models.functions import Cast
 
 from common.models import User
 from incident.enums import IngestPlatform, SocialMediaLinkStatus
-from incident.models import SocialMediaLink
+from incident.models import Agency, SocialMediaLink, SocMedAccount
 
 from .errors import OfficialPostFetchError, OfficialPostIngestError
 from .urls import canonicalize_url
@@ -64,13 +69,17 @@ _MAX_RESULTS_PER_REQUEST = 100
 #: ``SocialMediaLink.title`` is a CharField(256); longer post text is truncated
 #: there while ``description`` keeps the verbatim text.
 TITLE_MAX_LENGTH = 256
-#: Namespaced cache prefix for resolved user ids. The mapping is effectively
-#: immutable, so the timeout is None (cache until evicted). Locally DEBUG swaps
-#: in DummyCache, which simply re-resolves — correctness never depends on it.
-_USER_ID_CACHE_PREFIX = "incident:official_posts:user_id"
-#: Reverse direction of the above, for webhook payloads that only carry a numeric
-#: ``author_id``. Same immutability argument, same "never cache a negative" rule.
-_HANDLE_FOR_USER_ID_CACHE_PREFIX = "incident:official_posts:handle_for_user_id"
+#: Target agency for accounts the registry does not know yet; see
+#: ``resolve_account`` (auto-registration never calls the API and may carry an
+#: empty ``user_id`` until ``ensure_user_profile`` runs).
+UNASSIGNED_AGENCY_NAME = "Unassigned"
+#: ``user.fields`` for the profile lookup in ``ensure_user_profile``. The same
+#: rich field set was baked into the 0029 seed payloads, so a seeded row and a
+#: freshly-resolved row carry the identical shape.
+X_USER_FIELDS = (
+    "id,username,name,description,created_at,location,url,"
+    "profile_image_url,public_metrics,verified,verified_type"
+)
 #: Author of every automatically ingested row; seeded by the data migration.
 SYSTEM_AUTHOR_FIREBASE_ID = "system:official-ingest"
 
@@ -232,21 +241,105 @@ def tweet_to_raw_post(tweet: dict[str, Any], handle: str) -> RawPost:
     )
 
 
-def _resolve_user_id(handle: str) -> str:
-    """Return the X user id for ``handle``, lazily and cached.
+def resolve_account(
+    platform: IngestPlatform | str,
+    *,
+    handle: str = "",
+    user_id: str = "",
+    raw_payload: dict[str, Any] | None = None,
+    display_name: str = "",
+    create: bool = False,
+) -> SocMedAccount | None:
+    """The registry account for ``platform``/``handle``/``user_id``, or ``None``.
 
-    Never hardcoded: the id is looked up once and cached under a namespaced key
-    with no timeout, since a handle's numeric id is effectively immutable.
+    This is the **only** entry point every ingest path uses to decide which
+    account a post belongs to, and it never calls the API — the DB registry is
+    the single source of truth. Lookup order: ``(platform, user_id)`` when
+    ``user_id`` is given (the strongest key — a webhook carries the id while
+    the handle may have changed), else ``(platform, handle)``.
+
+    A hit is cheaply refreshed: a missing ``user_id`` is back-filled, and when
+    ``raw_payload``/``display_name`` are supplied those columns are updated and
+    ``resolved_at`` stamped — a webhook delivery that includes the full user
+    object therefore keeps the row current for free, which is what keeps the
+    later ``sync_account_profiles`` pass short.
+
+    A miss with ``create=True`` *and* a known ``handle`` auto-registers the
+    account under the ``Unassigned`` agency (``user_id`` may stay empty — it is
+    resolved on demand by ``ensure_user_profile``). Returns ``None`` when there
+    is no match and no registration is possible: the caller counts the post as
+    unresolved rather than attributing it to the wrong account.
     """
-    cache_key = f"{_USER_ID_CACHE_PREFIX}:{handle}"
-    cached = cache.get(cache_key)
-    if cached:
-        return str(cached)
+    handle_norm = (handle or "").strip().lstrip("@")
+    user_id_norm = (user_id or "").strip()
 
-    context = f"X API error for handle={handle} (user lookup)"
+    queryset = SocMedAccount.objects.filter(platform=platform)
+    account: SocMedAccount | None = None
+    if user_id_norm:
+        account = queryset.filter(user_id=user_id_norm).first()
+    if account is None and handle_norm:
+        account = queryset.filter(handle=handle_norm).first()
+
+    if account is not None:
+        dirty: list[str] = []
+        if not account.user_id and user_id_norm:
+            account.user_id = user_id_norm
+            dirty.append("user_id")
+        if display_name or raw_payload is not None:
+            if display_name:
+                account.display_name = display_name
+                dirty.append("display_name")
+            if raw_payload is not None:
+                account.raw_payload = raw_payload
+                dirty.append("raw_payload")
+            account.resolved_at = datetime.now().astimezone()
+            dirty.append("resolved_at")
+        if dirty:
+            account.save(update_fields=dirty)
+        return account
+
+    if create and handle_norm:
+        agency, _ = Agency.objects.get_or_create(
+            name=UNASSIGNED_AGENCY_NAME,
+            defaults={
+                "description": (
+                    "Auto-registered accounts pending mapping to a real agency."
+                )
+            },
+        )
+        account, _ = SocMedAccount.objects.get_or_create(
+            platform=platform,
+            handle=handle_norm,
+            defaults={
+                "agency": agency,
+                "user_id": user_id_norm,
+                "display_name": display_name,
+                "raw_payload": raw_payload or {},
+            },
+        )
+        return account
+    return None
+
+
+def ensure_user_profile(account: SocMedAccount) -> SocMedAccount:
+    """Resolve and persist the provider profile for ``account`` — the ONLY API lookup.
+
+    No-op when ``account.user_id`` is already set. Otherwise one call to
+    ``GET /2/users/by/username/{handle}`` with the rich ``X_USER_FIELDS`` set
+    (identical shape to the 0029 seed payloads); on success persists ``user_id``,
+    ``display_name``, the whole ``data`` object as ``raw_payload`` and a
+    ``resolved_at`` stamp, returning the refreshed account. Errors are sanitized
+    by ``_get_json`` and surface as ``OfficialPostFetchError``. Callers that
+    hold an account with an empty ``user_id`` (webhook fallout,
+    ``sync_account_profiles``, ``fetch_user_posts``) all come through here.
+    """
+    if account.user_id:
+        return account
+
+    context = f"X API error for handle={account.handle} (user lookup)"
     payload = _get_json(
-        f"{X_USER_LOOKUP_URL}/{handle}",
-        params={"user.fields": "id"},
+        f"{X_USER_LOOKUP_URL}/{account.handle}",
+        params={"user.fields": X_USER_FIELDS},
         headers=_auth_headers(),
         context=context,
     )
@@ -254,54 +347,40 @@ def _resolve_user_id(handle: str) -> str:
     if not isinstance(data, dict) or not data.get("id"):
         raise OfficialPostFetchError(f"{context}: response carried no user id")
 
-    user_id = str(data["id"])
-    cache.set(cache_key, user_id, timeout=None)
-    return user_id
+    account.user_id = str(data["id"])
+    account.display_name = str(data.get("name") or "")
+    account.raw_payload = data
+    account.resolved_at = datetime.now().astimezone()
+    account.save(
+        update_fields=["user_id", "display_name", "raw_payload", "resolved_at"]
+    )
+    return account
 
 
-def resolve_handle_for_user_id(user_id: str) -> str | None:
-    """Map an X numeric user id back to one of our tracked handles, or ``None``.
+def sync_account_profiles(*, platform: IngestPlatform = IngestPlatform.X) -> int:
+    """Resolve every registry account on ``platform`` that lacks a ``user_id``.
 
-    The webhook payload normally carries ``includes.users[].username``, which
-    answers this with no network at all; this is the fallback for when it does
-    not. It walks ``settings.OFFICIAL_POST_HANDLES`` and compares against
-    ``_resolve_user_id(handle)``, so the bounded work is the number of tracked
-    handles (two today) and the answers are already cached per handle.
-
-    A lookup failure for one handle is caught and logged (a 429 or a transient
-    5xx must not abort the remaining handles), and ``None`` is returned when no
-    tracked handle matches — a post from an untracked account is not ingested
-    with an invented handle, because that would write a wrong permalink and a
-    wrong ``source_handle``. Only a positive match is cached, so widening
-    ``OFFICIAL_POST_HANDLES`` later does not need a cache flush.
+    One bounded pass over the registry (polling-style sweep for rows the
+    webhook auto-registered under ``Unassigned``). A per-account
+    ``OfficialPostFetchError`` is logged and the loop continues, so one
+    unresolvable account cannot abort the rest; returns how many accounts
+    gained a user id.
     """
-    if not user_id:
-        return None
-
-    cache_key = f"{_HANDLE_FOR_USER_ID_CACHE_PREFIX}:{user_id}"
-    cached = cache.get(cache_key)
-    if cached:
-        return str(cached)
-
-    for handle in settings.OFFICIAL_POST_HANDLES:
+    resolved = 0
+    for account in SocMedAccount.objects.filter(platform=platform, user_id="").order_by(
+        "handle"
+    ):
         try:
-            resolved = _resolve_user_id(handle)
+            ensure_user_profile(account)
         except OfficialPostFetchError as exc:
-            logger.warning(
-                "handle lookup failed for handle=%s while resolving user_id=%s: %s",
-                handle,
-                user_id,
-                exc,
-            )
+            logger.warning("profile sync failed for account=%s: %s", account, exc)
             continue
-        if resolved == str(user_id):
-            cache.set(cache_key, handle, timeout=None)
-            return handle
-    return None
+        resolved += 1
+    return resolved
 
 
 def fetch_user_posts(
-    handle: str,
+    account: SocMedAccount,
     *,
     since_id: str | None = None,
     start_time: datetime | None = None,
@@ -312,7 +391,12 @@ def fetch_user_posts(
     # (e.g. a quiet-window query) opt in explicitly.
     exclude_retweets: bool = False,
 ) -> list[RawPost]:
-    """Fetch up to ``limit`` most recent posts for ``handle`` from the X API.
+    """Fetch up to ``limit`` most recent posts for ``account`` from the X API.
+
+    Resolves the account's ``user_id`` first via ``ensure_user_profile`` (the
+    only network lookup apart from the paged tweet reads); a registry account
+    seeded by migration 0029 already carries its id and skips straight to the
+    tweets endpoint.
 
     ``since_id`` is the cheap incremental filter (only genuinely new posts are
     billed); ``start_time`` / ``end_time`` are the backfill window. Both are
@@ -325,7 +409,9 @@ def fetch_user_posts(
     if limit <= 0:
         return []
 
-    user_id = _resolve_user_id(handle)
+    account = ensure_user_profile(account)
+    handle = account.handle
+    user_id = account.user_id
     collected: list[RawPost] = []
     pagination_token: str | None = None
 
@@ -429,7 +515,7 @@ def _resolve_fixture_handle(
     """Pick the account handle for a saved payload: argument, then sidecar key.
 
     Failing loudly beats inventing a handle, which would silently write wrong
-    permalinks and wrong ``source_handle`` values.
+    permalinks and wrong registry attribution.
     """
     if handle and handle.strip():
         return handle.strip().lstrip("@")
@@ -446,18 +532,20 @@ def _resolve_fixture_handle(
 def ingest_posts(
     posts: list[RawPost],
     *,
-    handle: str,
     author: User,
     dry_run: bool = False,
 ) -> IngestSummary:
     """Persist ``posts`` as ``SocialMediaLink`` rows, idempotently.
 
-    Per post, in order: existing ``(platform, post_id)`` → skip; existing
-    ``normalized_url`` → skip and count as a duplicate URL (the existing row is
-    left alone and never upvoted by a system author); otherwise create. Each
-    create runs in its own short ``transaction.atomic()`` so one bad post cannot
-    roll back the batch, and an ``IntegrityError`` from the partial unique
-    constraint is the race backstop.
+    Per post, in order: resolve the owning registry account via
+    ``resolve_account(platform, handle=..., create=True)`` (an unknown handle is
+    auto-registered under ``Unassigned`` with no API call; a ``None`` — only
+    possible for a handle-less post — is skipped and counted); existing
+    ``(socmed_account, post_id)`` → skip; existing ``normalized_url`` → skip and
+    count as a duplicate URL (the existing row is left alone and never upvoted
+    by a system author); otherwise create. Each create runs in its own short
+    ``transaction.atomic()`` so one bad post cannot roll back the batch, and an
+    ``IntegrityError`` from the partial unique constraint is the race backstop.
 
     ``dry_run`` runs the same existence checks and counts what *would* be
     created (``created`` is therefore a projected count) but writes nothing, so a
@@ -470,8 +558,13 @@ def ingest_posts(
     created_ids: list[int] = []
 
     for post in posts:
+        account = resolve_account(post.platform, handle=post.handle, create=True)
+        if account is None:
+            skipped += 1
+            continue
+
         if SocialMediaLink.objects.filter(
-            platform=post.platform, post_id=post.post_id
+            socmed_account=account, post_id=post.post_id
         ).first():
             skipped += 1
             continue
@@ -503,10 +596,9 @@ def ingest_posts(
                     status=SocialMediaLinkStatus.PENDING_APPROVAL,
                     is_automated=True,
                     user=author,
-                    platform=post.platform,
+                    socmed_account=account,
                     post_id=post.post_id,
                     posted_at=post.posted_at,
-                    source_handle=handle,
                     raw_payload=post.raw,
                 )
         except IntegrityError:
@@ -528,24 +620,23 @@ def ingest_posts(
     )
 
 
-def latest_post_id(handle: str) -> str | None:
-    """Highest numeric post id stored for ``handle``, as a string.
+def latest_post_id(account: SocMedAccount) -> str | None:
+    """Highest numeric post id stored for ``account``, as a string.
 
     Feeds the X API's ``since_id`` so a 5-minute tick only bills genuinely new
     posts. ``post_id`` is a CharField, so a plain ``Max()`` would compare
     lexicographically ("9…" > "10…") — it is cast to a big integer first.
-    Non-numeric ids (another platform, a manual row) cannot be cast, so they are
-    filtered out rather than crashing the aggregate.
+    Non-numeric ids (a manual row) cannot be cast, so they are filtered out
+    rather than crashing the aggregate.
     """
     newest = (
         SocialMediaLink.objects.filter(
-            source_handle=handle,
-            platform=IngestPlatform.X,
+            socmed_account=account,
             post_id__isnull=False,
         )
         # A non-numeric id would abort the whole aggregate on the cast. Rows
         # written by ingestion only ever hold snowflakes, but the column is
-        # nullable CharField, so the guard is cheap on a handle's own rows.
+        # nullable CharField, so the guard is cheap on an account's own rows.
         .filter(post_id__regex=r"^[0-9]+$")
         .aggregate(newest=Max(Cast("post_id", models.BigIntegerField())))["newest"]
     )

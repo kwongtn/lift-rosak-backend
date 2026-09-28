@@ -38,11 +38,15 @@ from typing import Any, Mapping
 
 from django.conf import settings
 
+from incident.enums import IngestPlatform
+from incident.models import SocMedAccount
+
 from .errors import OfficialPostFetchError
 from .official_posts import (
     get_system_author,
     ingest_posts,
-    resolve_handle_for_user_id,
+    resolve_account,
+    sync_account_profiles,
     tweet_to_raw_post,
 )
 
@@ -228,14 +232,16 @@ def _expansion_containers(payload: Mapping[str, Any]) -> tuple[Mapping[str, Any]
     return (payload,)
 
 
-def _usernames_by_id(payload: Mapping[str, Any]) -> dict[str, str]:
-    """``includes.users`` flattened to ``{user id: username}``.
+def _users_by_id(payload: Mapping[str, Any]) -> dict[str, dict]:
+    """``includes.users`` flattened to ``{user id: full user object}``.
 
-    This is the zero-network path to the post author's handle, and it is the
+    This is the zero-network path to the post author's identity, and it is the
     only source trusted for attribution: an expansion is delivered inside the
-    signed body, so it cannot be forged without the signing secret.
+    signed body, so it cannot be forged without the signing secret. Malformed
+    entries are skipped rather than crashing the mapping, mirroring the old
+    handle-only flattening's tolerance.
     """
-    mapping: dict[str, str] = {}
+    mapping: dict[str, dict] = {}
     for container in _expansion_containers(payload):
         includes = container.get("includes")
         users = includes.get("users") if isinstance(includes, dict) else None
@@ -245,33 +251,69 @@ def _usernames_by_id(payload: Mapping[str, Any]) -> dict[str, str]:
             if not isinstance(user, dict):
                 continue
             user_id = str(user.get("id") or "").strip()
-            username = str(user.get("username") or "").strip().lstrip("@")
+            username = str(user.get("username") or "").strip()
+            # Same tolerance as the old handle-only flattening: an entry
+            # missing either field is malformed and skipped. The username is
+            # what step-1 attribution needs, and the whole object (minus the
+            # key) is only useful when that attribution is possible.
+            if not (user_id and username):
+                continue
             # setdefault, not assignment: the first container searched is the
             # current envelope, so a stale top-level entry for the same id is
             # ignored rather than overriding the real expansion.
-            if user_id and username:
-                mapping.setdefault(user_id, username)
+            if user_id:
+                mapping.setdefault(user_id, user)
     return mapping
 
 
-def _resolve_handle(
-    post: Mapping[str, Any], usernames: Mapping[str, str], hint: str
-) -> str | None:
-    """The tracked handle that authored ``post``, or ``None`` if untracked.
+def _resolve_account(
+    post: Mapping[str, Any],
+    users: Mapping[str, dict],
+    hint: str,
+) -> SocMedAccount | None:
+    """The registry account that authored ``post``, or ``None`` if unknown.
 
-    ``includes.users`` first (no network), then a bounded reverse lookup over
-    ``OFFICIAL_POST_HANDLES``. An untracked author is never attributed to some
-    other handle: a permalink built from the wrong account is worse than a
-    dropped post, and the post is still retrievable by the polling fallback.
+    1. ``payload.author_id`` + ``includes.users[author_id]`` → hand the full
+       user object to ``resolve_account(..., create=True)``: no API call, and
+       the delivery back-fills the registry row's ``display_name`` /
+       ``raw_payload`` / ``resolved_at`` for free. An unknown author is
+       auto-registered under the ``Unassigned`` agency (empty ``user_id`` until
+       ``ensure_user_profile`` runs).
+    2. Otherwise ``author_id`` (or the subscription ``hint`` — the filter's
+       ``user_id``, which a reply post by another account must not override the
+       real author with) → lookup by ``user_id`` only; on a miss,
+       ``sync_account_profiles()`` runs once — the bounded, registry-driven API
+       sweep — and the lookup is retried once. This is the fallback for a
+       delivery whose expansion is missing.
+    3. Still unknown → ``None``: the post is counted ``unresolved`` and dropped,
+       never attributed to the wrong account.
     """
     author_id = str(post.get("author_id") or post.get("user_id") or "").strip()
-    handle = usernames.get(author_id) if author_id else None
-    if handle:
-        return handle
-    target = author_id or hint
+    target = author_id or str(hint or "").strip()
+
+    user_obj = users.get(author_id) if author_id else None
+    if user_obj is not None:
+        username = str(user_obj.get("username") or "").strip().lstrip("@")
+        if username:
+            return resolve_account(
+                IngestPlatform.X,
+                handle=username,
+                user_id=author_id,
+                raw_payload=user_obj,
+                display_name=str(user_obj.get("name") or ""),
+                create=True,
+            )
+
     if not target:
         return None
-    return resolve_handle_for_user_id(target)
+
+    account = resolve_account(IngestPlatform.X, user_id=target)
+    if account is not None:
+        return account
+    # One bounded sweep: the author may be a tracked account whose profile was
+    # never resolved, or a webhook expansion we did not ship.
+    sync_account_profiles()
+    return resolve_account(IngestPlatform.X, user_id=target)
 
 
 def ingest_webhook_payload(payload: dict[str, Any]) -> WebhookIngestResult:
@@ -279,7 +321,7 @@ def ingest_webhook_payload(payload: dict[str, Any]) -> WebhookIngestResult:
 
     Reads both the current Activity API shape and the deprecated AAA shape, maps
     each post through the shared ``tweet_to_raw_post`` and hands the posts to the
-    shared ``ingest_posts`` — so idempotency on ``(platform, post_id)`` is
+    shared ``ingest_posts`` — so idempotency on ``(socmed_account, post_id)`` is
     structural, not re-implemented. A redelivery therefore creates nothing and
     contributes only to ``skipped``.
 
@@ -298,17 +340,17 @@ def ingest_webhook_payload(payload: dict[str, Any]) -> WebhookIngestResult:
             events=0, ingested=0, skipped=0, unresolved=0, created_ids=()
         )
 
-    usernames = _usernames_by_id(payload)
+    users = _users_by_id(payload)
     grouped: dict[str, list[dict[str, Any]]] = {}
     unresolved = 0
     skipped = 0
 
     for post, hint in items:
-        handle = _resolve_handle(post, usernames, hint)
-        if not handle:
+        account = _resolve_account(post, users, hint)
+        if account is None:
             unresolved += 1
             logger.warning(
-                "X webhook post %s has no tracked handle; dropping it rather than "
+                "X webhook post %s has no known account; dropping it rather than "
                 "attributing it to the wrong account",
                 post.get("id"),
             )
@@ -319,7 +361,7 @@ def ingest_webhook_payload(payload: dict[str, Any]) -> WebhookIngestResult:
             skipped += 1
             logger.warning("skipping a webhook post with no usable id")
             continue
-        grouped.setdefault(handle, []).append(post)
+        grouped.setdefault(account.handle, []).append(post)
 
     if not grouped:
         return WebhookIngestResult(
@@ -331,7 +373,7 @@ def ingest_webhook_payload(payload: dict[str, Any]) -> WebhookIngestResult:
     created_ids: list[int] = []
     for handle, posts in grouped.items():
         raw_posts = [tweet_to_raw_post(post, handle) for post in posts]
-        summary = ingest_posts(raw_posts, handle=handle, author=author)
+        summary = ingest_posts(raw_posts, author=author)
         ingested += summary.created
         skipped += summary.skipped + summary.duplicate_urls
         created_ids.extend(summary.created_ids)

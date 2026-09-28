@@ -536,10 +536,8 @@ OFFICIAL_POST_POLLING_ENABLED = bool(
     strtobool(os.getenv("OFFICIAL_POST_POLLING_ENABLED", "false"))
 )
 # Polling is opt-in; webhooks are the primary path; toggling requires restarting
-# celerybeat (the schedule is built at import).
-OFFICIAL_POST_HANDLES = [
-    h.strip()
-    for h in os.environ.get("OFFICIAL_POST_HANDLES", "askrapidkl,myrapidkl").split(",")
-    if h.strip()
-]
+# celerybeat (the schedule is built at import). The tracked accounts themselves
+# come from the incident.SocMedAccount registry (seeded by incident migration
+# 0029), never from a settings list — the DB registry is the single source of
+# truth for which handles the pipeline polls and follows.
 OFFICIAL_POST_FETCH_LIMIT = int(os.environ.get("OFFICIAL_POST_FETCH_LIMIT", "10"))

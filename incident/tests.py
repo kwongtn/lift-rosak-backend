@@ -19,7 +19,6 @@ from asgiref.sync import async_to_sync
 from celery.schedules import crontab
 from django.conf import settings
 from django.contrib.gis.geos import Point
-from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
@@ -39,12 +38,14 @@ from incident.enums import (
     SocialMediaLinkStatus,
 )
 from incident.models import (
+    Agency,
     CalendarIncident,
     CalendarIncidentCategory,
     CalendarIncidentChronology,
     CalendarIncidentMedia,
     LineStatusReport,
     SocialMediaLink,
+    SocMedAccount,
     StationIncident,
     VehicleIncident,
 )
@@ -52,18 +53,21 @@ from incident.services import official_posts
 from incident.services.errors import OfficialPostFetchError
 from incident.services.line_status import load_line_status_history
 from incident.services.official_posts import (
+    UNASSIGNED_AGENCY_NAME,
     RawPost,
+    ensure_user_profile,
     fetch_user_posts,
     get_system_author,
     ingest_posts,
     latest_post_id,
     load_fixture_posts,
-    resolve_handle_for_user_id,
+    resolve_account,
+    sync_account_profiles,
     tweet_to_raw_post,
 )
 from incident.services.urls import canonicalize_url
 from incident.services.x_webhooks import (
-    _usernames_by_id,
+    _users_by_id,
     crc_response_token,
     has_signing_secret,
     ingest_webhook_payload,
@@ -84,6 +88,15 @@ from telegram_provider.models import TelegramLogs, TelegramSocialMediaLinkLog
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 SAMPLE_FIXTURE = FIXTURES_DIR / "x_user_tweets_sample.json"
+
+#: The registry seeded by incident migration 0029: two agencies, the two
+#: tracked X accounts (with their provider user ids baked in, so no profile
+#: lookup is needed against seeded rows), and the ``system:official-ingest``
+#: author. Tests that pin-hits these constants stay robust to any later
+#: cosmetic seed edit.
+PRASARANA_AGENCY_NAME = "Prasarana Malaysia Berhad"
+SEEDED_ASKRAPIDKL_USER_ID = "2934256998"
+SEEDED_MYRAPIDKL_USER_ID = "1375351250745618432"
 
 #: Distinguishes "no scripted outcome left" from a scripted ``None`` (a
 #: dead-lettered send) in :func:`fake_sender`.
@@ -1465,7 +1478,7 @@ class OfficialPostIngestTests(TestCase):
         self.posts = load_fixture_posts(str(SAMPLE_FIXTURE))
 
     def test_same_posts_twice_yield_one_row_each_and_no_second_creation(self):
-        first = ingest_posts(self.posts, handle="askrapidkl", author=self.author)
+        first = ingest_posts(self.posts, author=self.author)
 
         self.assertEqual(first.fetched, 2)
         self.assertEqual(first.created, 2)
@@ -1473,17 +1486,18 @@ class OfficialPostIngestTests(TestCase):
         self.assertEqual(first.duplicate_urls, 0)
         self.assertEqual(len(first.created_ids), 2)
 
-        second = ingest_posts(self.posts, handle="askrapidkl", author=self.author)
+        second = ingest_posts(self.posts, author=self.author)
 
         self.assertEqual(second.created, 0)
         self.assertEqual(second.skipped, 2)
         self.assertEqual(second.created_ids, ())
         self.assertEqual(
-            SocialMediaLink.objects.filter(platform=IngestPlatform.X).count(), 2
+            SocialMediaLink.objects.filter(socmed_account__handle="askrapidkl").count(),
+            2,
         )
 
     def test_same_url_under_a_second_handle_is_a_duplicate_url_not_a_twin(self):
-        ingest_posts(self.posts, handle="askrapidkl", author=self.author)
+        ingest_posts(self.posts, author=self.author)
         existing = SocialMediaLink.objects.get(post_id=self.posts[0].post_id)
 
         # Same permalink, arriving attributed to the other tracked account with a
@@ -1502,14 +1516,14 @@ class OfficialPostIngestTests(TestCase):
             raw={"id": "1791552500000000001"},
         )
 
-        summary = ingest_posts([cross_account], handle="myrapidkl", author=self.author)
+        summary = ingest_posts([cross_account], author=self.author)
 
         self.assertEqual(summary.duplicate_urls, 1)
         self.assertEqual(summary.created, 0)
         self.assertEqual(SocialMediaLink.objects.count(), 2)
         # The existing row is left alone: not rewritten, not re-attributed.
         existing.refresh_from_db()
-        self.assertEqual(existing.source_handle, "askrapidkl")
+        self.assertEqual(existing.socmed_account.handle, "askrapidkl")
         self.assertEqual(existing.post_id, self.posts[0].post_id)
 
     def test_row_is_verbatim_mapped_and_pending_approval(self):
@@ -1528,9 +1542,9 @@ class OfficialPostIngestTests(TestCase):
             raw={"id": "1791552310047416320", "text": bm_text},
         )
 
-        ingest_posts([post], handle="askrapidkl", author=self.author)
+        ingest_posts([post], author=self.author)
 
-        link = SocialMediaLink.objects.get(platform=IngestPlatform.X)
+        link = SocialMediaLink.objects.get(socmed_account__handle="askrapidkl")
         self.assertEqual(link.description, bm_text)
         self.assertEqual(link.title, bm_text[:256])
         self.assertEqual(len(link.title), 256)
@@ -1541,7 +1555,7 @@ class OfficialPostIngestTests(TestCase):
         self.assertEqual(link.posted_at, timezone.make_naive(posted_at))
         # posted_at is post time; created is ingest time.
         self.assertNotEqual(link.posted_at, link.created)
-        self.assertEqual(link.source_handle, "askrapidkl")
+        self.assertEqual(link.socmed_account.handle, "askrapidkl")
         self.assertEqual(link.post_id, "1791552310047416320")
         self.assertEqual(link.raw_payload, post.raw)
         self.assertEqual(
@@ -1550,18 +1564,18 @@ class OfficialPostIngestTests(TestCase):
         )
 
     def test_latest_post_id_returns_the_highest_numeric_snowflake(self):
-        self.assertIsNone(latest_post_id("askrapidkl"))
-        ingest_posts(self.posts, handle="askrapidkl", author=self.author)
+        askrapidkl = resolve_account(IngestPlatform.X, handle="askrapidkl")
+        myrapidkl = resolve_account(IngestPlatform.X, handle="myrapidkl")
+        self.assertIsNone(latest_post_id(askrapidkl))
+        ingest_posts(self.posts, author=self.author)
 
         # The fixture's newest id is numerically the larger one, and a plain
         # lexicographic Max() would pick the smaller.
-        self.assertEqual(latest_post_id("askrapidkl"), "1791552408821972992")
-        self.assertIsNone(latest_post_id("myrapidkl"))
+        self.assertEqual(latest_post_id(askrapidkl), "1791552408821972992")
+        self.assertIsNone(latest_post_id(myrapidkl))
 
     def test_dry_run_counts_creations_but_writes_nothing(self):
-        summary = ingest_posts(
-            self.posts, handle="askrapidkl", author=self.author, dry_run=True
-        )
+        summary = ingest_posts(self.posts, author=self.author, dry_run=True)
 
         self.assertEqual(summary.fetched, 2)
         self.assertEqual(summary.created, 2)
@@ -1632,11 +1646,10 @@ class OfficialPostEntityDecodingTests(TestCase):
     def test_the_stored_row_is_decoded_and_the_raw_payload_is_not(self):
         ingest_posts(
             [tweet_to_raw_post(self._tweet(self.ENCODED), "askrapidkl")],
-            handle="askrapidkl",
             author=self.author,
         )
 
-        link = SocialMediaLink.objects.get(platform=IngestPlatform.X)
+        link = SocialMediaLink.objects.get(socmed_account__handle="askrapidkl")
         self.assertEqual(link.description, self.DECODED)
         self.assertEqual(link.title, self.DECODED[:256])
         self.assertEqual(link.raw_payload["text"], self.ENCODED)
@@ -1649,11 +1662,10 @@ class OfficialPostEntityDecodingTests(TestCase):
         encoded = "&amp;" * 40 + "ekor " * 80
         ingest_posts(
             [tweet_to_raw_post(self._tweet(encoded), "askrapidkl")],
-            handle="askrapidkl",
             author=self.author,
         )
 
-        link = SocialMediaLink.objects.get(platform=IngestPlatform.X)
+        link = SocialMediaLink.objects.get(socmed_account__handle="askrapidkl")
         self.assertEqual(link.description, decoded)
         self.assertEqual(link.title, decoded[:256])
         self.assertEqual(len(link.title), 256)
@@ -1714,7 +1726,6 @@ class OfficialPostTaskGuardTests(TestCase):
         OFFICIAL_POST_INGESTION_ENABLED=True,
         OFFICIAL_POST_POLLING_ENABLED=True,
         X_API_BEARER_TOKEN="t",
-        OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"],
     )
     def test_one_handle_failing_does_not_stop_the_others(self):
         posts = load_fixture_posts(str(SAMPLE_FIXTURE))
@@ -1741,6 +1752,54 @@ class OfficialPostTaskGuardTests(TestCase):
         # since_id is the incremental filter, read from that handle's own rows.
         self.assertIsNone(fetch.call_args_list[0].kwargs["since_id"])
         self.assertEqual(SocialMediaLink.objects.count(), 2)
+
+    @override_settings(
+        OFFICIAL_POST_INGESTION_ENABLED=True,
+        OFFICIAL_POST_POLLING_ENABLED=True,
+        X_API_BEARER_TOKEN="t",
+    )
+    def test_only_enabled_registry_accounts_are_polled(self):
+        # ``is_enabled`` gates POLLING only (the webhook path ingests
+        # regardless); an account flipped off must leave the task entirely.
+        SocMedAccount.objects.filter(handle="myrapidkl").update(is_enabled=False)
+        posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+
+        with mock.patch("incident.tasks.fetch_user_posts", return_value=posts) as fetch:
+            result = ingest_official_posts()
+
+        self.assertEqual(
+            [call.args[0].handle for call in fetch.call_args_list], ["askrapidkl"]
+        )
+        self.assertEqual(result["handles"]["askrapidkl"]["created"], 2)
+        self.assertNotIn("myrapidkl", result["handles"])
+
+    @override_settings(
+        OFFICIAL_POST_INGESTION_ENABLED=True,
+        OFFICIAL_POST_POLLING_ENABLED=True,
+        X_API_BEARER_TOKEN="t",
+    )
+    def test_an_empty_registry_returns_the_uniform_zero_totals_shape(self):
+        SocMedAccount.objects.all().delete()
+        with mock.patch(
+            "incident.tasks.fetch_user_posts",
+            side_effect=AssertionError("fetch called"),
+        ) as fetch:
+            result = ingest_official_posts()
+
+        # The registry is the single source of truth for what to poll; an empty
+        # one must still give callers the shape they can sum over.
+        self.assertEqual(
+            result,
+            {
+                "handles": {},
+                "fetched": 0,
+                "created": 0,
+                "skipped": 0,
+                "duplicate_urls": 0,
+            },
+        )
+        fetch.assert_not_called()
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
 
 
 class OfficialPostPollingDisabledTests(TestCase):
@@ -1800,13 +1859,18 @@ class OfficialPostPollingEntryTests(TestCase):
 
 
 class OfficialPostBoundedFetchTests(TestCase):
-    """The pagination walk is bounded by ``limit`` *and* by a page cap (4.8.6)."""
+    """The pagination walk is bounded by ``limit`` *and* by a page cap (4.8.6).
+
+    ``fetch_user_posts`` now takes a registry account, not a handle. The seeded
+    accounts already carry their ``user_id``, so no profile lookup is ever made
+    against them (the one test that needs the lookup builds a fresh account).
+    """
 
     def setUp(self):
-        # The user-id lookup is cached under a namespaced key; a cache hit would
-        # skip the first call and change what the side_effect chain means.
-        cache.clear()
-        self.addCleanup(cache.clear)
+        # A seeded account carries its user_id, so the fetch skips the profile
+        # lookup entirely and starts straight on the tweets endpoint.
+        self.account = resolve_account(IngestPlatform.X, handle="askrapidkl")
+        self.assertIsNotNone(self.account)
 
     def _paged_api(self, posts_per_page, pages):
         """A _get_json stand-in: one user lookup, then ``pages`` tweet pages."""
@@ -1845,7 +1909,7 @@ class OfficialPostBoundedFetchTests(TestCase):
         with mock.patch.object(
             official_posts, "_get_json", side_effect=self._paged_api(2, pages=10)
         ) as http:
-            posts = fetch_user_posts("askrapidkl", limit=3)
+            posts = fetch_user_posts(self.account, limit=3)
             pages = self._tweet_pages(http)
 
         # limit=3 over 2-post pages: the second page is truncated, not a third
@@ -1861,7 +1925,7 @@ class OfficialPostBoundedFetchTests(TestCase):
         with mock.patch.object(
             official_posts, "_get_json", side_effect=self._paged_api(1, pages=10_000)
         ) as http:
-            posts = fetch_user_posts("askrapidkl", limit=10_000)
+            posts = fetch_user_posts(self.account, limit=10_000)
             pages = self._tweet_pages(http)
 
         # Every page carries a next_token, so only the cap stops the walk.
@@ -1884,7 +1948,7 @@ class OfficialPostBoundedFetchTests(TestCase):
 
         with mock.patch.object(official_posts, "_get_json", side_effect=fake_get_json):
             fetch_user_posts(
-                "askrapidkl",
+                self.account,
                 since_id="1791552310047416320",
                 start_time=datetime(2026, 9, 1, tzinfo=UTC),
                 end_time=datetime(2026, 9, 2, 23, 59, 59, tzinfo=UTC),
@@ -1893,7 +1957,7 @@ class OfficialPostBoundedFetchTests(TestCase):
             )
 
         tweets_url, params, headers = captured[-1]
-        self.assertIn("/2/users/424242/tweets", tweets_url)
+        self.assertIn(f"/2/users/{self.account.user_id}/tweets", tweets_url)
         self.assertEqual(params["since_id"], "1791552310047416320")
         self.assertEqual(params["start_time"], "2026-09-01T00:00:00+00:00")
         self.assertEqual(params["end_time"], "2026-09-02T23:59:59+00:00")
@@ -1901,33 +1965,343 @@ class OfficialPostBoundedFetchTests(TestCase):
         self.assertEqual(params["max_results"], 5)
         self.assertEqual(headers["Authorization"], "Bearer test-bearer-token")
 
-    # DEBUG=True swaps the default cache for DummyCache (AGENTS.md "local-vs-prod
-    # gotcha"), which discards every write — so the cache assertion below needs a
-    # real backend to mean anything.
-    @override_settings(
-        CACHES={
-            "default": {
-                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-                "LOCATION": "official-post-tests",
-            }
-        }
-    )
-    def test_user_id_is_resolved_once_per_handle(self):
-        # The second call is served entirely from the cache, so the lookup does
-        # not happen again — one extra HTTP request per account, not per tick.
-        api = self._paged_api(1, pages=1)
-        with mock.patch.object(official_posts, "_get_json", side_effect=api) as http:
-            fetch_user_posts("askrapidkl", limit=1)
-            fetch_user_posts("askrapidkl", limit=1)
-            looked_up = [
-                call for call in http.call_args_list if "by/username" in call.args[0]
-            ]
-            pages = self._tweet_pages(http)
+    def test_a_missing_user_id_is_resolved_once_and_persisted(self):
+        # Not a seeded row: ``user_id`` stays empty, which is the only state
+        # that triggers the profile lookup. The registry is the source of
+        # truth, so the id is resolved through ``ensure_user_profile`` and
+        # persisted once — a second fetch must not pay the lookup again.
+        agency = Agency.objects.get(name=PRASARANA_AGENCY_NAME)
+        account = SocMedAccount.objects.create(
+            agency=agency,
+            platform=IngestPlatform.X,
+            handle="freshaccount",
+            user_id="",
+        )
+        username_lookups = []
 
-        self.assertEqual(len(looked_up), 1)
-        # One tweets page per call, so the cached id was reused instead of a
-        # second username lookup — but the page fetch itself still happens.
-        self.assertEqual(len(pages), 2)
+        def fake_get_json(url, *, params, headers, context):
+            if "by/username" in url:
+                username_lookups.append(url)
+                return {
+                    "data": {
+                        "id": "424242",
+                        "name": "Fresh Account",
+                        "username": "freshaccount",
+                    }
+                }
+            return {"data": []}
+
+        with mock.patch.object(official_posts, "_get_json", side_effect=fake_get_json):
+            fetch_user_posts(account, limit=1)
+            fetch_user_posts(account, limit=1)
+
+        # One profile lookup for the whole life of the account, not per fetch.
+        self.assertEqual(len(username_lookups), 1)
+        account.refresh_from_db()
+        self.assertEqual(account.user_id, "424242")
+        self.assertEqual(account.display_name, "Fresh Account")
+        self.assertIsNotNone(account.resolved_at)
+
+
+class SocMedAccountRegistrySeedTests(TestCase):
+    """Migration 0029's registry seed is present — and pinned, so a later seed
+    edit that would break the pipeline is caught at the source instead of only
+    in the dozens of behaviour tests that quietly depend on it."""
+
+    def test_the_two_agencies_are_seeded(self):
+        names = {agency.name for agency in Agency.objects.all()}
+        self.assertIn(PRASARANA_AGENCY_NAME, names)
+        self.assertIn(UNASSIGNED_AGENCY_NAME, names)
+
+    def test_the_tracked_accounts_are_seeded_with_their_user_ids(self):
+        accounts = {account.handle: account for account in SocMedAccount.objects.all()}
+        self.assertIn("askrapidkl", accounts)
+        self.assertIn("myrapidkl", accounts)
+        self.assertEqual(accounts["askrapidkl"].user_id, SEEDED_ASKRAPIDKL_USER_ID)
+        self.assertEqual(accounts["myrapidkl"].user_id, SEEDED_MYRAPIDKL_USER_ID)
+
+    def test_the_seeded_payloads_match_a_live_profile_lookup_shape(self):
+        # The provider ``data`` object is baked into the seed so staging/prod
+        # cost no API call, and it matches the shape ``ensure_user_profile``
+        # persists on a live lookup — seeding and resolving cannot diverge.
+        account = SocMedAccount.objects.get(handle="askrapidkl")
+        self.assertEqual(account.display_name, "Ask Rapid KL")
+        self.assertIsInstance(account.raw_payload, dict)
+        self.assertEqual(account.raw_payload["id"], SEEDED_ASKRAPIDKL_USER_ID)
+        self.assertEqual(account.raw_payload["username"], "askrapidkl")
+        self.assertIsNotNone(account.resolved_at)
+        self.assertTrue(account.is_enabled)
+        self.assertEqual(account.agency.name, PRASARANA_AGENCY_NAME)
+
+    def test_the_system_author_is_seeded(self):
+        self.assertIsNotNone(get_system_author())
+
+
+class SocMedAccountRegistryTests(TestCase):
+    """``resolve_account`` / ``ensure_user_profile`` / ``sync_account_profiles``:
+    the DB registry is the single source of truth, ``resolve_account`` never
+    calls the API, and the sole network lookup is ``ensure_user_profile``."""
+
+    def test_lookup_finds_by_user_id_and_by_handle(self):
+        by_user_id = resolve_account(
+            IngestPlatform.X, user_id=SEEDED_ASKRAPIDKL_USER_ID
+        )
+        self.assertIsNotNone(by_user_id)
+        self.assertEqual(by_user_id.handle, "askrapidkl")
+
+        by_handle = resolve_account(IngestPlatform.X, handle="myrapidkl")
+        self.assertIsNotNone(by_handle)
+        self.assertEqual(by_handle.user_id, SEEDED_MYRAPIDKL_USER_ID)
+
+    def test_a_hit_backfills_a_missing_user_id(self):
+        # A row registered by handle alone (empty user_id) is backfilled when a
+        # delivery carrying the id resolves to it — no second row, no API call.
+        agency = Agency.objects.get(name=PRASARANA_AGENCY_NAME)
+        account = SocMedAccount.objects.create(
+            agency=agency,
+            platform=IngestPlatform.X,
+            handle="backfillme",
+            user_id="",
+        )
+
+        resolved = resolve_account(
+            IngestPlatform.X, handle="backfillme", user_id="424242"
+        )
+
+        # A fresh queryset fetch is a new instance — compare by identity key,
+        # not object identity.
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved.id, account.id)
+        account.refresh_from_db()
+        self.assertEqual(account.user_id, "424242")
+
+    def test_a_hit_with_a_user_object_refreshes_the_profile_columns(self):
+        # A webhook delivery with the full user object keeps the row current
+        # for free, which is what keeps the later sync sweep short.
+        account = resolve_account(
+            IngestPlatform.X,
+            handle="askrapidkl",
+            raw_payload={
+                "id": SEEDED_ASKRAPIDKL_USER_ID,
+                "username": "askrapidkl",
+            },
+            display_name="Fresh name",
+        )
+
+        self.assertEqual(account.display_name, "Fresh name")
+        account.refresh_from_db()
+        self.assertEqual(account.display_name, "Fresh name")
+        self.assertIsNotNone(account.resolved_at)
+
+    def test_an_unknown_handle_is_auto_registered_under_unassigned(self):
+        # No API call: the row is written with an empty user_id, resolved later
+        # by ``ensure_user_profile`` (or backfilled by a delivery).
+        account = resolve_account(IngestPlatform.X, handle="brandnew", create=True)
+
+        self.assertIsNotNone(account)
+        self.assertEqual(account.agency.name, UNASSIGNED_AGENCY_NAME)
+        self.assertEqual(account.user_id, "")
+        # Same account on a second resolution, never a twin.
+        again = resolve_account(IngestPlatform.X, handle="brandnew", create=True)
+        self.assertEqual(again.id, account.id)
+        self.assertEqual(SocMedAccount.objects.filter(handle="brandnew").count(), 1)
+
+    def test_create_without_a_handle_never_registers(self):
+        self.assertIsNone(resolve_account(IngestPlatform.X, user_id="777", create=True))
+        self.assertFalse(SocMedAccount.objects.filter(user_id="777").exists())
+
+    def test_no_match_and_no_create_returns_none_without_an_api_call(self):
+        with mock.patch.object(
+            official_posts,
+            "_get_json",
+            side_effect=AssertionError("HTTP called"),
+        ):
+            self.assertIsNone(
+                resolve_account(IngestPlatform.X, handle="nobody", create=False)
+            )
+
+    # --- ensure_user_profile --------------------------------------------
+
+    def test_ensure_user_profile_is_a_no_op_when_the_id_is_set(self):
+        account = SocMedAccount.objects.get(handle="askrapidkl")
+
+        with mock.patch.object(
+            official_posts,
+            "_get_json",
+            side_effect=AssertionError("HTTP called"),
+        ):
+            self.assertIs(ensure_user_profile(account), account)
+
+        account.refresh_from_db()
+        self.assertEqual(account.user_id, SEEDED_ASKRAPIDKL_USER_ID)
+
+    def test_ensure_user_profile_resolves_and_persists_a_missing_id(self):
+        agency = Agency.objects.get(name=PRASARANA_AGENCY_NAME)
+        account = SocMedAccount.objects.create(
+            agency=agency,
+            platform=IngestPlatform.X,
+            handle="resolveable",
+            user_id="",
+        )
+
+        with mock.patch.object(
+            official_posts,
+            "_get_json",
+            return_value={
+                "data": {
+                    "id": "424242",
+                    "name": "Resolveable",
+                    "username": "resolveable",
+                }
+            },
+        ):
+            refreshed = ensure_user_profile(account)
+
+        account.refresh_from_db()
+        self.assertEqual(refreshed.user_id, "424242")
+        self.assertEqual(account.user_id, "424242")
+        self.assertEqual(account.display_name, "Resolveable")
+        self.assertEqual(account.raw_payload["username"], "resolveable")
+        self.assertIsNotNone(account.resolved_at)
+
+    def test_ensure_user_profile_raises_when_the_payload_carries_no_id(self):
+        agency = Agency.objects.get(name=PRASARANA_AGENCY_NAME)
+        account = SocMedAccount.objects.create(
+            agency=agency,
+            platform=IngestPlatform.X,
+            handle="noidentity",
+            user_id="",
+        )
+
+        with mock.patch.object(
+            official_posts,
+            "_get_json",
+            return_value={"data": {"username": "noidentity"}},
+        ):
+            with self.assertRaises(OfficialPostFetchError) as caught:
+                ensure_user_profile(account)
+
+        self.assertIn("no user id", str(caught.exception))
+
+    # --- sync_account_profiles -------------------------------------------
+
+    def test_sync_resolves_every_missing_id_and_reports_the_count(self):
+        agency = Agency.objects.get(name=PRASARANA_AGENCY_NAME)
+        first = SocMedAccount.objects.create(
+            agency=agency, platform=IngestPlatform.X, handle="sync-a", user_id=""
+        )
+        second = SocMedAccount.objects.create(
+            agency=agency, platform=IngestPlatform.X, handle="sync-b", user_id=""
+        )
+        payloads = {
+            "sync-a": {"data": {"id": "111", "name": "A", "username": "sync-a"}},
+            "sync-b": {"data": {"id": "222", "name": "B", "username": "sync-b"}},
+        }
+
+        def fake_get_json(url, *, params, headers, context):
+            return payloads[url.rsplit("/", 1)[-1]]
+
+        with mock.patch.object(official_posts, "_get_json", side_effect=fake_get_json):
+            resolved = sync_account_profiles()
+
+        self.assertEqual(resolved, 2)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.user_id, "111")
+        self.assertEqual(second.user_id, "222")
+
+    def test_a_per_account_failure_does_not_abort_the_sweep(self):
+        agency = Agency.objects.get(name=PRASARANA_AGENCY_NAME)
+        SocMedAccount.objects.create(
+            agency=agency, platform=IngestPlatform.X, handle="dead-a", user_id=""
+        )
+        good = SocMedAccount.objects.create(
+            agency=agency, platform=IngestPlatform.X, handle="good-b", user_id=""
+        )
+        call_count = 0
+
+        def fake_get_json(url, *, params, headers, context):
+            nonlocal call_count
+            call_count += 1
+            if "dead-a" in url:
+                raise OfficialPostFetchError("X API error: HTTP 429")
+            return {"data": {"id": "222", "name": "B", "username": "good-b"}}
+
+        with self.assertLogs("incident.services.official_posts", level="WARNING"):
+            with mock.patch.object(
+                official_posts, "_get_json", side_effect=fake_get_json
+            ):
+                resolved = sync_account_profiles()
+
+        self.assertEqual(resolved, 1)
+        good.refresh_from_db()
+        self.assertEqual(good.user_id, "222")
+        # Both rows were attempted; one failure did not stop the other.
+        self.assertEqual(call_count, 2)
+
+    def test_sync_makes_no_api_calls_when_nothing_is_missing(self):
+        with mock.patch.object(
+            official_posts,
+            "_get_json",
+            side_effect=AssertionError("HTTP called"),
+        ):
+            self.assertEqual(sync_account_profiles(), 0)
+
+    # --- model constraints -------------------------------------------------
+
+    def test_duplicate_platform_and_handle_is_rejected(self):
+        agency = Agency.objects.first()
+        SocMedAccount.objects.create(
+            agency=agency, platform=IngestPlatform.X, handle="dup"
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                SocMedAccount.objects.create(
+                    agency=agency, platform=IngestPlatform.X, handle="dup"
+                )
+
+    def test_a_non_empty_user_id_is_unique_per_platform(self):
+        agency = Agency.objects.first()
+        SocMedAccount.objects.create(
+            agency=agency, platform=IngestPlatform.X, handle="one", user_id="424242"
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                SocMedAccount.objects.create(
+                    agency=agency,
+                    platform=IngestPlatform.X,
+                    handle="two",
+                    user_id="424242",
+                )
+
+    def test_an_empty_user_id_is_shared_by_many(self):
+        # ``user_id=""`` is the "not yet resolved" state; the uniqueness must
+        # never treat several unresolved rows as duplicates.
+        agency = Agency.objects.first()
+        for handle in ("empty-a", "empty-b"):
+            SocMedAccount.objects.create(
+                agency=agency, platform=IngestPlatform.X, handle=handle, user_id=""
+            )
+        self.assertEqual(SocMedAccount.objects.filter(user_id="").count(), 2)
+
+    def test_one_account_may_hold_a_post_id_only_once(self):
+        account = SocMedAccount.objects.get(handle="askrapidkl")
+        author = get_system_author()
+        kwargs = dict(
+            url="https://x.com/askrapidkl/status/1791552310047416320",
+            user=author,
+            socmed_account=account,
+            post_id="1791552310047416320",
+        )
+        SocialMediaLink.objects.create(title="first", description="first", **kwargs)
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                SocialMediaLink.objects.create(
+                    title="twin", description="twin", **kwargs
+                )
 
 
 class OfficialPostNotificationTests(TestCase):
@@ -1942,7 +2316,11 @@ class OfficialPostNotificationTests(TestCase):
     def setUp(self):
         self.author = get_system_author()
         self.posts = load_fixture_posts(str(SAMPLE_FIXTURE))
-        self.addCleanup(cache.clear)
+        # Poll only the one account this class cares about: ``is_enabled`` is
+        # the polling gate, and the other seeded account would re-fetch the
+        # same askrapidkl-handle posts (adding noise to the totals), not new
+        # ones.
+        SocMedAccount.objects.filter(handle="myrapidkl").update(is_enabled=False)
 
     def _ingest(self, sender=None, *, posts=None, **extra_settings):
         """Run the beat task with HTTP stubbed; ``sender=None`` uses the real
@@ -1951,7 +2329,6 @@ class OfficialPostNotificationTests(TestCase):
             "OFFICIAL_POST_INGESTION_ENABLED": True,
             "OFFICIAL_POST_POLLING_ENABLED": True,
             "X_API_BEARER_TOKEN": "t",
-            "OFFICIAL_POST_HANDLES": ["askrapidkl"],
             "TELEGRAM_ADMIN_CHAT_ID": "-1001234",
             **extra_settings,
         }
@@ -2498,7 +2875,8 @@ class IngestOfficialPostsCommandTests(TestCase):
         self.assertIn("dry_run=False", out)
         self.assertEqual(
             SocialMediaLink.objects.filter(
-                platform=IngestPlatform.X, status=SocialMediaLinkStatus.PENDING_APPROVAL
+                socmed_account__handle="askrapidkl",
+                status=SocialMediaLinkStatus.PENDING_APPROVAL,
             ).count(),
             2,
         )
@@ -2517,6 +2895,25 @@ class IngestOfficialPostsCommandTests(TestCase):
         self.assertIn("dry_run=True", out)
         self.assertIn("created=2", out)
         self.assertEqual(SocialMediaLink.objects.count(), 0)
+
+    def test_dry_run_with_an_unregistered_handle_is_refused(self):
+        # Auto-registration is itself a write, so a preview may only point at an
+        # account the registry already knows: a dry run must write no rows of
+        # any kind — link rows or account rows.
+        accounts_before = SocMedAccount.objects.count()
+
+        with self.assertRaises(CommandError) as caught:
+            self._run(
+                "--handle",
+                "brandnew",
+                "--fixture",
+                str(SAMPLE_FIXTURE),
+                "--dry-run",
+            )
+
+        self.assertIn("not in the registry", str(caught.exception))
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.assertEqual(SocMedAccount.objects.count(), accounts_before)
 
     def test_unknown_fixture_path_raises_command_error(self):
         with self.assertRaises(CommandError) as caught:
@@ -2544,7 +2941,7 @@ class IngestOfficialPostsCommandTests(TestCase):
         links = SocialMediaLink.objects.order_by("post_id")
         self.assertEqual(links.count(), 2)
         for link in links:
-            self.assertEqual(link.source_handle, "myrapidkl")
+            self.assertEqual(link.socmed_account.handle, "myrapidkl")
             # The permalink follows the handle it was attributed to, even though
             # the payload's sidecar key said otherwise.
             self.assertIn("/myrapidkl/status/", link.url)
@@ -2681,7 +3078,7 @@ class ExportOfficialPostsFixture:
     @classmethod
     def build(cls, author):
         posts = load_fixture_posts(str(SAMPLE_FIXTURE))
-        ingest_posts(posts, handle="askrapidkl", author=author)
+        ingest_posts(posts, author=author)
         # A second tracked account, dated a day earlier: --handle and the date
         # window each have something to narrow.
         ingest_posts(
@@ -2697,7 +3094,6 @@ class ExportOfficialPostsFixture:
                     raw={"id": "1791552500000000001"},
                 )
             ],
-            handle=cls.OTHER_HANDLE,
             author=author,
         )
         # A hand-submitted link: same table, never part of the operator's
@@ -2719,6 +3115,9 @@ class ExportOfficialPostsCommandTests(TestCase):
         self.fixture_posts, self.community = ExportOfficialPostsFixture.build(
             self.author
         )
+        # The registry account direct-row writes below are attributed to.
+        self.askrapidkl = resolve_account(IngestPlatform.X, handle="askrapidkl")
+        self.assertIsNotNone(self.askrapidkl)
         self.tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmpdir.cleanup)
         self.tmppath = Path(self.tmpdir.name)
@@ -2745,7 +3144,7 @@ class ExportOfficialPostsCommandTests(TestCase):
         defaults = {
             "user": self.author,
             "is_automated": True,
-            "platform": IngestPlatform.X,
+            "socmed_account": self.askrapidkl,
         }
         return SocialMediaLink.objects.create(**{**defaults, **fields})
 
@@ -2792,7 +3191,6 @@ class ExportOfficialPostsCommandTests(TestCase):
             description="posted_at could not be parsed",
             post_id="1791552900000000001",
             posted_at=None,
-            source_handle="askrapidkl",
         )
 
         records = self._records("--handle", "askrapidkl")
@@ -2809,7 +3207,6 @@ class ExportOfficialPostsCommandTests(TestCase):
             description="posted 27 Sep",
             post_id="1791552600000000001",
             posted_at=datetime(2026, 9, 27, 10, 0, tzinfo=UTC),
-            source_handle="askrapidkl",
         )
         self._store(
             url="https://x.com/askrapidkl/status/1791552700000000002",
@@ -2817,7 +3214,6 @@ class ExportOfficialPostsCommandTests(TestCase):
             description="posted 26 Sep",
             post_id="1791552700000000002",
             posted_at=datetime(2026, 9, 26, 10, 0, tzinfo=UTC),
-            source_handle="askrapidkl",
         )
 
         ids = [record["post_id"] for record in self._records()]
@@ -2844,7 +3240,6 @@ class ExportOfficialPostsCommandTests(TestCase):
                 description="same post time",
                 post_id=post_id,
                 posted_at=same,
-                source_handle="askrapidkl",
             )
 
         ids = [record["post_id"] for record in self._records("--handle", "askrapidkl")]
@@ -2902,7 +3297,6 @@ class ExportOfficialPostsCommandTests(TestCase):
             description="26 Sep 16:30Z",
             post_id="1791552600000000009",
             posted_at=datetime(2026, 9, 26, 16, 30, tzinfo=UTC),
-            source_handle="askrapidkl",
         )
 
         on_the_26th = [r["post_id"] for r in self._records("--until", "2026-09-26")]
@@ -2938,7 +3332,6 @@ class ExportOfficialPostsCommandTests(TestCase):
             description=nasty,
             post_id="1791553000000000001",
             posted_at=datetime(2026, 9, 29, 5, 0, tzinfo=UTC),
-            source_handle="askrapidkl",
         )
         target = self.tmppath / "export.csv"
 
@@ -3009,7 +3402,6 @@ class ExportOfficialPostsCommandTests(TestCase):
             description="raw in csv",
             post_id="1791553000000000002",
             posted_at=datetime(2026, 9, 29, 5, 0, tzinfo=UTC),
-            source_handle="askrapidkl",
             raw_payload={"id": "1791553000000000002", "text": "raw, in csv"},
         )
         target = self.tmppath / "raw.csv"
@@ -3659,30 +4051,16 @@ class XWebhookCrcViewTests(TestCase):
         self.assertIn("GET, POST", self.client.put(WEBHOOK_URL)["Allow"])
 
 
-@override_settings(
-    # DEBUG is False in this environment, so the shipped default cache is the
-    # *shared* Redis one — not the DummyCache the docs assume — and these
-    # assertions would be decided by whatever a previous run left behind. A
-    # private LocMem backend is the only way "a cache hit changes the answer"
-    # is actually what is under test.
-    CACHES={
-        "default": {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "x-webhook-handle-resolution",
-        }
-    }
-)
 class XWebhookHandleResolutionTests(TestCase):
-    """``includes.users`` first (no network), then a bounded reverse lookup."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
+    """Attribution through the registry: ``includes.users`` first (no network),
+    then a user-id lookup with at most one bounded ``sync_account_profiles``
+    sweep. ``resolve_account`` is the one path every delivery goes through and
+    it never calls the API."""
 
     def test_the_includes_expansion_resolves_the_handle_with_no_network(self):
         with mock.patch.object(
             official_posts,
-            "_resolve_user_id",
+            "_get_json",
             side_effect=AssertionError("network must not be used"),
         ):
             result = ingest_webhook_payload(xaa_post_create_payload())
@@ -3691,18 +4069,19 @@ class XWebhookHandleResolutionTests(TestCase):
         self.assertEqual(result.ingested, 1)
         self.assertEqual(result.unresolved, 0)
         link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
-        self.assertEqual(link.source_handle, "askrapidkl")
+        self.assertEqual(link.socmed_account.handle, "askrapidkl")
 
     def test_the_nested_includes_expansion_resolves_the_handle_with_no_network(self):
         # Regression: X puts the expansion on the event object (data.includes).
-        # Reading only the top level resolved nothing, so a real delivery made a
-        # reverse lookup, failed offline, and was counted unresolved — the whole
-        # ingest path was dead in production while the tests passed.
+        # Reading only the top level resolved nothing, so a real delivery made
+        # a profile sweep, failed offline, and was counted unresolved — the
+        # whole ingest path was dead in production while the tests passed.
         payload = xaa_post_create_payload()
         self.assertIn("includes", payload["data"])
 
-        with mock.patch(
-            "incident.services.x_webhooks.resolve_handle_for_user_id",
+        with mock.patch.object(
+            official_posts,
+            "_get_json",
             side_effect=AssertionError("network must not be used"),
         ):
             result = ingest_webhook_payload(payload)
@@ -3711,12 +4090,13 @@ class XWebhookHandleResolutionTests(TestCase):
         self.assertEqual(result.ingested, 1)
         self.assertEqual(result.unresolved, 0)
         link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
-        self.assertEqual(link.source_handle, "askrapidkl")
+        self.assertEqual(link.socmed_account.handle, "askrapidkl")
 
     def test_a_top_level_includes_expansion_is_still_accepted(self):
         # The defensive fallback: a differently-shaped delivery must keep working.
-        with mock.patch(
-            "incident.services.x_webhooks.resolve_handle_for_user_id",
+        with mock.patch.object(
+            official_posts,
+            "_get_json",
             side_effect=AssertionError("network must not be used"),
         ):
             result = ingest_webhook_payload(
@@ -3726,7 +4106,7 @@ class XWebhookHandleResolutionTests(TestCase):
         self.assertEqual(result.ingested, 1)
         self.assertEqual(result.unresolved, 0)
         link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
-        self.assertEqual(link.source_handle, "askrapidkl")
+        self.assertEqual(link.socmed_account.handle, "askrapidkl")
 
     def test_the_nested_includes_wins_over_a_top_level_one(self):
         payload = xaa_post_create_payload(
@@ -3736,16 +4116,18 @@ class XWebhookHandleResolutionTests(TestCase):
             top_level_username="askrapidkl_old",
         )
 
-        self.assertEqual(_usernames_by_id(payload), {WEBHOOK_AUTHOR_ID: "askrapidkl"})
+        users = _users_by_id(payload)
+        self.assertIn(WEBHOOK_AUTHOR_ID, users)
+        self.assertEqual(users[WEBHOOK_AUTHOR_ID]["username"], "askrapidkl")
 
         result = ingest_webhook_payload(payload)
 
         link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
-        self.assertEqual(link.source_handle, "askrapidkl")
+        self.assertEqual(link.socmed_account.handle, "askrapidkl")
         self.assertEqual(result.ingested, 1)
 
     def test_a_malformed_includes_expansion_is_tolerated(self):
-        # Anything unparseable must degrade to the reverse lookup, not raise.
+        # Anything unparseable must degrade to the user-id lookup, not raise.
         for includes in (
             {},
             {"users": None},
@@ -3756,7 +4138,7 @@ class XWebhookHandleResolutionTests(TestCase):
             with self.subTest(includes=includes):
                 payload = xaa_post_create_payload(username=None)
                 payload["data"]["includes"] = includes
-                self.assertEqual(_usernames_by_id(payload), {})
+                self.assertEqual(_users_by_id(payload), {})
 
     def test_an_incomplete_user_expansion_is_skipped(self):
         payload = xaa_post_create_payload(username=None)
@@ -3770,66 +4152,84 @@ class XWebhookHandleResolutionTests(TestCase):
             ]
         }
 
-        self.assertEqual(_usernames_by_id(payload), {WEBHOOK_AUTHOR_ID: "askrapidkl"})
+        users = _users_by_id(payload)
+        self.assertEqual(set(users), {WEBHOOK_AUTHOR_ID})
+        # The whole user object is kept verbatim; only the validity check
+        # strips the surrounding whitespace.
+        self.assertEqual(users[WEBHOOK_AUTHOR_ID]["username"], " @askrapidkl ")
+        self.assertEqual(users[WEBHOOK_AUTHOR_ID]["id"], WEBHOOK_AUTHOR_ID)
 
-    @override_settings(OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"])
-    def test_without_the_expansion_the_filter_user_id_drives_the_reverse_lookup(self):
-        # A user id of its own per test: a positive match is cached forever, so
-        # reusing one id would let the previous test decide this one's answer.
-        author_id = "7100000000000000001"
-        payload = xaa_post_create_payload(
-            author_id=author_id, username=None, filter_user_id=author_id
-        )
-
-        with mock.patch.object(
-            official_posts, "_resolve_user_id", return_value=author_id
-        ) as resolve:
-            result = ingest_webhook_payload(payload)
-
-        # Bounded: one comparison per tracked handle, then a positive cache.
-        self.assertEqual(
-            [call.args[0] for call in resolve.call_args_list],
-            ["askrapidkl"],
-        )
-        self.assertEqual(result.ingested, 1)
-        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
-        self.assertEqual(link.source_handle, "askrapidkl")
-
-    @override_settings(OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"])
-    def test_a_handle_whose_lookup_fails_does_not_abort_the_others(self):
-        author_id = "7100000000000000002"
-
-        with mock.patch.object(
-            official_posts,
-            "_resolve_user_id",
-            side_effect=[
-                official_posts.OfficialPostFetchError("X API error: HTTP 429"),
-                author_id,
-            ],
-        ):
-            # The warning is the service's, not the webhook parser's: it is
-            # logged where the per-handle lookup actually failed.
-            with self.assertLogs("incident.services.official_posts", level="WARNING"):
-                result = ingest_webhook_payload(
-                    xaa_post_create_payload(
-                        author_id=author_id, username=None, filter_user_id=author_id
-                    )
-                )
-
-        self.assertEqual(result.ingested, 1)
-        self.assertEqual(result.unresolved, 0)
-
-    @override_settings(OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"])
-    def test_an_author_with_no_tracked_handle_is_counted_and_dropped(self):
-        # Tracked handles resolve to some *other* id, so nothing matches.
-        author_id = "7100000000000000003"
-
-        with mock.patch.object(
-            official_posts, "_resolve_user_id", return_value="7100000000000000004"
+    def test_a_seeded_user_id_resolves_without_a_profile_sweep(self):
+        # The migration-0029 account already carries its user_id, so a delivery
+        # with no expansion resolves by user_id alone — no sweep, no network.
+        with (
+            mock.patch.object(
+                official_posts,
+                "_get_json",
+                side_effect=AssertionError("network must not be used"),
+            ),
+            mock.patch(
+                "incident.services.x_webhooks.sync_account_profiles",
+                side_effect=AssertionError("a profile sweep must not run here"),
+            ),
         ):
             result = ingest_webhook_payload(
                 xaa_post_create_payload(
+                    author_id=SEEDED_ASKRAPIDKL_USER_ID, username=None
+                )
+            )
+
+        self.assertEqual(result.ingested, 1)
+        self.assertEqual(result.unresolved, 0)
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.assertEqual(link.socmed_account.handle, "askrapidkl")
+
+    def test_an_unknown_user_id_gets_one_bounded_sweep_then_retries(self):
+        # Bounded: one profile sweep, then the user-id lookup is retried once.
+        # The sweep registers the row (resolving accounts whose user_id is
+        # empty), and that row is what makes the retry resolve — never a second
+        # sweep, never a direct API call from the webhook path.
+        author_id = "7100000000000000001"
+        agency = Agency.objects.get(name=UNASSIGNED_AGENCY_NAME)
+
+        def sweep():
+            SocMedAccount.objects.create(
+                agency=agency,
+                platform=IngestPlatform.X,
+                handle="brandnew",
+                user_id=author_id,
+            )
+            return 1
+
+        with mock.patch(
+            "incident.services.x_webhooks.sync_account_profiles", side_effect=sweep
+        ) as sync:
+            result = ingest_webhook_payload(
+                xaa_post_create_payload(
                     author_id=author_id, username=None, filter_user_id=author_id
+                )
+            )
+
+        self.assertEqual(sync.call_count, 1)
+        self.assertEqual(result.events, 1)
+        self.assertEqual(result.ingested, 1)
+        self.assertEqual(result.unresolved, 0)
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.assertEqual(link.socmed_account.handle, "brandnew")
+
+    def test_the_filter_hint_never_overrides_the_real_author(self):
+        # The subscription filter's user_id is only a fallback: a reply by a
+        # different account must not be attributed to the tracked handle.
+        author_id = "7100000000000000003"
+
+        with mock.patch(
+            "incident.services.x_webhooks.sync_account_profiles", return_value=0
+        ):
+            result = ingest_webhook_payload(
+                xaa_post_create_payload(
+                    author_id=author_id,
+                    username=None,
+                    filter_user_id=SEEDED_ASKRAPIDKL_USER_ID,
                 )
             )
 
@@ -3840,29 +4240,24 @@ class XWebhookHandleResolutionTests(TestCase):
         self.assertEqual(result.unresolved, 1)
         self.assertEqual(SocialMediaLink.objects.count(), 0)
 
-    @override_settings(OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"])
-    def test_resolve_handle_caches_only_a_positive_match(self):
-        matched_id = "7100000000000000005"
-        missed_id = "7100000000000000006"
+    def test_an_unresolvable_author_is_counted_and_dropped(self):
+        with mock.patch(
+            "incident.services.x_webhooks.sync_account_profiles", return_value=0
+        ):
+            with self.assertLogs(
+                "incident.services.x_webhooks", level="WARNING"
+            ) as logs:
+                result = ingest_webhook_payload(
+                    xaa_post_create_payload(
+                        author_id="7100000000000000002", username=None
+                    )
+                )
 
-        with mock.patch.object(
-            official_posts, "_resolve_user_id", return_value=matched_id
-        ) as resolve:
-            self.assertEqual(resolve_handle_for_user_id(matched_id), "askrapidkl")
-            # Second call is served from the cache: no comparison at all.
-            self.assertEqual(resolve_handle_for_user_id(matched_id), "askrapidkl")
-        self.assertEqual(resolve.call_count, 1)
-
-        # A miss is never cached, so widening OFFICIAL_POST_HANDLES later starts
-        # working without a cache flush — two calls, two walks of the handles.
-        with mock.patch.object(
-            official_posts, "_resolve_user_id", return_value="7100000000000000007"
-        ) as resolve:
-            self.assertIsNone(resolve_handle_for_user_id(missed_id))
-            self.assertIsNone(resolve_handle_for_user_id(missed_id))
-        self.assertEqual(resolve.call_count, 2 * len(settings.OFFICIAL_POST_HANDLES))
-
-        self.assertIsNone(resolve_handle_for_user_id(""))
+        self.assertEqual(result.events, 1)
+        self.assertEqual(result.ingested, 0)
+        self.assertEqual(result.unresolved, 1)
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.assertTrue(any("no known account" in line for line in logs.output))
 
 
 class XWebhookEntityDecodingTests(TestCase):
@@ -3896,32 +4291,18 @@ class XWebhookEntityDecodingTests(TestCase):
 
 
 @no_debug_toolbar
-@override_settings(
-    # Same reasoning as XWebhookHandleResolutionTests: the deprecated AAA
-    # deliveries resolve their handle by reverse lookup, and a cache left in the
-    # shared Redis by an earlier run would silently skip that lookup.
-    CACHES={
-        "default": {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "x-webhook-delivery-view",
-        }
-    }
-)
 class XWebhookDeliveryViewTests(TestCase):
     """``POST /webhooks/x-api`` — verify, ingest, acknowledge inside 10 seconds."""
 
     BASE_SETTINGS = {
         "OFFICIAL_POST_INGESTION_ENABLED": True,
         "OFFICIAL_POST_POLLING_ENABLED": False,
-        "OFFICIAL_POST_HANDLES": ["askrapidkl"],
         "X_API_OAUTH2_CLIENT_SECRET": "",
         "X_API_SECRET_KEY": TEST_LEGACY_SECRET,
         "TELEGRAM_ADMIN_CHAT_ID": "-1001234",
     }
 
     def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
         # The symbol incident.views imported, so the enqueue is observable and
         # no broker is contacted.
         self.notify = mock.patch("incident.views.notify_official_post_links").start()
@@ -3974,9 +4355,9 @@ class XWebhookDeliveryViewTests(TestCase):
         # The provider object is kept whole for the export — still encoded.
         self.assertEqual(link.raw_payload["text"], WEBHOOK_POST_TEXT)
         # The handle comes from includes.users; the permalink is built from it.
-        self.assertEqual(link.source_handle, "askrapidkl")
+        self.assertEqual(link.socmed_account.handle, "askrapidkl")
         self.assertEqual(link.url, f"https://x.com/askrapidkl/status/{WEBHOOK_POST_ID}")
-        self.assertEqual(link.platform, IngestPlatform.X)
+        self.assertEqual(link.socmed_account.platform, IngestPlatform.X)
         # The post's own time, stored as naive local because USE_TZ is off.
         self.assertEqual(
             link.posted_at,
@@ -4111,33 +4492,37 @@ class XWebhookDeliveryViewTests(TestCase):
         self.notify.delay.assert_not_called()
 
     def test_the_deprecated_aaa_shape_is_ingested(self):
-        with mock.patch.object(
-            official_posts, "_resolve_user_id", return_value=WEBHOOK_AUTHOR_ID
-        ):
-            response = self._post(aaa_post_create_payload())
+        # The AAA delivery carries the seeded account's user_id, so the registry
+        # resolves it with no network and no profile sweep.
+        response = self._post(
+            aaa_post_create_payload(user_id=SEEDED_ASKRAPIDKL_USER_ID)
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["ingested"], 1)
         link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
-        self.assertEqual(link.source_handle, "askrapidkl")
+        self.assertEqual(link.socmed_account.handle, "askrapidkl")
         self.assertEqual(link.url, f"https://x.com/askrapidkl/status/{WEBHOOK_POST_ID}")
         self.notify.delay.assert_called_once()
 
     def test_the_aaa_shape_resolves_the_handle_from_for_user_id(self):
-        # No author key at all: for_user_id is the only id the delivery carries.
-        payload = aaa_post_create_payload()
+        # No author key at all: for_user_id is the only id the delivery carries,
+        # and it identifies a seeded account by user_id.
+        payload = aaa_post_create_payload(for_user_id=SEEDED_ASKRAPIDKL_USER_ID)
         payload["tweet_create_events"][0].pop("user_id")
 
-        with mock.patch.object(
-            official_posts, "_resolve_user_id", return_value=WEBHOOK_AUTHOR_ID
-        ) as resolve:
-            response = self._post(payload)
+        response = self._post(payload)
 
         self.assertEqual(response.json()["ingested"], 1)
-        self.assertEqual(resolve.call_args.args[0], "askrapidkl")
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.assertEqual(link.socmed_account.handle, "askrapidkl")
 
     def test_an_unresolvable_handle_is_200_counted_and_logged(self):
-        with mock.patch.object(official_posts, "_resolve_user_id", return_value="999"):
+        # An id no seeded account carries: the bounded profile sweep runs once
+        # (resolving nothing), the delivery is counted unresolved and dropped.
+        with mock.patch(
+            "incident.services.x_webhooks.sync_account_profiles", return_value=0
+        ):
             with self.assertLogs(
                 "incident.services.x_webhooks", level="WARNING"
             ) as logs:
@@ -4150,7 +4535,7 @@ class XWebhookDeliveryViewTests(TestCase):
         self.assertEqual(response.json()["ingested"], 0)
         self.assertEqual(SocialMediaLink.objects.count(), 0)
         self.notify.delay.assert_not_called()
-        self.assertTrue(any("no tracked handle" in line for line in logs.output))
+        self.assertTrue(any("no known account" in line for line in logs.output))
 
     def test_a_body_that_is_not_json_is_400(self):
         raw = b"this is not json"
@@ -4196,27 +4581,24 @@ class XWebhookDeliveryViewTests(TestCase):
 
     def test_two_posts_in_one_delivery_are_ingested_and_notified_together(self):
         payload = {
-            "for_user_id": WEBHOOK_AUTHOR_ID,
+            "for_user_id": SEEDED_ASKRAPIDKL_USER_ID,
             "tweet_create_events": [
                 {
                     "id": WEBHOOK_POST_ID,
                     "text": WEBHOOK_POST_TEXT,
                     "created_at": WEBHOOK_CREATED_AT,
-                    "user_id": WEBHOOK_AUTHOR_ID,
+                    "user_id": SEEDED_ASKRAPIDKL_USER_ID,
                 },
                 {
                     "id": "1791552310047416321",
                     "text": "second post",
                     "created_at": WEBHOOK_CREATED_AT,
-                    "user_id": WEBHOOK_AUTHOR_ID,
+                    "user_id": SEEDED_ASKRAPIDKL_USER_ID,
                 },
             ],
         }
 
-        with mock.patch.object(
-            official_posts, "_resolve_user_id", return_value=WEBHOOK_AUTHOR_ID
-        ):
-            response = self._post(payload)
+        response = self._post(payload)
 
         self.assertEqual(response.json()["events"], 2)
         self.assertEqual(response.json()["ingested"], 2)
@@ -4235,7 +4617,7 @@ class NotifyOfficialPostLinksTaskTests(TestCase):
     def setUp(self):
         self.author = get_system_author()
         posts = load_fixture_posts(str(SAMPLE_FIXTURE))
-        ingest_posts(posts, handle="askrapidkl", author=self.author)
+        ingest_posts(posts, author=self.author)
         self.ids = list(
             SocialMediaLink.objects.order_by("id").values_list("id", flat=True)
         )
@@ -4309,7 +4691,6 @@ class XWebhookCommandTests(TestCase):
         "X_API_BEARER_TOKEN": TOKEN,
         "X_API_OAUTH2_CLIENT_SECRET": TEST_OAUTH2_SECRET,
         "X_API_SECRET_KEY": TEST_LEGACY_SECRET,
-        "OFFICIAL_POST_HANDLES": ["askrapidkl", "myrapidkl"],
     }
 
     def _run(self, *args, **kwargs):
@@ -4447,19 +4828,16 @@ class XWebhookCommandTests(TestCase):
 
     def test_subscribe_creates_one_subscription_per_handle(self):
         with override_settings(**self.SETTINGS):
-            with (
-                mock.patch.object(
-                    official_posts, "_resolve_user_id", side_effect=["111", "222"]
-                ),
-                # One scripted response per handle: a second call with an empty
-                # script would be a StopIteration, not a silent pass.
-                self._patched(
-                    [
-                        fake_x_response(200, {"data": {"id": "5001"}}),
-                        fake_x_response(200, {"data": {"id": "5002"}}),
-                    ]
-                ) as request,
-            ):
+            # One scripted response per handle: a second call with an empty
+            # script would be a StopIteration, not a silent pass. The seeded
+            # accounts already carry their user_ids, so no API lookup happens
+            # before the subscription calls.
+            with self._patched(
+                [
+                    fake_x_response(200, {"data": {"id": "5001"}}),
+                    fake_x_response(200, {"data": {"id": "5002"}}),
+                ]
+            ) as request:
                 out, _ = self._run(
                     "subscribe", "askrapidkl", "myrapidkl", "--webhook-id", "18923"
                 )
@@ -4471,23 +4849,22 @@ class XWebhookCommandTests(TestCase):
             first.kwargs["json"],
             {
                 "event_type": "post.create",
-                "filter": {"user_id": "111"},
+                "filter": {"user_id": SEEDED_ASKRAPIDKL_USER_ID},
                 "webhook_id": "18923",
                 "tag": "official-posts",
             },
         )
-        self.assertEqual(second.kwargs["json"]["filter"], {"user_id": "222"})
-        self.assertIn("subscribed handle=askrapidkl user_id=111", out)
+        self.assertEqual(
+            second.kwargs["json"]["filter"], {"user_id": SEEDED_MYRAPIDKL_USER_ID}
+        )
+        self.assertIn(
+            f"subscribed handle=askrapidkl user_id={SEEDED_ASKRAPIDKL_USER_ID}", out
+        )
         self.assertNotIn(self.TOKEN, out)
 
     def test_subscribe_strips_a_leading_at_sign(self):
         with override_settings(**self.SETTINGS):
-            with (
-                mock.patch.object(
-                    official_posts, "_resolve_user_id", return_value="111"
-                ),
-                self._patched([fake_x_response(200, {"data": {"id": "5001"}})]),
-            ):
+            with self._patched([fake_x_response(200, {"data": {"id": "5001"}})]):
                 out, _ = self._run("subscribe", "@askrapidkl", "--webhook-id", "18923")
 
         self.assertIn("handle=askrapidkl", out)
@@ -4503,19 +4880,12 @@ class XWebhookCommandTests(TestCase):
 
     def test_subscribe_uses_the_only_registered_webhook_when_none_is_given(self):
         with override_settings(**self.SETTINGS):
-            with (
-                mock.patch.object(
-                    official_posts, "_resolve_user_id", return_value="111"
-                ),
-                self._patched(
-                    [
-                        fake_x_response(
-                            200, {"data": [{"id": "18923", "valid": True}]}
-                        ),
-                        fake_x_response(200, {"data": {"id": "5001"}}),
-                    ]
-                ) as request,
-            ):
+            with self._patched(
+                [
+                    fake_x_response(200, {"data": [{"id": "18923", "valid": True}]}),
+                    fake_x_response(200, {"data": {"id": "5001"}}),
+                ]
+            ) as request:
                 out, _ = self._run("subscribe", "askrapidkl")
 
         self.assertIn("subscribing to webhook id=18923", out)
@@ -4613,11 +4983,14 @@ class XWebhookCommandTests(TestCase):
         self.assertIn("no webhook id", str(caught.exception))
 
     def test_an_unresolvable_handle_is_a_sanitized_command_error(self):
+        # ``_user_id`` resolves through the *service's* functions (imported
+        # function-locally inside the command), so the lookup is patched at its
+        # source. The unknown handle auto-registers under Unassigned, then the
+        # profile lookup fails and the subscription is refused.
         with override_settings(**self.SETTINGS):
             with (
-                mock.patch.object(
-                    official_posts,
-                    "_resolve_user_id",
+                mock.patch(
+                    "incident.services.official_posts.ensure_user_profile",
                     side_effect=OfficialPostFetchError("X API error: HTTP 404"),
                 ),
                 self._patched([]) as request,

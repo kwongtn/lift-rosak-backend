@@ -11,9 +11,11 @@ from ordered_model.admin import (
 
 from generic.views import GeometricForm
 from incident.models import (
+    Agency,
     CalendarIncident,
     CalendarIncidentCategory,
     CalendarIncidentChronology,
+    SocMedAccount,
     StationIncident,
     VehicleIncident,
 )
@@ -194,8 +196,30 @@ class CalendarIncidentCategoryAdmin(OrderedModelAdmin):
     )
 
 
+class AgencyAdmin(admin.ModelAdmin):
+    search_fields = ("name", "short_name")
+
+
+class SocMedAccountAdmin(admin.ModelAdmin):
+    list_display = (
+        "__str__",
+        "agency",
+        "platform",
+        "handle",
+        "user_id",
+        "display_name",
+        "is_enabled",
+        "resolved_at",
+    )
+    list_filter = ("platform", "is_enabled", "agency")
+    search_fields = ("handle", "user_id", "display_name")
+    autocomplete_fields = ("agency",)
+
+
 admin.site.register(VehicleIncident, VehicleIncidentAdmin)
 admin.site.register(StationIncident, StationIncidentAdmin)
 admin.site.register(CalendarIncident, CalendarIncidentAdmin)
 admin.site.register(CalendarIncidentChronology, CalendarIncidentChronologyAdmin)
 admin.site.register(CalendarIncidentCategory, CalendarIncidentCategoryAdmin)
+admin.site.register(Agency, AgencyAdmin)
+admin.site.register(SocMedAccount, SocMedAccountAdmin)

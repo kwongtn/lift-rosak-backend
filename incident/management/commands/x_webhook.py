@@ -348,20 +348,39 @@ class Command(BaseCommand):
         return ids[0]
 
     def _user_id(self, handle: str) -> str:
-        """Resolve ``handle`` to its X user id through the shared lookup.
+        """Resolve ``handle`` to its X user id through the shared registry.
 
-        Reuses the ingestion service's own (cached) resolution rather than a
-        second one, so a subscription can never be created against a different
-        id than the one ingestion polls for.
+        Reuses the ingestion service's own resolution path (``resolve_account``
+        + ``ensure_user_profile``) rather than a second one, so a subscription
+        can never be created against a different id than the one ingestion
+        polls for. An unknown handle is auto-registered under the ``Unassigned``
+        agency, then ``ensure_user_profile`` — the only live lookup — fills the
+        ``user_id``; when the profile cannot be resolved the subscription is
+        refused with a ``CommandError``.
 
-        The import is function-local on purpose: a module-level binding is
-        frozen at import time, which makes the lookup impossible to stub at its
-        source and lets a test reach the real X API with a fake token.
+        The imports are function-local on purpose: a module-level binding is
+        frozen at import time, which makes the lookups impossible to stub at
+        their source and lets a test reach the real X API with a fake token.
         """
-        from incident.services.official_posts import _resolve_user_id
+        from incident.enums import IngestPlatform
+        from incident.services.official_posts import (
+            ensure_user_profile,
+            resolve_account,
+        )
 
+        account = resolve_account(IngestPlatform.X, handle=handle, create=True)
+        if account is None:
+            raise CommandError(
+                f"could not register a registry account for @{handle}; no user "
+                "id could be resolved for the subscription"
+            )
         try:
-            return _resolve_user_id(handle)
+            account = ensure_user_profile(account)
         except OfficialPostFetchError as exc:
             # Already sanitized by the service layer: status + reason only.
             raise CommandError(f"could not resolve @{handle}: {exc}") from None
+        if not account.user_id:
+            raise CommandError(
+                f"could not resolve @{handle}: the profile lookup returned no user id"
+            )
+        return account.user_id
