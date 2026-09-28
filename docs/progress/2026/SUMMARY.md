@@ -1,13 +1,14 @@
 # Yearly Summary - 2026
 
-Total commits: 109
+Total commits: 110
 
 ## Monthly Breakdown
 
-### 2026-09 (37 commits)
+### 2026-09 (38 commits)
 
-#### Incident (21 commits)
+#### Incident (22 commits)
 
+- (this commit) [feat](incident): official-post polling is opt-in — `OFFICIAL_POST_POLLING_ENABLED` (default off; webhook path is primary) gates both the beat entry (`official_post_polling_entry()`) and the task (`{"skipped": "polling_disabled"}`); all existing master-flag tests updated + `official_post_polling_entry()`/polling-disabled tests added
 - (this commit) [feat](incident): official-post Phase 3 — `export_official_posts` writes the ingested archive as JSONL/CSV (streamed, stable order, `raw_payload` opt-in, `--dry-run`, optional private `push_to_hub`); 28 tests, + docs (naive-local `posted_at` trap)
 - (this commit) [feat](incident): official-post Phase 2 — Telegram the admin per newly ingested post (reply `/approve`-able via `send_message(return_log=True)` + `TelegramSocialMediaLinkLog`), and exclude automated `PENDING_APPROVAL` posts from the public feed (+ docs: corrected the stale "outbound is ungoverned" claims in APPS.md and the component docs)
 - **c23e7bc** [feat](incident): official post ingestion foundation
@@ -172,6 +173,7 @@ Total commits: 109
 
 ### Major Features & Refactors
 
+- **2026-09-28** (this commit) [feat](incident): official-post polling made explicitly opt-in — `OFFICIAL_POST_POLLING_ENABLED` (env, default `false`) gates the beat entry via the importable `official_post_polling_entry()` helper and hard-stops the task with `{"skipped": "polling_disabled"}`; the webhook receiver (separate follow-up) is the primary path
 - **2026-09-26** (this commit) [feat](incident): official-post dataset export — `export_official_posts` streams the `is_automated=True` rows to JSONL/CSV (`--handle/--since/--until/--format/--output/--include-raw/--dry-run/--push-to-hub`) in a stable `posted_at, post_id, id` order, with an optional lazy-imported private HuggingFace push; 367-test full suite OK
 - **2026-09-26** (this commit) [feat](incident): scheduled official-post ingestion — `incident.tasks.ingest_official_posts` on a 5-minute beat (`expires` 240 / `time_limit` 180), the `ingest_official_posts` management command for backfill (`--handle/--since/--until/--limit/--fixture/--dry-run`), and 5 test classes; 323-test full suite OK
 - **2026-09-26** **c23e7bc** [feat](incident): official post ingestion foundation — `IngestPlatform` + `SocialMediaLink` ingestion fields with a partial unique constraint on `(platform, post_id)`, the bounded `services/official_posts.py` X API client, and the `system:official-ingest` service user

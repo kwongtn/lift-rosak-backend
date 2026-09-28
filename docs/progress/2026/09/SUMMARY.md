@@ -1,17 +1,17 @@
 # Monthly Summary - September 2026
 
-Total commits: 37
+Total commits: 38
 
 ## Commit Type Distribution
 
-- feat: 27
+- feat: 28
 - fix: 6
 - test: 2
 - chore: 2
 
 ## By Module/Feature
 
-### Incident (21 commits)
+### Incident (22 commits)
 
 - (this commit) [feat](incident): official-post Phase 3 — `export_official_posts` writes the ingested archive as JSONL/CSV (streamed, stable order, `raw_payload` opt-in, `--dry-run`, optional private `push_to_hub`); 28 tests, + docs (naive-local `posted_at` trap)
 - (this commit) [feat](incident): official-post Phase 2 — Telegram the admin per newly ingested post (reply `/approve`-able via `send_message(return_log=True)` + `TelegramSocialMediaLinkLog`), and exclude automated `PENDING_APPROVAL` posts from the public feed (+ docs: corrected the stale "outbound is ungoverned" claims in APPS.md and the component docs)

@@ -53,6 +53,23 @@ if "spotting" in settings.INSTALLED_APPS:
         "schedule": crontab(hour="0", minute="0"),
     }
 
+
+# Poll the tracked official X accounts. Ships inert: the task itself checks
+# OFFICIAL_POST_INGESTION_ENABLED, OFFICIAL_POST_POLLING_ENABLED and
+# X_API_BEARER_TOKEN and no-ops without them. expires < the 5-minute period so
+# a wedged run is not re-dispatched on top of itself; time_limit caps a hung
+# fetch.
+def official_post_polling_entry() -> dict | None:
+    """The opt-in beat entry for official-post polling, or None when disabled."""
+    if not settings.OFFICIAL_POST_POLLING_ENABLED:
+        return None
+    return {
+        "task": "incident.tasks.ingest_official_posts",
+        "schedule": crontab(minute="*/5"),
+        "options": {"expires": 240, "time_limit": 180},
+    }
+
+
 if "incident" in settings.INSTALLED_APPS:
     beat_schedule["purge_soft_deleted_incidents"] = {
         "task": "incident.tasks.purge_soft_deleted_incidents",
@@ -62,15 +79,9 @@ if "incident" in settings.INSTALLED_APPS:
         "task": "incident.tasks.purge_rejected_incidents",
         "schedule": crontab(hour="3", minute="30"),
     }
-    # Poll the tracked official X accounts. Ships inert: the task itself checks
-    # OFFICIAL_POST_INGESTION_ENABLED and X_API_BEARER_TOKEN and no-ops without
-    # them. expires < the 5-minute period so a wedged run is not re-dispatched
-    # on top of itself; time_limit caps a hung fetch.
-    beat_schedule["ingest_official_posts"] = {
-        "task": "incident.tasks.ingest_official_posts",
-        "schedule": crontab(minute="*/5"),
-        "options": {"expires": 240, "time_limit": 180},
-    }
+    entry = official_post_polling_entry()
+    if entry is not None:
+        beat_schedule["ingest_official_posts"] = entry
 
 app.conf.beat_schedule = beat_schedule
 

@@ -201,6 +201,13 @@ backend is authoritative.
 **Fix**: `bucket_hourly` returns `[]` when the line has no report in the service day (preserving the frontend's "No data" placeholder), otherwise all `HOURS_IN_SERVICE_DAY` (24) buckets from the service-day start through 02:00, zero-filling hours without reports. Docstrings corrected; the pytest mirror updated and runnable coverage added in `incident/tests.py::LineStatusHistoryTests`.
 **Prevention**: Fixed-length domain ranges (a 24-hour service day) must come from the domain constant, never from `now`; keep the empty state distinguishable from "all-zero data" and assert both shapes at the service boundary.
 
+### [2026-09-28] incident: the official-post poll's opt-in is read twice with different lifetimes — only **celerybeat** dispatch sees it — TRAP
+
+**Problem**: `OFFICIAL_POST_POLLING_ENABLED` (default off) is read in two places with different lifetimes. `rosak/celery.py` builds `beat_schedule` **at import**, so toggling the env var and restarting only `celeryworker` changes nothing — the 5-minute `ingest_official_posts` tick keeps (or never starts) running until `celerybeat` is restarted. Meanwhile `incident/tasks.py` re-reads the setting on every run, so a manually-enqueued run and a beat-dispatched run can disagree with the value the operator just toggled.
+**Root Cause**: The schedule is a module-level dict evaluated once at import; the task guard is a per-run read. The two layers are deliberately independent (dispatch gate + execution gate), which makes "did my env change apply?" ambiguous if only one service is restarted.
+**Fix**: _By design, documented._ The settings comment and the `docs/APPS.md` beat table both state that toggling requires restarting `celerybeat`. Verify with `docker compose exec app python -c "from rosak.celery import beat_schedule; print('ingest_official_posts' in beat_schedule)"` after the restart.
+**Prevention**: Every new env-gated beat entry must state the restart requirement in its settings comment and the APPS.md beat table; never verify a schedule toggle by looking at the worker alone.
+
 ---
 
 ## spotting

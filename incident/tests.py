@@ -15,6 +15,7 @@ from unittest import mock
 from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import async_to_sync
+from celery.schedules import crontab
 from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.core.cache import cache
@@ -59,6 +60,7 @@ from incident.services.official_posts import (
 from incident.services.urls import canonicalize_url
 from incident.tasks import TELEGRAM_MAX_TEXT_LENGTH, ingest_official_posts
 from operation.models import Line, Station, Vehicle, VehicleType
+from rosak.celery import official_post_polling_entry
 from rosak.context import ContextLoaders
 from rosak.schema import schema
 from telegram_provider.enums import MessageDirection
@@ -1552,7 +1554,8 @@ class OfficialPostIngestTests(TestCase):
 
 
 class OfficialPostTaskGuardTests(TestCase):
-    """The two env guards (4.8.5) — no request, no row, no crash."""
+    """The env guards (master flag, opt-in polling, token) — no request, no
+    row, no crash."""
 
     @override_settings(OFFICIAL_POST_INGESTION_ENABLED=False, X_API_BEARER_TOKEN="t")
     def test_disabled_flag_makes_no_request_and_writes_nothing(self):
@@ -1577,7 +1580,11 @@ class OfficialPostTaskGuardTests(TestCase):
         self.assertEqual(SocialMediaLink.objects.count(), 0)
         self.assertTrue(any("disabled" in line for line in logs.output))
 
-    @override_settings(OFFICIAL_POST_INGESTION_ENABLED=True, X_API_BEARER_TOKEN="")
+    @override_settings(
+        OFFICIAL_POST_INGESTION_ENABLED=True,
+        OFFICIAL_POST_POLLING_ENABLED=True,
+        X_API_BEARER_TOKEN="",
+    )
     def test_enabled_without_a_token_is_a_clean_no_op(self):
         with (
             mock.patch.object(
@@ -1599,6 +1606,7 @@ class OfficialPostTaskGuardTests(TestCase):
 
     @override_settings(
         OFFICIAL_POST_INGESTION_ENABLED=True,
+        OFFICIAL_POST_POLLING_ENABLED=True,
         X_API_BEARER_TOKEN="t",
         OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"],
     )
@@ -1627,6 +1635,62 @@ class OfficialPostTaskGuardTests(TestCase):
         # since_id is the incremental filter, read from that handle's own rows.
         self.assertIsNone(fetch.call_args_list[0].kwargs["since_id"])
         self.assertEqual(SocialMediaLink.objects.count(), 2)
+
+
+class OfficialPostPollingDisabledTests(TestCase):
+    """Polling is opt-in (4.6) — OFFICIAL_POST_POLLING_ENABLED already ships
+    false, so the beat task must refuse to run even with the master flag on and
+    a token set. No request, no row, no crash."""
+
+    @override_settings(
+        OFFICIAL_POST_INGESTION_ENABLED=True,
+        OFFICIAL_POST_POLLING_ENABLED=False,
+        X_API_BEARER_TOKEN="t",
+    )
+    def test_polling_disabled_no_ops_even_with_a_token_and_the_master_on(self):
+        with (
+            mock.patch.object(
+                official_posts, "_get_json", side_effect=AssertionError("HTTP called")
+            ) as get_json,
+            mock.patch(
+                "incident.tasks.fetch_user_posts",
+                side_effect=AssertionError("fetch called"),
+            ) as fetch,
+            self.assertLogs("incident.tasks", level="INFO") as logs,
+        ):
+            result = ingest_official_posts()
+
+        self.assertEqual(result, {"skipped": "polling_disabled"})
+        fetch.assert_not_called()
+        get_json.assert_not_called()
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.assertTrue(any("polling" in line for line in logs.output))
+
+
+class OfficialPostPollingEntryTests(TestCase):
+    """The opt-in beat entry builder in rosak/celery.py. Reads the live setting
+    at call time, so override_settings covers both branches without reloading
+    the module."""
+
+    @override_settings(OFFICIAL_POST_POLLING_ENABLED=False)
+    def test_off_means_no_beat_entry(self):
+        # False is the shipping default; the beat schedule must not carry the
+        # polling tick until somebody opts in.
+        self.assertIsNone(official_post_polling_entry())
+
+    @override_settings(
+        OFFICIAL_POST_POLLING_ENABLED=True,
+        OFFICIAL_POST_INGESTION_ENABLED=True,
+        X_API_BEARER_TOKEN="t",
+    )
+    def test_on_returns_the_exact_beat_entry(self):
+        entry = official_post_polling_entry()
+
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["task"], "incident.tasks.ingest_official_posts")
+        self.assertIsInstance(entry["schedule"], crontab)
+        self.assertEqual(entry["schedule"], crontab(minute="*/5"))
+        self.assertEqual(entry["options"], {"expires": 240, "time_limit": 180})
 
 
 class OfficialPostBoundedFetchTests(TestCase):
@@ -1774,6 +1838,7 @@ class OfficialPostNotificationTests(TestCase):
         ``send_message`` (only the PTB application is then faked)."""
         task_settings = {
             "OFFICIAL_POST_INGESTION_ENABLED": True,
+            "OFFICIAL_POST_POLLING_ENABLED": True,
             "X_API_BEARER_TOKEN": "t",
             "OFFICIAL_POST_HANDLES": ["askrapidkl"],
             "TELEGRAM_ADMIN_CHAT_ID": "-1001234",

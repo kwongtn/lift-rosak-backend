@@ -522,6 +522,11 @@ X_API_BEARER_TOKEN = os.environ.get("X_API_BEARER_TOKEN", "")
 OFFICIAL_POST_INGESTION_ENABLED = bool(
     strtobool(os.getenv("OFFICIAL_POST_INGESTION_ENABLED", "false"))
 )
+OFFICIAL_POST_POLLING_ENABLED = bool(
+    strtobool(os.getenv("OFFICIAL_POST_POLLING_ENABLED", "false"))
+)
+# Polling is opt-in; webhooks are the primary path; toggling requires restarting
+# celerybeat (the schedule is built at import).
 OFFICIAL_POST_HANDLES = [
     h.strip()
     for h in os.environ.get("OFFICIAL_POST_HANDLES", "askrapidkl,myrapidkl").split(",")

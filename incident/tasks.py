@@ -268,12 +268,14 @@ def _ingest_handle(handle: str, *, author: User) -> dict[str, Any]:
 def ingest_official_posts() -> dict[str, Any]:
     """Ingest new official X posts for every tracked handle.
 
-    Two env guards come first and both no-op without writing anything or making
+    Three env guards come first and all no-op without writing anything or making
     a request: ``OFFICIAL_POST_INGESTION_ENABLED`` (the kill switch — flipping it
-    is the only thing needed to stop or start ingestion) and
-    ``X_API_BEARER_TOKEN`` (the X API's free tier cannot read, so a paid token is
-    required; there is deliberately no fallback source). A missing system author
-    is *not* swallowed — a misconfigured database should be loud.
+    is the only thing needed to stop or start ingestion),
+    ``OFFICIAL_POST_POLLING_ENABLED`` (polling is opt-in; the webhook path is
+    primary, so this task additionally refuses to run unless polling is enabled)
+    and ``X_API_BEARER_TOKEN`` (the X API's free tier cannot read, so a paid
+    token is required; there is deliberately no fallback source). A missing
+    system author is *not* swallowed — a misconfigured database should be loud.
 
     Returns a totals dict, ``{"skipped": ...}`` when a guard tripped.
     """
@@ -283,6 +285,13 @@ def ingest_official_posts() -> dict[str, Any]:
             "(OFFICIAL_POST_INGESTION_ENABLED=false); nothing fetched or written"
         )
         return {"skipped": "disabled"}
+
+    if not settings.OFFICIAL_POST_POLLING_ENABLED:
+        logger.info(
+            "Official post polling is disabled "
+            "(OFFICIAL_POST_POLLING_ENABLED=false); nothing fetched or written"
+        )
+        return {"skipped": "polling_disabled"}
 
     if not settings.X_API_BEARER_TOKEN:
         logger.warning(

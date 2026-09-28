@@ -114,12 +114,12 @@ graph TD
 
 **Ingress surface** — GraphQL `POST /graphql/` (introspection disabled when `DEBUG=False`); `POST /upload/` (multipart, authenticated by the `Firebase-Auth-Key` header rather than GraphQL context); three DRF chart feeds under `/operation/` (one returns CSV built with `polars`); `POST /telegram_provider/` (self-registering webhook, polling disabled); `/admin/`, `/hijack/`, `/advanced_filters/`, `/mdeditor/`, `/health-check/`; a Sentry tunnel at `/sentry/` and `/version/`. In production, every unmatched path is caught by `custom_view.redirect_view` — a rickroll.
 
-**Celery beat — 9 jobs, all declared centrally in [rosak/celery.py](../rosak/celery.py#L22-L73), none locally:**
+**Celery beat — 9 jobs, all declared centrally in [rosak/celery.py](../rosak/celery.py#L22-L73), none locally — the official-post poll is **opt-in** (`OFFICIAL_POST_POLLING_ENABLED`, default off):**
 
 | Schedule     | Task                                                                         | Owner               |
 | ------------ | ---------------------------------------------------------------------------- | ------------------- |
 | every 1 min  | `cleanup_temporary_media_task` — re-drive stalled uploads, purge `TO_DELETE` | `common`            |
-| every 5 min  | `ingest_official_posts` — pull tracked X accounts into `SocialMediaLink` + Telegram the admin per new post (no-ops unless enabled + token present; notification skipped when `TELEGRAM_ADMIN_CHAT_ID` is blank) | `incident` |
+| every 5 min  | `ingest_official_posts` — pull tracked X accounts into `SocialMediaLink` + Telegram the admin per new post (**opt-in**: not scheduled unless `OFFICIAL_POST_POLLING_ENABLED=true` — webhooks are the primary path; no-ops unless the master flag + token are also set; notification skipped when `TELEGRAM_ADMIN_CHAT_ID` is blank) | `incident` |
 | every 10 min | `cleanup_expired_verification_codes`                                         | `common`            |
 | 01:00        | `aggregate_line_vehicle_status_mtrec_task` — external scrape                 | `chartography`      |
 | 03:00        | `cleanup_telegram_logs` — 30-day retention                                   | `telegram_provider` |
