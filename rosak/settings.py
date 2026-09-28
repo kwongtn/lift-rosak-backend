@@ -519,6 +519,16 @@ FRONTEND_BASE_URL = os.environ.get(
 # higher) plus this flag is what actually starts ingestion. The token is
 # never logged, never echoed and never exposed over GraphQL.
 X_API_BEARER_TOKEN = os.environ.get("X_API_BEARER_TOKEN", "")
+# Webhook signing secrets for /webhooks/x-api (incident/services/x_webhooks.py).
+# Neither is an API credential for calling X: they exist only to prove that an
+# inbound webhook request came from our own registered app. X accepts the OAuth
+# 2.0 Client Secret or, as the legacy fallback, the OAuth 1.0 consumer secret
+# ("API Secret Key" in the developer portal). When both are set the OAuth 2.0
+# secret is preferred, because that is the one X itself signs with by default.
+# Both values are never logged, never echoed, never rendered into a response
+# body and never exposed over GraphQL; only their HMAC output ever leaves here.
+X_API_SECRET_KEY = os.environ.get("X_API_SECRET_KEY", "")
+X_API_OAUTH2_CLIENT_SECRET = os.environ.get("X_API_OAUTH2_CLIENT_SECRET", "")
 OFFICIAL_POST_INGESTION_ENABLED = bool(
     strtobool(os.getenv("OFFICIAL_POST_INGESTION_ENABLED", "false"))
 )

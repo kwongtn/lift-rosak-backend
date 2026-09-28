@@ -1,3 +1,4 @@
+import base64
 import copy
 import csv
 import html
@@ -22,7 +23,7 @@ from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
-from django.test import TestCase, override_settings
+from django.test import TestCase, modify_settings, override_settings
 from django.utils import timezone
 from dotmap import DotMap
 from graphql import GraphQLError
@@ -48,6 +49,7 @@ from incident.models import (
     VehicleIncident,
 )
 from incident.services import official_posts
+from incident.services.errors import OfficialPostFetchError
 from incident.services.line_status import load_line_status_history
 from incident.services.official_posts import (
     RawPost,
@@ -56,9 +58,21 @@ from incident.services.official_posts import (
     ingest_posts,
     latest_post_id,
     load_fixture_posts,
+    resolve_handle_for_user_id,
 )
 from incident.services.urls import canonicalize_url
-from incident.tasks import TELEGRAM_MAX_TEXT_LENGTH, ingest_official_posts
+from incident.services.x_webhooks import (
+    crc_response_token,
+    has_signing_secret,
+    ingest_webhook_payload,
+    sign_body,
+    verify_webhook_signature,
+)
+from incident.tasks import (
+    TELEGRAM_MAX_TEXT_LENGTH,
+    ingest_official_posts,
+    notify_official_post_links,
+)
 from operation.models import Line, Station, Vehicle, VehicleType
 from rosak.celery import official_post_polling_entry
 from rosak.context import ContextLoaders
@@ -1762,7 +1776,12 @@ class OfficialPostBoundedFetchTests(TestCase):
         self.assertEqual(len(pages), official_posts._MAX_PAGES)
         self.assertEqual(len(posts), official_posts._MAX_PAGES)
 
+    @override_settings(X_API_BEARER_TOKEN="test-bearer-token")
     def test_since_id_start_time_and_end_time_reach_the_request(self):
+        # The bearer token is pinned above rather than read from the
+        # environment: secrets.dev.env sets a real one, so asserting against
+        # whatever the operator happened to configure would make this test
+        # env-dependent (and would put that token in a failure message).
         captured = []
 
         def fake_get_json(url, *, params, headers, context):
@@ -1788,7 +1807,7 @@ class OfficialPostBoundedFetchTests(TestCase):
         self.assertEqual(params["end_time"], "2026-09-02T23:59:59+00:00")
         self.assertEqual(params["exclude"], "retweets")
         self.assertEqual(params["max_results"], 5)
-        self.assertEqual(headers["Authorization"], "Bearer ")
+        self.assertEqual(headers["Authorization"], "Bearer test-bearer-token")
 
     # DEBUG=True swaps the default cache for DummyCache (AGENTS.md "local-vs-prod
     # gotcha"), which discards every write — so the cache assertion below needs a
@@ -2906,3 +2925,1250 @@ class ExportOfficialPostsHubPushTests(TestCase):
         pushed.push_to_hub.assert_not_called()
         self.assertIn("rows=3", out)
         self.assertIn("push_to_hub=rosak/rapidkl-official-posts", out)
+
+
+# ---------------------------------------------------------------------------
+# X (Twitter) Activity API webhook receiver
+# ---------------------------------------------------------------------------
+#
+# Every test in this section pins its secrets and flags with explicit
+# ``override_settings``. That is not defensive boilerplate: the dev environment
+# carries *real* X API keys, so a test relying on the shipped defaults would
+# verify signatures against whatever the operator configured — and a failing
+# assertion would print that secret into the test output.
+
+WEBHOOK_URL = "/webhooks/x-api"
+#: Obviously fictitious signing secrets. Real ones never appear in the repo.
+TEST_OAUTH2_SECRET = "test-oauth2-client-secret"
+TEST_LEGACY_SECRET = "test-legacy-consumer-secret"
+#: The XAA filter/author id for the tracked account, and the post it delivered.
+WEBHOOK_AUTHOR_ID = "2244994945"
+WEBHOOK_POST_ID = "1791552310047416320"
+WEBHOOK_POST_TEXT = "Gangguan laluan utama &amp; penyehjangan(types): MTR"
+WEBHOOK_CREATED_AT = "2026-09-28T04:05:00.000Z"
+#: Header name for each signing candidate, kept next to the secret it pairs with
+#: so a test never has to guess which one the app prefers.
+OAUTH2_SIGNATURE_HEADER = "X-Twitter-Webhooks-Signature-Oauth2"
+LEGACY_SIGNATURE_HEADER = "X-Twitter-Webhooks-Signature"
+
+#: Every test class below that drives ``self.client`` needs this. The test runner
+#: sets ``settings.DEBUG = False``, which is why ``rosak.urls`` withholds the
+#: ``__debug__`` routes — but the toolbar's ``SHOW_TOOLBAR_CALLBACK`` closes over
+#: ``rosak.settings.DEBUG``, the *module* global, which the runner does not
+#: touch and which is True in this environment. So the middleware stays active
+#: and reverses the ``djdt`` namespace that is not there, turning every test
+#: client request into ``NoReverseMatch``. Same remedy the other view test
+#: classes in this repo already use.
+no_debug_toolbar = modify_settings(
+    MIDDLEWARE={
+        "remove": ["strawberry_django.middlewares.debug_toolbar.DebugToolbarMiddleware"]
+    }
+)
+
+
+def xaa_post_create_payload(
+    *,
+    post_id: str = WEBHOOK_POST_ID,
+    text: str = WEBHOOK_POST_TEXT,
+    author_id: str = WEBHOOK_AUTHOR_ID,
+    username: str | None = "askrapidkl",
+    event_type: str = "post.create",
+    filter_user_id: str | None = None,
+    created_at: str = WEBHOOK_CREATED_AT,
+) -> dict:
+    """A current-shaped Activity API ``post.create`` delivery.
+
+    ``username=None`` drops the ``includes.users`` expansion, which is what
+    forces the reverse (user-id → handle) lookup path.
+    """
+    event_filter: dict = {}
+    if filter_user_id is not None:
+        event_filter["user_id"] = filter_user_id
+    event = {
+        "event_uuid": "0f0f0f0f-0000-4000-8000-000000000001",
+        "event_type": event_type,
+        "tag": "official-posts",
+        "filter": event_filter,
+        "payload": {
+            "id": post_id,
+            "text": text,
+            "created_at": created_at,
+            "author_id": author_id,
+        },
+    }
+    payload = {"data": event}
+    if username is not None:
+        payload["includes"] = {
+            "users": [{"id": author_id, "username": username, "name": "RapidKL"}]
+        }
+    return payload
+
+
+def aaa_post_create_payload(
+    *,
+    post_id: str = WEBHOOK_POST_ID,
+    text: str = WEBHOOK_POST_TEXT,
+    user_id: str = WEBHOOK_AUTHOR_ID,
+    for_user_id: str = WEBHOOK_AUTHOR_ID,
+    created_at: str = WEBHOOK_CREATED_AT,
+) -> dict:
+    """A deprecated AAA ``tweet_create_events`` delivery (no ``data`` envelope)."""
+    return {
+        "for_user_id": for_user_id,
+        "tweet_create_events": [
+            {
+                "id": post_id,
+                "text": text,
+                "created_at": created_at,
+                "user_id": user_id,
+            }
+        ],
+    }
+
+
+def signed_delivery(
+    payload: dict,
+    *,
+    secret: str = TEST_LEGACY_SECRET,
+    header: str = LEGACY_SIGNATURE_HEADER,
+) -> tuple[bytes, dict[str, str]]:
+    """``(raw bytes, headers)`` — the signature covers exactly these bytes.
+
+    Deliberately *not* a helper that both encodes and posts: signing a
+    re-serialization of the parsed body is the classic way to make a webhook
+    verifier pass in tests and fail in production.
+    """
+    raw = json.dumps(payload).encode("utf-8")
+    return raw, {header: sign_body(secret, raw)}
+
+
+def fake_x_response(status: int = 200, payload=None, *, unparseable: bool = False):
+    """A ``requests`` response stand-in for the management-command tests."""
+
+    def _json():
+        if unparseable:
+            raise ValueError("no JSON could be decoded")
+        return payload
+
+    return SimpleNamespace(status_code=status, json=_json)
+
+
+class XWebhookSigningTests(TestCase):
+    """CRC signing and delivery-signature verification, with no HTTP involved."""
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET="", X_API_SECRET_KEY=TEST_LEGACY_SECRET
+    )
+    def test_sign_body_matches_the_published_hmac_sha256_vector(self):
+        # RFC 4231 test case 1: key = 0x0b * 20, data = "Hi There". Asserting a
+        # vector from outside this codebase is the only way the test can fail if
+        # the construction itself is wrong, rather than merely agreeing with a
+        # second copy of the same mistake.
+        expected = "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
+        self.assertEqual(
+            sign_body(bytes([0x0B] * 20).decode("latin-1"), b"Hi There"),
+            "sha256=" + base64.b64encode(bytes.fromhex(expected)).decode(),
+        )
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET="", X_API_SECRET_KEY=TEST_LEGACY_SECRET
+    )
+    def test_crc_token_is_the_documented_sha256_base64_form(self):
+        token = crc_response_token("hello")
+
+        self.assertTrue(token.startswith("sha256="))
+        # Exactly one '=' separator, then standard base64 of a 32-byte digest.
+        _, _, encoded = token.partition("=")
+        self.assertEqual(len(base64.b64decode(encoded, validate=True)), 32)
+        self.assertEqual(token, sign_body(TEST_LEGACY_SECRET, "hello".encode("utf-8")))
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET,
+        X_API_SECRET_KEY=TEST_LEGACY_SECRET,
+    )
+    def test_crc_prefers_the_oauth2_client_secret_when_both_are_set(self):
+        # X verifies the CRC answer against the secret it signs with, which is
+        # the OAuth 2.0 client secret when the app has one.
+        self.assertEqual(
+            crc_response_token("hello"),
+            sign_body(TEST_OAUTH2_SECRET, b"hello"),
+        )
+
+    @override_settings(X_API_OAUTH2_CLIENT_SECRET="", X_API_SECRET_KEY="")
+    def test_crc_without_any_secret_raises_rather_than_signing_with_nothing(self):
+        with self.assertRaises(OfficialPostFetchError) as caught:
+            crc_response_token("hello")
+
+        self.assertIn("X_API_OAUTH2_CLIENT_SECRET", str(caught.exception))
+
+    def test_has_signing_secret_tracks_the_configured_candidates(self):
+        with override_settings(X_API_OAUTH2_CLIENT_SECRET="", X_API_SECRET_KEY=""):
+            self.assertFalse(has_signing_secret())
+        with override_settings(X_API_OAUTH2_CLIENT_SECRET="", X_API_SECRET_KEY="   "):
+            self.assertFalse(has_signing_secret())
+        with override_settings(
+            X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET, X_API_SECRET_KEY=""
+        ):
+            self.assertTrue(has_signing_secret())
+
+    # --- signature verification -----------------------------------------
+
+    def _headers(self, signature: str, header: str) -> dict[str, str]:
+        return {header: signature}
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET="", X_API_SECRET_KEY=TEST_LEGACY_SECRET
+    )
+    def test_the_legacy_consumer_secret_signature_is_accepted(self):
+        raw = b'{"data":{"event_type":"post.create"}}'
+        headers = self._headers(
+            sign_body(TEST_LEGACY_SECRET, raw), LEGACY_SIGNATURE_HEADER
+        )
+
+        self.assertTrue(verify_webhook_signature(headers, raw))
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET, X_API_SECRET_KEY=""
+    )
+    def test_the_oauth2_client_secret_signature_is_accepted(self):
+        raw = b'{"data":{"event_type":"post.create"}}'
+        headers = self._headers(
+            sign_body(TEST_OAUTH2_SECRET, raw), OAUTH2_SIGNATURE_HEADER
+        )
+
+        self.assertTrue(verify_webhook_signature(headers, raw))
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET,
+        X_API_SECRET_KEY=TEST_LEGACY_SECRET,
+    )
+    def test_either_configured_candidate_is_enough(self):
+        # A half-migrated app — OAuth 2.0 secret set, but X still signing with
+        # the legacy consumer secret — must keep receiving.
+        raw = b"a raw body"
+        for secret, header in (
+            (TEST_OAUTH2_SECRET, OAUTH2_SIGNATURE_HEADER),
+            (TEST_LEGACY_SECRET, LEGACY_SIGNATURE_HEADER),
+        ):
+            with self.subTest(header=header):
+                self.assertTrue(
+                    verify_webhook_signature(
+                        self._headers(sign_body(secret, raw), header), raw
+                    )
+                )
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET,
+        X_API_SECRET_KEY=TEST_LEGACY_SECRET,
+    )
+    def test_a_signature_from_the_wrong_secret_is_rejected(self):
+        raw = b"a raw body"
+
+        self.assertFalse(
+            verify_webhook_signature(
+                self._headers(
+                    sign_body("some-other-secret", raw), LEGACY_SIGNATURE_HEADER
+                ),
+                raw,
+            )
+        )
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET,
+        X_API_SECRET_KEY=TEST_LEGACY_SECRET,
+    )
+    def test_a_signature_over_different_bytes_is_rejected(self):
+        signed = b'{"a":1}'
+        replayed = b'{"a": 1}'  # same JSON value, different octets
+
+        self.assertFalse(
+            verify_webhook_signature(
+                self._headers(
+                    sign_body(TEST_LEGACY_SECRET, signed), LEGACY_SIGNATURE_HEADER
+                ),
+                replayed,
+            )
+        )
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET,
+        X_API_SECRET_KEY=TEST_LEGACY_SECRET,
+    )
+    def test_a_missing_signature_header_is_rejected(self):
+        self.assertFalse(verify_webhook_signature({}, b"a raw body"))
+        self.assertFalse(
+            verify_webhook_signature({LEGACY_SIGNATURE_HEADER: "   "}, b"a raw body")
+        )
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET,
+        X_API_SECRET_KEY=TEST_LEGACY_SECRET,
+    )
+    def test_nothing_is_accepted_when_no_secret_is_configured(self):
+        # A signature over an empty key is computable by anyone, so an
+        # unconfigured candidate must never authenticate a delivery.
+        headers = self._headers(sign_body("", b"a raw body"), LEGACY_SIGNATURE_HEADER)
+
+        with override_settings(X_API_OAUTH2_CLIENT_SECRET="", X_API_SECRET_KEY=""):
+            self.assertFalse(verify_webhook_signature(headers, b"a raw body"))
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET="", X_API_SECRET_KEY=TEST_LEGACY_SECRET
+    )
+    def test_the_header_name_is_matched_case_insensitively(self):
+        raw = b"a raw body"
+        signature = sign_body(TEST_LEGACY_SECRET, raw)
+
+        self.assertTrue(
+            verify_webhook_signature({"x-twitter-webhooks-signature": signature}, raw)
+        )
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET="", X_API_SECRET_KEY=TEST_LEGACY_SECRET
+    )
+    def test_a_non_ascii_signature_is_rejected_without_raising(self):
+        # compare_digest refuses non-ASCII str; a hostile header must produce a
+        # 403, not a 500.
+        self.assertFalse(
+            verify_webhook_signature(
+                {LEGACY_SIGNATURE_HEADER: "sha256=ééé"}, b"a raw body"
+            )
+        )
+
+
+@no_debug_toolbar
+class XWebhookCrcViewTests(TestCase):
+    """``GET /webhooks/x-api`` — X's registration-time CRC challenge."""
+
+    def _get(self, query: str = ""):
+        return self.client.get(f"{WEBHOOK_URL}{query}")
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET, X_API_SECRET_KEY=""
+    )
+    def test_get_returns_the_response_token(self):
+        response = self._get("?crc_token=hello")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        # The token is asserted against the same construction X specifies, never
+        # printed: a live CRC value is a short-lived credential.
+        self.assertEqual(
+            body["response_token"], sign_body(TEST_OAUTH2_SECRET, b"hello")
+        )
+        self.assertNotIn("status", body)
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET, X_API_SECRET_KEY=""
+    )
+    def test_get_answers_the_legacy_secret_when_it_is_the_only_one(self):
+        response = self._get("?crc_token=hello")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["response_token"],
+            sign_body(TEST_OAUTH2_SECRET, b"hello"),
+        )
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET, X_API_SECRET_KEY=""
+    )
+    def test_get_without_a_crc_token_is_400(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("crc_token", response.json()["reason"])
+
+    @override_settings(
+        X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET, X_API_SECRET_KEY=""
+    )
+    def test_get_with_a_blank_crc_token_is_400(self):
+        response = self._get("?crc_token=")
+
+        self.assertEqual(response.status_code, 400)
+
+    @override_settings(X_API_OAUTH2_CLIENT_SECRET="", X_API_SECRET_KEY="")
+    def test_get_without_any_signing_secret_is_503_and_actionable(self):
+        with self.assertLogs("incident.views", level="ERROR") as logs:
+            response = self._get("?crc_token=hello")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("X_API_OAUTH2_CLIENT_SECRET", str(logs.output))
+        # The operator is told what to configure but not what is configured.
+        self.assertNotIn(TEST_LEGACY_SECRET, response.content.decode())
+
+    def test_other_methods_are_405(self):
+        for method in (self.client.put, self.client.delete, self.client.patch):
+            with self.subTest(method=method.__name__):
+                response = method(WEBHOOK_URL)
+                self.assertEqual(response.status_code, 405)
+        self.assertIn("GET, POST", self.client.put(WEBHOOK_URL)["Allow"])
+
+
+@override_settings(
+    # DEBUG is False in this environment, so the shipped default cache is the
+    # *shared* Redis one — not the DummyCache the docs assume — and these
+    # assertions would be decided by whatever a previous run left behind. A
+    # private LocMem backend is the only way "a cache hit changes the answer"
+    # is actually what is under test.
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "x-webhook-handle-resolution",
+        }
+    }
+)
+class XWebhookHandleResolutionTests(TestCase):
+    """``includes.users`` first (no network), then a bounded reverse lookup."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_the_includes_expansion_resolves_the_handle_with_no_network(self):
+        with mock.patch.object(
+            official_posts,
+            "_resolve_user_id",
+            side_effect=AssertionError("network must not be used"),
+        ):
+            result = ingest_webhook_payload(xaa_post_create_payload())
+
+        self.assertEqual(result.events, 1)
+        self.assertEqual(result.ingested, 1)
+        self.assertEqual(result.unresolved, 0)
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.assertEqual(link.source_handle, "askrapidkl")
+
+    @override_settings(OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"])
+    def test_without_the_expansion_the_filter_user_id_drives_the_reverse_lookup(self):
+        # A user id of its own per test: a positive match is cached forever, so
+        # reusing one id would let the previous test decide this one's answer.
+        author_id = "7100000000000000001"
+        payload = xaa_post_create_payload(
+            author_id=author_id, username=None, filter_user_id=author_id
+        )
+
+        with mock.patch.object(
+            official_posts, "_resolve_user_id", return_value=author_id
+        ) as resolve:
+            result = ingest_webhook_payload(payload)
+
+        # Bounded: one comparison per tracked handle, then a positive cache.
+        self.assertEqual(
+            [call.args[0] for call in resolve.call_args_list],
+            ["askrapidkl"],
+        )
+        self.assertEqual(result.ingested, 1)
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.assertEqual(link.source_handle, "askrapidkl")
+
+    @override_settings(OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"])
+    def test_a_handle_whose_lookup_fails_does_not_abort_the_others(self):
+        author_id = "7100000000000000002"
+
+        with mock.patch.object(
+            official_posts,
+            "_resolve_user_id",
+            side_effect=[
+                official_posts.OfficialPostFetchError("X API error: HTTP 429"),
+                author_id,
+            ],
+        ):
+            # The warning is the service's, not the webhook parser's: it is
+            # logged where the per-handle lookup actually failed.
+            with self.assertLogs("incident.services.official_posts", level="WARNING"):
+                result = ingest_webhook_payload(
+                    xaa_post_create_payload(
+                        author_id=author_id, username=None, filter_user_id=author_id
+                    )
+                )
+
+        self.assertEqual(result.ingested, 1)
+        self.assertEqual(result.unresolved, 0)
+
+    @override_settings(OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"])
+    def test_an_author_with_no_tracked_handle_is_counted_and_dropped(self):
+        # Tracked handles resolve to some *other* id, so nothing matches.
+        author_id = "7100000000000000003"
+
+        with mock.patch.object(
+            official_posts, "_resolve_user_id", return_value="7100000000000000004"
+        ):
+            result = ingest_webhook_payload(
+                xaa_post_create_payload(
+                    author_id=author_id, username=None, filter_user_id=author_id
+                )
+            )
+
+        # Nothing was attributed and no row was written: a wrong permalink is
+        # worse than a dropped post.
+        self.assertEqual(result.events, 1)
+        self.assertEqual(result.ingested, 0)
+        self.assertEqual(result.unresolved, 1)
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+
+    @override_settings(OFFICIAL_POST_HANDLES=["askrapidkl", "myrapidkl"])
+    def test_resolve_handle_caches_only_a_positive_match(self):
+        matched_id = "7100000000000000005"
+        missed_id = "7100000000000000006"
+
+        with mock.patch.object(
+            official_posts, "_resolve_user_id", return_value=matched_id
+        ) as resolve:
+            self.assertEqual(resolve_handle_for_user_id(matched_id), "askrapidkl")
+            # Second call is served from the cache: no comparison at all.
+            self.assertEqual(resolve_handle_for_user_id(matched_id), "askrapidkl")
+        self.assertEqual(resolve.call_count, 1)
+
+        # A miss is never cached, so widening OFFICIAL_POST_HANDLES later starts
+        # working without a cache flush — two calls, two walks of the handles.
+        with mock.patch.object(
+            official_posts, "_resolve_user_id", return_value="7100000000000000007"
+        ) as resolve:
+            self.assertIsNone(resolve_handle_for_user_id(missed_id))
+            self.assertIsNone(resolve_handle_for_user_id(missed_id))
+        self.assertEqual(resolve.call_count, 2 * len(settings.OFFICIAL_POST_HANDLES))
+
+        self.assertIsNone(resolve_handle_for_user_id(""))
+
+
+@no_debug_toolbar
+@override_settings(
+    # Same reasoning as XWebhookHandleResolutionTests: the deprecated AAA
+    # deliveries resolve their handle by reverse lookup, and a cache left in the
+    # shared Redis by an earlier run would silently skip that lookup.
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "x-webhook-delivery-view",
+        }
+    }
+)
+class XWebhookDeliveryViewTests(TestCase):
+    """``POST /webhooks/x-api`` — verify, ingest, acknowledge inside 10 seconds."""
+
+    BASE_SETTINGS = {
+        "OFFICIAL_POST_INGESTION_ENABLED": True,
+        "OFFICIAL_POST_POLLING_ENABLED": False,
+        "OFFICIAL_POST_HANDLES": ["askrapidkl"],
+        "X_API_OAUTH2_CLIENT_SECRET": "",
+        "X_API_SECRET_KEY": TEST_LEGACY_SECRET,
+        "TELEGRAM_ADMIN_CHAT_ID": "-1001234",
+    }
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        # The symbol incident.views imported, so the enqueue is observable and
+        # no broker is contacted.
+        self.notify = mock.patch("incident.views.notify_official_post_links").start()
+        self.addCleanup(mock.patch.stopall)
+
+    def _post(
+        self,
+        payload,
+        *,
+        secret=TEST_LEGACY_SECRET,
+        header=LEGACY_SIGNATURE_HEADER,
+        **overrides,
+    ):
+        raw, headers = signed_delivery(payload, secret=secret, header=header)
+        with override_settings(**{**self.BASE_SETTINGS, **overrides}):
+            return self.client.post(
+                WEBHOOK_URL, data=raw, content_type="application/json", headers=headers
+            )
+
+    def _post_raw(self, raw: bytes, *, signature: str | None = None, **overrides):
+        headers = {}
+        if signature is not None:
+            headers[LEGACY_SIGNATURE_HEADER] = signature
+        with override_settings(**{**self.BASE_SETTINGS, **overrides}):
+            return self.client.post(
+                WEBHOOK_URL, data=raw, content_type="application/json", headers=headers
+            )
+
+    def test_a_signed_delivery_creates_exactly_one_pending_row(self):
+        response = self._post(xaa_post_create_payload())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "status": "ok",
+                "events": 1,
+                "ingested": 1,
+                "skipped": 0,
+                "unresolved": 0,
+            },
+        )
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.assertEqual(link.status, SocialMediaLinkStatus.PENDING_APPROVAL)
+        self.assertTrue(link.is_automated)
+        self.assertEqual(link.user, get_system_author())
+        # Verbatim, byte for byte — including the ampersand.
+        self.assertEqual(link.description, WEBHOOK_POST_TEXT)
+        self.assertEqual(link.title, WEBHOOK_POST_TEXT[:256])
+        # The handle comes from includes.users; the permalink is built from it.
+        self.assertEqual(link.source_handle, "askrapidkl")
+        self.assertEqual(link.url, f"https://x.com/askrapidkl/status/{WEBHOOK_POST_ID}")
+        self.assertEqual(link.platform, IngestPlatform.X)
+        # The post's own time, stored as naive local because USE_TZ is off.
+        self.assertEqual(
+            link.posted_at,
+            timezone.make_naive(datetime(2026, 9, 28, 4, 5, tzinfo=UTC)),
+        )
+        # The provider object is kept whole for the export.
+        self.assertEqual(link.raw_payload["id"], WEBHOOK_POST_ID)
+
+    def test_a_new_row_queues_the_notification_once(self):
+        self._post(xaa_post_create_payload())
+
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.notify.delay.assert_called_once_with([link.id])
+        # The task, not a direct send: an inline Telegram round trip would blow
+        # the 10-second acknowledgement budget.
+        self.assertEqual(self.notify.delay.call_count, 1)
+
+    def test_a_reply_carries_referenced_tweets_and_is_still_ingested(self):
+        # Replies, quotes and reposts all arrive as post.create; parity with
+        # exclude_retweets=False means they are kept.
+        payload = xaa_post_create_payload()
+        payload["data"]["payload"]["referenced_tweets"] = [
+            {"type": "replied_to", "id": "1791550000000000000"}
+        ]
+
+        response = self._post(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ingested"], 1)
+        self.assertTrue(
+            SocialMediaLink.objects.filter(post_id=WEBHOOK_POST_ID).exists()
+        )
+
+    def test_the_oauth2_signature_is_accepted_when_that_secret_is_configured(self):
+        response = self._post(
+            xaa_post_create_payload(),
+            secret=TEST_OAUTH2_SECRET,
+            header=OAUTH2_SIGNATURE_HEADER,
+            X_API_OAUTH2_CLIENT_SECRET=TEST_OAUTH2_SECRET,
+            X_API_SECRET_KEY="",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ingested"], 1)
+
+    def test_a_redelivery_creates_nothing_and_queues_nothing(self):
+        first = self._post(xaa_post_create_payload())
+        second = self._post(xaa_post_create_payload())
+
+        self.assertEqual(first.json()["ingested"], 1)
+        # X retries and redelivers; (platform, post_id) idempotency is what makes
+        # the second delivery a no-op rather than a duplicate row.
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(
+            second.json(),
+            {
+                "status": "ok",
+                "events": 1,
+                "ingested": 0,
+                "skipped": 1,
+                "unresolved": 0,
+            },
+        )
+        self.assertEqual(SocialMediaLink.objects.count(), 1)
+        self.notify.delay.assert_called_once()
+
+    def test_a_wrong_signature_is_403_and_writes_nothing(self):
+        payload = xaa_post_create_payload()
+        raw = json.dumps(payload).encode()
+
+        with self.assertLogs("incident.views", level="WARNING") as logs:
+            response = self._post_raw(raw, signature=sign_body("wrong", raw))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.notify.delay.assert_not_called()
+        # One line, no detail: a prober learns nothing about which header or
+        # which secret is configured, and no secret is echoed.
+        self.assertIn("signature", str(logs.output))
+        self.assertNotIn(TEST_LEGACY_SECRET, str(logs.output))
+        self.assertNotIn("wrong", str(logs.output))
+
+    def test_a_missing_signature_is_403_and_writes_nothing(self):
+        response = self._post_raw(json.dumps(xaa_post_create_payload()).encode())
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.notify.delay.assert_not_called()
+
+    def test_a_delivery_is_403_when_no_signing_secret_is_configured(self):
+        raw, headers = signed_delivery(xaa_post_create_payload())
+
+        with override_settings(
+            **{
+                **self.BASE_SETTINGS,
+                "X_API_SECRET_KEY": "",
+                "X_API_OAUTH2_CLIENT_SECRET": "",
+            }
+        ):
+            response = self.client.post(
+                WEBHOOK_URL, data=raw, content_type="application/json", headers=headers
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+
+    def test_the_ingestion_master_switch_off_acknowledges_without_writing(self):
+        response = self._post(
+            xaa_post_create_payload(), OFFICIAL_POST_INGESTION_ENABLED=False
+        )
+
+        # 200, not 5xx: ingestion being off is an operator decision, and an
+        # error would only earn a retry storm.
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"status": "ignored", "reason": "ingestion disabled"},
+        )
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.notify.delay.assert_not_called()
+
+    def test_a_non_post_create_event_is_acknowledged_and_ignored(self):
+        payload = xaa_post_create_payload(event_type="post.delete")
+        payload["data"].pop("payload")
+
+        response = self._post(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ignored")
+        self.assertEqual(response.json()["events"], 0)
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.notify.delay.assert_not_called()
+
+    def test_the_deprecated_aaa_shape_is_ingested(self):
+        with mock.patch.object(
+            official_posts, "_resolve_user_id", return_value=WEBHOOK_AUTHOR_ID
+        ):
+            response = self._post(aaa_post_create_payload())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ingested"], 1)
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.assertEqual(link.source_handle, "askrapidkl")
+        self.assertEqual(link.url, f"https://x.com/askrapidkl/status/{WEBHOOK_POST_ID}")
+        self.notify.delay.assert_called_once()
+
+    def test_the_aaa_shape_resolves_the_handle_from_for_user_id(self):
+        # No author key at all: for_user_id is the only id the delivery carries.
+        payload = aaa_post_create_payload()
+        payload["tweet_create_events"][0].pop("user_id")
+
+        with mock.patch.object(
+            official_posts, "_resolve_user_id", return_value=WEBHOOK_AUTHOR_ID
+        ) as resolve:
+            response = self._post(payload)
+
+        self.assertEqual(response.json()["ingested"], 1)
+        self.assertEqual(resolve.call_args.args[0], "askrapidkl")
+
+    def test_an_unresolvable_handle_is_200_counted_and_logged(self):
+        with mock.patch.object(official_posts, "_resolve_user_id", return_value="999"):
+            with self.assertLogs(
+                "incident.services.x_webhooks", level="WARNING"
+            ) as logs:
+                response = self._post(
+                    xaa_post_create_payload(username=None, filter_user_id="42")
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["unresolved"], 1)
+        self.assertEqual(response.json()["ingested"], 0)
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.notify.delay.assert_not_called()
+        self.assertTrue(any("no tracked handle" in line for line in logs.output))
+
+    def test_a_body_that_is_not_json_is_400(self):
+        raw = b"this is not json"
+        response = self._post_raw(raw, signature=sign_body(TEST_LEGACY_SECRET, raw))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.notify.delay.assert_not_called()
+
+    def test_a_json_body_that_is_not_an_object_is_400(self):
+        raw = b"[1, 2, 3]"
+        response = self._post_raw(raw, signature=sign_body(TEST_LEGACY_SECRET, raw))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("object", response.json()["reason"])
+
+    def test_a_post_with_no_id_is_skipped_not_fatal(self):
+        payload = xaa_post_create_payload()
+        payload["data"]["payload"].pop("id")
+
+        with self.assertLogs("incident.services.x_webhooks", level="WARNING"):
+            response = self._post(payload)
+
+        # Accounted for as skipped, so events == ingested + skipped + unresolved.
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["skipped"], 1)
+        self.assertEqual(response.json()["events"], 1)
+        self.assertEqual(SocialMediaLink.objects.count(), 0)
+        self.notify.delay.assert_not_called()
+
+    def test_a_broker_outage_still_answers_200(self):
+        # The rows are committed; the console can still approve them. A 5xx here
+        # would make X redeliver a post we already stored.
+        self.notify.delay.side_effect = RuntimeError("broker down")
+
+        with self.assertLogs("incident.views", level="ERROR") as logs:
+            response = self._post(xaa_post_create_payload())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ingested"], 1)
+        self.assertEqual(SocialMediaLink.objects.count(), 1)
+        self.assertTrue(any("enqueue" in line for line in logs.output))
+
+    def test_two_posts_in_one_delivery_are_ingested_and_notified_together(self):
+        payload = {
+            "for_user_id": WEBHOOK_AUTHOR_ID,
+            "tweet_create_events": [
+                {
+                    "id": WEBHOOK_POST_ID,
+                    "text": WEBHOOK_POST_TEXT,
+                    "created_at": WEBHOOK_CREATED_AT,
+                    "user_id": WEBHOOK_AUTHOR_ID,
+                },
+                {
+                    "id": "1791552310047416321",
+                    "text": "second post",
+                    "created_at": WEBHOOK_CREATED_AT,
+                    "user_id": WEBHOOK_AUTHOR_ID,
+                },
+            ],
+        }
+
+        with mock.patch.object(
+            official_posts, "_resolve_user_id", return_value=WEBHOOK_AUTHOR_ID
+        ):
+            response = self._post(payload)
+
+        self.assertEqual(response.json()["events"], 2)
+        self.assertEqual(response.json()["ingested"], 2)
+        self.assertEqual(SocialMediaLink.objects.count(), 2)
+        # One enqueue for the delivery, carrying both ids — not one per post.
+        self.notify.delay.assert_called_once()
+        self.assertEqual(
+            sorted(self.notify.delay.call_args.args[0]),
+            sorted(SocialMediaLink.objects.values_list("id", flat=True)),
+        )
+
+
+class NotifyOfficialPostLinksTaskTests(TestCase):
+    """The queued notification the webhook view hands its ids to."""
+
+    def setUp(self):
+        self.author = get_system_author()
+        posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+        ingest_posts(posts, handle="askrapidkl", author=self.author)
+        self.ids = list(
+            SocialMediaLink.objects.order_by("id").values_list("id", flat=True)
+        )
+
+    def test_it_sends_one_message_per_link(self):
+        sender = fake_sender()
+
+        with override_settings(TELEGRAM_ADMIN_CHAT_ID="-1001234"):
+            with mock.patch("incident.tasks.send_message", sender):
+                sent = notify_official_post_links(self.ids)
+
+        self.assertEqual(sent, len(self.ids))
+        self.assertEqual(len(sender.calls), len(self.ids))
+        for call in sender.calls:
+            self.assertEqual(call["chat_id"], "-1001234")
+            self.assertEqual(call["parse_mode"], "HTML")
+            self.assertIs(call["return_log"], True)
+        # The join row is what makes the message reply-/approve-able.
+        self.assertEqual(TelegramSocialMediaLinkLog.objects.count(), len(self.ids))
+
+    def test_a_blank_admin_chat_id_is_a_no_op(self):
+        sender = fake_sender()
+
+        with override_settings(TELEGRAM_ADMIN_CHAT_ID=""):
+            with mock.patch("incident.tasks.send_message", sender):
+                sent = notify_official_post_links(self.ids)
+
+        self.assertEqual(sent, 0)
+        self.assertEqual(sender.calls, [])
+        self.assertEqual(TelegramSocialMediaLinkLog.objects.count(), 0)
+
+    def test_an_empty_id_list_is_a_no_op(self):
+        sender = fake_sender()
+
+        with override_settings(TELEGRAM_ADMIN_CHAT_ID="-1001234"):
+            with mock.patch("incident.tasks.send_message", sender):
+                sent = notify_official_post_links([])
+
+        self.assertEqual(sent, 0)
+        self.assertEqual(sender.calls, [])
+
+    def test_a_failing_send_is_contained_and_the_rows_survive(self):
+        sender = fake_sender(outcomes=[RuntimeError("bot down")] * len(self.ids))
+
+        with override_settings(TELEGRAM_ADMIN_CHAT_ID="-1001234"):
+            with mock.patch("incident.tasks.send_message", sender):
+                with self.assertLogs("incident.tasks", level="WARNING"):
+                    sent = notify_official_post_links(self.ids)
+
+        self.assertEqual(sent, 0)
+        self.assertEqual(SocialMediaLink.objects.count(), len(self.ids))
+
+    def test_an_unknown_id_is_simply_ignored(self):
+        sender = fake_sender()
+
+        with override_settings(TELEGRAM_ADMIN_CHAT_ID="-1001234"):
+            with mock.patch("incident.tasks.send_message", sender):
+                sent = notify_official_post_links([*self.ids, 10**9])
+
+        # One message per link that exists, and no error for the one that does not.
+        self.assertEqual(sent, len(self.ids))
+
+
+class XWebhookCommandTests(TestCase):
+    """The operator's registration lever. Every HTTP call is mocked — this
+    command is the one surface that talks to X's management API, and the bearer
+    token must be asserted absent from every byte of output."""
+
+    TOKEN = "test-app-only-bearer-token"
+    SETTINGS = {
+        "X_API_BEARER_TOKEN": TOKEN,
+        "X_API_OAUTH2_CLIENT_SECRET": TEST_OAUTH2_SECRET,
+        "X_API_SECRET_KEY": TEST_LEGACY_SECRET,
+        "OFFICIAL_POST_HANDLES": ["askrapidkl", "myrapidkl"],
+    }
+
+    def _run(self, *args, **kwargs):
+        out, err = StringIO(), StringIO()
+        call_command("x_webhook", *args, stdout=out, stderr=err)
+        return out.getvalue(), err.getvalue()
+
+    @staticmethod
+    def _x_api(responses):
+        """A ``requests.request`` stand-in returning ``responses`` in order."""
+        return mock.Mock(side_effect=responses)
+
+    def _patched(self, responses):
+        return mock.patch(
+            "incident.management.commands.x_webhook.requests.request",
+            self._x_api(responses),
+        )
+
+    def test_register_reports_the_id_and_validity(self):
+        payload = {
+            "data": {
+                "id": "18923",
+                "url": "https://api.x/webhooks/x-api",
+                "valid": True,
+            }
+        }
+
+        with override_settings(**self.SETTINGS):
+            with self._patched([fake_x_response(201, payload)]) as request:
+                out, _ = self._run("register", "https://api.x/webhooks/x-api")
+
+        self.assertIn("id=18923", out)
+        self.assertIn("valid=True", out)
+        method, url = request.call_args.args[:2]
+        self.assertEqual((method, url), ("POST", "https://api.x.com/2/webhooks"))
+        self.assertEqual(
+            request.call_args.kwargs["json"], {"url": "https://api.x/webhooks/x-api"}
+        )
+        # The bearer is sent in the header and printed nowhere.
+        self.assertEqual(
+            request.call_args.kwargs["headers"],
+            {"Authorization": f"Bearer {self.TOKEN}"},
+        )
+        self.assertNotIn(self.TOKEN, out)
+
+    def test_register_warns_when_the_webhook_is_not_valid_yet(self):
+        payload = {
+            "data": {
+                "id": "18923",
+                "url": "https://api.x/webhooks/x-api",
+                "valid": False,
+            }
+        }
+
+        with override_settings(**self.SETTINGS):
+            with self._patched([fake_x_response(201, payload)]):
+                out, err = self._run("register", "https://api.x/webhooks/x-api")
+
+        self.assertIn("valid=False", out)
+        self.assertIn("CRC", err)
+
+    def test_register_rejects_a_non_https_url_without_calling_x(self):
+        with override_settings(**self.SETTINGS):
+            with self._patched([]) as request:
+                with self.assertRaises(CommandError) as caught:
+                    self._run("register", "http://api.x/webhooks/x-api")
+
+        self.assertIn("HTTPS", str(caught.exception))
+        request.assert_not_called()
+
+    def test_register_needs_exactly_one_url(self):
+        with override_settings(**self.SETTINGS):
+            with self.assertRaises(CommandError) as caught:
+                self._run("register")
+
+        self.assertIn("exactly one argument", str(caught.exception))
+
+    def test_list_prints_every_webhook(self):
+        payload = {
+            "data": [
+                {
+                    "id": "18923",
+                    "url": "https://a.example/webhooks/x-api",
+                    "valid": True,
+                },
+                {
+                    "id": "18924",
+                    "url": "https://b.example/webhooks/x-api",
+                    "valid": False,
+                },
+            ]
+        }
+
+        with override_settings(**self.SETTINGS):
+            with self._patched([fake_x_response(200, payload)]) as request:
+                out, _ = self._run("list")
+
+        self.assertIn("id=18923", out)
+        self.assertIn("https://b.example/webhooks/x-api", out)
+        self.assertEqual(
+            request.call_args.args[:2], ("GET", "https://api.x.com/2/webhooks")
+        )
+
+    def test_list_says_so_when_nothing_is_registered(self):
+        with override_settings(**self.SETTINGS):
+            with self._patched([fake_x_response(200, {"data": []})]):
+                out, _ = self._run("list")
+
+        self.assertIn("no webhooks are registered", out)
+
+    def test_delete_confirms_the_removal(self):
+        with override_settings(**self.SETTINGS):
+            with self._patched(
+                [fake_x_response(200, {"data": {"deleted": True}})]
+            ) as request:
+                out, _ = self._run("delete", "18923")
+
+        self.assertIn("deleted webhook id=18923", out)
+        self.assertEqual(
+            request.call_args.args[:2],
+            ("DELETE", "https://api.x.com/2/webhooks/18923"),
+        )
+
+    def test_revalidate_puts_the_webhook(self):
+        with override_settings(**self.SETTINGS):
+            with self._patched(
+                [fake_x_response(200, {"data": {"valid": True}})]
+            ) as request:
+                out, _ = self._run("revalidate", "18923")
+
+        self.assertIn("revalidated webhook id=18923 valid=True", out)
+        self.assertEqual(
+            request.call_args.args[:2], ("PUT", "https://api.x.com/2/webhooks/18923")
+        )
+
+    def test_subscribe_creates_one_subscription_per_handle(self):
+        with override_settings(**self.SETTINGS):
+            with (
+                mock.patch.object(
+                    official_posts, "_resolve_user_id", side_effect=["111", "222"]
+                ),
+                # One scripted response per handle: a second call with an empty
+                # script would be a StopIteration, not a silent pass.
+                self._patched(
+                    [
+                        fake_x_response(200, {"data": {"id": "5001"}}),
+                        fake_x_response(200, {"data": {"id": "5002"}}),
+                    ]
+                ) as request,
+            ):
+                out, _ = self._run(
+                    "subscribe", "askrapidkl", "myrapidkl", "--webhook-id", "18923"
+                )
+
+        self.assertEqual(request.call_count, 2)
+        first, second = request.call_args_list
+        self.assertEqual(first.args[1], "https://api.x.com/2/activity/subscriptions")
+        self.assertEqual(
+            first.kwargs["json"],
+            {
+                "event_type": "post.create",
+                "filter": {"user_id": "111"},
+                "webhook_id": "18923",
+                "tag": "official-posts",
+            },
+        )
+        self.assertEqual(second.kwargs["json"]["filter"], {"user_id": "222"})
+        self.assertIn("subscribed handle=askrapidkl user_id=111", out)
+        self.assertNotIn(self.TOKEN, out)
+
+    def test_subscribe_strips_a_leading_at_sign(self):
+        with override_settings(**self.SETTINGS):
+            with (
+                mock.patch.object(
+                    official_posts, "_resolve_user_id", return_value="111"
+                ),
+                self._patched([fake_x_response(200, {"data": {"id": "5001"}})]),
+            ):
+                out, _ = self._run("subscribe", "@askrapidkl", "--webhook-id", "18923")
+
+        self.assertIn("handle=askrapidkl", out)
+
+    def test_subscribe_needs_at_least_one_handle(self):
+        with override_settings(**self.SETTINGS):
+            with self._patched([]) as request:
+                with self.assertRaises(CommandError) as caught:
+                    self._run("subscribe", "--webhook-id", "18923")
+
+        self.assertIn("at least one HANDLE", str(caught.exception))
+        request.assert_not_called()
+
+    def test_subscribe_uses_the_only_registered_webhook_when_none_is_given(self):
+        with override_settings(**self.SETTINGS):
+            with (
+                mock.patch.object(
+                    official_posts, "_resolve_user_id", return_value="111"
+                ),
+                self._patched(
+                    [
+                        fake_x_response(
+                            200, {"data": [{"id": "18923", "valid": True}]}
+                        ),
+                        fake_x_response(200, {"data": {"id": "5001"}}),
+                    ]
+                ) as request,
+            ):
+                out, _ = self._run("subscribe", "askrapidkl")
+
+        self.assertIn("subscribing to webhook id=18923", out)
+        self.assertEqual(request.call_args.kwargs["json"]["webhook_id"], "18923")
+
+    def test_subscribe_refuses_to_guess_between_several_webhooks(self):
+        payload = {"data": [{"id": "18923"}, {"id": "18924"}]}
+
+        with override_settings(**self.SETTINGS):
+            with self._patched([fake_x_response(200, payload)]):
+                with self.assertRaises(CommandError) as caught:
+                    self._run("subscribe", "askrapidkl")
+
+        # Both ids are named so the operator can pick one; nothing was created.
+        self.assertIn("18923, 18924", str(caught.exception))
+        self.assertIn("--webhook-id", str(caught.exception))
+
+    def test_subscribe_tells_the_operator_to_register_first(self):
+        with override_settings(**self.SETTINGS):
+            with self._patched([fake_x_response(200, {"data": []})]):
+                with self.assertRaises(CommandError) as caught:
+                    self._run("subscribe", "askrapidkl")
+
+        self.assertIn("register", str(caught.exception))
+
+    def test_a_missing_bearer_token_is_a_command_error(self):
+        with override_settings(X_API_BEARER_TOKEN=""):
+            with self._patched([]) as request:
+                with self.assertRaises(CommandError) as caught:
+                    self._run("list")
+
+        self.assertIn("X_API_BEARER_TOKEN", str(caught.exception))
+        request.assert_not_called()
+
+    def test_a_crc_validation_failure_is_reported_sanitized(self):
+        payload = {
+            "errors": [
+                {
+                    "title": "CrcValidationFailed",
+                    "detail": f"the request was signed with {self.TOKEN}",
+                }
+            ]
+        }
+
+        with override_settings(**self.SETTINGS):
+            with self._patched([fake_x_response(403, payload)]):
+                with self.assertRaises(CommandError) as caught:
+                    self._run("register", "https://api.x/webhooks/x-api")
+
+        message = str(caught.exception)
+        self.assertIn("HTTP 403", message)
+        self.assertIn("CrcValidationFailed", message)
+        # The upstream detail is never quoted and the token never appears.
+        self.assertNotIn(self.TOKEN, message)
+        self.assertNotIn("signed with", message)
+
+    def test_a_url_validation_failure_is_reported_by_title(self):
+        payload = {"errors": [{"title": "UrlValidationFailed", "detail": "port"}]}
+
+        with override_settings(**self.SETTINGS):
+            with self._patched([fake_x_response(400, payload)]):
+                with self.assertRaises(CommandError) as caught:
+                    self._run("register", "https://api.x/webhooks/x-api")
+
+        self.assertIn("UrlValidationFailed", str(caught.exception))
+
+    def test_a_timeout_is_a_command_error_without_the_token(self):
+        import requests as requests_module
+
+        with override_settings(**self.SETTINGS):
+            with mock.patch(
+                "incident.management.commands.x_webhook.requests.request",
+                side_effect=requests_module.Timeout(),
+            ):
+                with self.assertRaises(CommandError) as caught:
+                    self._run("list")
+
+        self.assertIn("timed out", str(caught.exception))
+        self.assertNotIn(self.TOKEN, str(caught.exception))
+
+    def test_an_unparseable_response_is_a_command_error(self):
+        with override_settings(**self.SETTINGS):
+            with self._patched([fake_x_response(200, unparseable=True)]):
+                with self.assertRaises(CommandError) as caught:
+                    self._run("list")
+
+        self.assertIn("not valid JSON", str(caught.exception))
+
+    def test_a_registration_that_returns_no_id_is_a_command_error(self):
+        with override_settings(**self.SETTINGS):
+            with self._patched([fake_x_response(201, {"data": {}})]):
+                with self.assertRaises(CommandError) as caught:
+                    self._run("register", "https://api.x/webhooks/x-api")
+
+        self.assertIn("no webhook id", str(caught.exception))
+
+    def test_an_unresolvable_handle_is_a_sanitized_command_error(self):
+        with override_settings(**self.SETTINGS):
+            with (
+                mock.patch.object(
+                    official_posts,
+                    "_resolve_user_id",
+                    side_effect=OfficialPostFetchError("X API error: HTTP 404"),
+                ),
+                self._patched([]) as request,
+            ):
+                with self.assertRaises(CommandError) as caught:
+                    self._run("subscribe", "nope", "--webhook-id", "18923")
+
+        self.assertIn("HTTP 404", str(caught.exception))
+        self.assertNotIn(self.TOKEN, str(caught.exception))
+        request.assert_not_called()
+
+    def test_the_help_text_states_the_registration_rules(self):
+        from incident.management.commands.x_webhook import Command
+
+        help_text = Command.help
+        self.assertIn("HTTPS", help_text)
+        self.assertIn("10 seconds", help_text)
+        self.assertIn("CrcValidationFailed", help_text)
+        self.assertIn("UrlValidationFailed", help_text)

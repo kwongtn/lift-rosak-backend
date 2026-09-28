@@ -1,13 +1,14 @@
 # Yearly Summary - 2026
 
-Total commits: 110
+Total commits: 111
 
 ## Monthly Breakdown
 
-### 2026-09 (38 commits)
+### 2026-09 (39 commits)
 
-#### Incident (22 commits)
+#### Incident (23 commits)
 
+- (this commit) [feat](incident): receive X Activity API webhook deliveries — `GET/POST /webhooks/x-api` (CRC challenge, HMAC-SHA256 over raw bytes, `post.create` → `SocialMediaLink`, queued Telegram notification, idempotent on redelivery) + the `x_webhook` management command for registration/subscriptions; 70 new tests, + docs (attribution rules, env matrix, CRC troubleshooting) and a MISTAKES entry for the debug-toolbar/Redis-cache test traps
 - (this commit) [feat](incident): official-post polling is opt-in — `OFFICIAL_POST_POLLING_ENABLED` (default off; webhook path is primary) gates both the beat entry (`official_post_polling_entry()`) and the task (`{"skipped": "polling_disabled"}`); all existing master-flag tests updated + `official_post_polling_entry()`/polling-disabled tests added
 - (this commit) [feat](incident): official-post Phase 3 — `export_official_posts` writes the ingested archive as JSONL/CSV (streamed, stable order, `raw_payload` opt-in, `--dry-run`, optional private `push_to_hub`); 28 tests, + docs (naive-local `posted_at` trap)
 - (this commit) [feat](incident): official-post Phase 2 — Telegram the admin per newly ingested post (reply `/approve`-able via `send_message(return_log=True)` + `TelegramSocialMediaLinkLog`), and exclude automated `PENDING_APPROVAL` posts from the public feed (+ docs: corrected the stale "outbound is ungoverned" claims in APPS.md and the component docs)

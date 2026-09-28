@@ -64,6 +64,9 @@ TITLE_MAX_LENGTH = 256
 #: immutable, so the timeout is None (cache until evicted). Locally DEBUG swaps
 #: in DummyCache, which simply re-resolves — correctness never depends on it.
 _USER_ID_CACHE_PREFIX = "incident:official_posts:user_id"
+#: Reverse direction of the above, for webhook payloads that only carry a numeric
+#: ``author_id``. Same immutability argument, same "never cache a negative" rule.
+_HANDLE_FOR_USER_ID_CACHE_PREFIX = "incident:official_posts:handle_for_user_id"
 #: Author of every automatically ingested row; seeded by the data migration.
 SYSTEM_AUTHOR_FIREBASE_ID = "system:official-ingest"
 
@@ -181,11 +184,12 @@ def _has_media(tweet: dict[str, Any]) -> bool:
     return bool(tweet.get("attachments")) or bool(tweet.get("media_keys"))
 
 
-def _tweet_to_raw_post(tweet: dict[str, Any], handle: str) -> RawPost:
+def tweet_to_raw_post(tweet: dict[str, Any], handle: str) -> RawPost:
     """Map one provider tweet object onto a :class:`RawPost`.
 
-    Shared by the live fetch and the fixture loader so both paths produce
-    identical rows; tweets without a usable id are skipped by the caller.
+    Shared by the live fetch, the fixture loader **and** the webhook parser
+    (``services/x_webhooks.py``) so all three produce identical rows from the
+    same provider object; tweets without a usable id are skipped by the caller.
     """
     post_id = str(tweet.get("id") or "").strip()
     if not post_id:
@@ -230,6 +234,47 @@ def _resolve_user_id(handle: str) -> str:
     user_id = str(data["id"])
     cache.set(cache_key, user_id, timeout=None)
     return user_id
+
+
+def resolve_handle_for_user_id(user_id: str) -> str | None:
+    """Map an X numeric user id back to one of our tracked handles, or ``None``.
+
+    The webhook payload normally carries ``includes.users[].username``, which
+    answers this with no network at all; this is the fallback for when it does
+    not. It walks ``settings.OFFICIAL_POST_HANDLES`` and compares against
+    ``_resolve_user_id(handle)``, so the bounded work is the number of tracked
+    handles (two today) and the answers are already cached per handle.
+
+    A lookup failure for one handle is caught and logged (a 429 or a transient
+    5xx must not abort the remaining handles), and ``None`` is returned when no
+    tracked handle matches — a post from an untracked account is not ingested
+    with an invented handle, because that would write a wrong permalink and a
+    wrong ``source_handle``. Only a positive match is cached, so widening
+    ``OFFICIAL_POST_HANDLES`` later does not need a cache flush.
+    """
+    if not user_id:
+        return None
+
+    cache_key = f"{_HANDLE_FOR_USER_ID_CACHE_PREFIX}:{user_id}"
+    cached = cache.get(cache_key)
+    if cached:
+        return str(cached)
+
+    for handle in settings.OFFICIAL_POST_HANDLES:
+        try:
+            resolved = _resolve_user_id(handle)
+        except OfficialPostFetchError as exc:
+            logger.warning(
+                "handle lookup failed for handle=%s while resolving user_id=%s: %s",
+                handle,
+                user_id,
+                exc,
+            )
+            continue
+        if resolved == str(user_id):
+            cache.set(cache_key, handle, timeout=None)
+            return handle
+    return None
 
 
 def fetch_user_posts(
@@ -299,7 +344,7 @@ def fetch_user_posts(
             if len(collected) >= limit:
                 break
             try:
-                collected.append(_tweet_to_raw_post(tweet, handle))
+                collected.append(tweet_to_raw_post(tweet, handle))
             except OfficialPostFetchError:
                 # One malformed tweet must not discard the rest of the page.
                 logger.warning("skipping a malformed tweet for handle=%s", handle)
@@ -351,7 +396,7 @@ def load_fixture_posts(path: str, *, handle: str | None = None) -> list[RawPost]
     posts: list[RawPost] = []
     for tweet in data:
         if isinstance(tweet, dict):
-            posts.append(_tweet_to_raw_post(tweet, resolved_handle))
+            posts.append(tweet_to_raw_post(tweet, resolved_handle))
     return posts
 
 

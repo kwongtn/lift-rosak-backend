@@ -71,6 +71,21 @@ if apps.is_installed("telegram_provider"):
         path("telegram_provider/", include("telegram_provider.urls")),
     ]
 
+if apps.is_installed("incident"):
+    from incident import views as incident_views
+
+    urlpatterns += [
+        # X (Twitter) Activity API webhook receiver: GET answers the CRC
+        # challenge, POST ingests a signed delivery. csrf_exempt because the
+        # request is authenticated by X's HMAC signature over the raw body, not
+        # by a session — X sends no CSRF token and cannot be given one.
+        path(
+            "webhooks/x-api",
+            csrf_exempt(incident_views.x_api_webhook),
+            name="x_api_webhook",
+        ),
+    ]
+
 # if settings.USE_SILK:
 #     urlpatterns += [path("silk/", include("silk.urls", namespace="silk"))]
 

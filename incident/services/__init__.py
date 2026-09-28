@@ -50,6 +50,8 @@ from .official_posts import (
     ingest_posts,
     latest_post_id,
     load_fixture_posts,
+    resolve_handle_for_user_id,
+    tweet_to_raw_post,
 )
 from .page_title import fetch_page_title
 from .social_links import (
@@ -67,6 +69,14 @@ from .votes import (
     set_incident_vote,
     set_social_media_link_vote,
 )
+from .x_webhooks import (
+    WebhookIngestResult,
+    crc_response_token,
+    has_signing_secret,
+    ingest_webhook_payload,
+    sign_body,
+    verify_webhook_signature,
+)
 
 __all__ = [
     "ChronologyUpdate",
@@ -83,11 +93,13 @@ __all__ = [
     "RawPost",
     "SocialMediaLinkWrite",
     "UpdateResult",
+    "WebhookIngestResult",
     "approve_chronology",
     "approve_chronology_deletion",
     "approve_incident",
     "create_chronology",
     "create_incident",
+    "crc_response_token",
     "delete_chronology",
     "delete_incident",
     "delete_social_media_link",
@@ -95,7 +107,9 @@ __all__ = [
     "fetch_user_posts",
     "get_incident",
     "get_system_author",
+    "has_signing_secret",
     "ingest_posts",
+    "ingest_webhook_payload",
     "is_author",
     "latest_post_id",
     "load_fixture_posts",
@@ -108,14 +122,18 @@ __all__ = [
     "remove_incident_vote",
     "remove_social_media_link_vote",
     "request_chronology_deletion",
+    "resolve_handle_for_user_id",
     "set_chronology_vote",
     "set_incident_vote",
     "set_social_media_link_vote",
+    "sign_body",
     "submit_feed_link",
     "submit_incident",
     "submit_line_status_report",
     "submit_social_media_link",
+    "tweet_to_raw_post",
     "update_chronology",
     "update_social_media_link",
     "update_incident",
+    "verify_webhook_signature",
 ]

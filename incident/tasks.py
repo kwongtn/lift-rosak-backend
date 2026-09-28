@@ -41,6 +41,10 @@ TELEGRAM_MAX_TEXT_LENGTH = 4096
 TRUNCATION_MARKER = "\n\n…[truncated]"
 #: The console moderation queue the notification links to for approval.
 CONSOLE_LINKS_PATH = "/console/insiden/links"
+#: Pseudo-handle reported by ``notify_official_post_links`` when no admin chat is
+#: configured. The webhook is not account-scoped, so there is no real handle to
+#: name; this keeps that one log line honest instead of fabricating an account.
+WEBHOOK_HANDLE_LABEL = "webhook"
 
 
 @celery_app.task()
@@ -262,6 +266,25 @@ def _ingest_handle(handle: str, *, author: User) -> dict[str, Any]:
         stats["duration_ms"],
     )
     return stats
+
+
+@celery_app.task(name="incident.tasks.notify_official_post_links")
+def notify_official_post_links(link_ids: list[int]) -> int:
+    """Telegram the admin about links created off the request path.
+
+    The polling task notifies inline (it *is* a background job). The webhook
+    receiver cannot: X requires a 200 within 10 seconds, and a Telegram round
+    trip with bounded retries is exactly the kind of stall that turns into a
+    redelivery. So the view persists the row, answers, and hands the ids to this
+    task — which reuses ``_notify_created_links`` rather than re-implementing a
+    single line of it, so both paths format the message and write the
+    ``TelegramSocialMediaLinkLog`` join row identically.
+
+    ``handle`` is only used for the log line when the admin chat is unconfigured,
+    so it is passed as the generic "webhook" label. Returns how many
+    notifications actually went out; a failure on one link never aborts the rest.
+    """
+    return _notify_created_links(WEBHOOK_HANDLE_LABEL, tuple(link_ids))
 
 
 @celery_app.task(name="incident.tasks.ingest_official_posts")
