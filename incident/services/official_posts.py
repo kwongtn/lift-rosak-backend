@@ -15,13 +15,17 @@ worker rather than an async resolver:
 * ingesting — ``ingest_posts`` is idempotent per ``(platform, post_id)``, backed
   by a partial unique constraint on the model plus a best-effort
   ``normalized_url`` check, and creates rows ``PENDING_APPROVAL`` because
-  approval is the publish gate (decision D4).
+  approval is the publish gate (decision D4). ``tweet_to_raw_post`` is also the
+  single HTML-entity decode point for the post text, so both ingest paths (poll
+  and webhook) store decoded text while ``raw_payload`` keeps the provider's
+  original bytes.
 
 Deliberate non-goals: no post classification, no cross-account content folding,
 no retries (the 5-minute beat tick *is* the retry), and no bare ``assert`` —
 every failure is an explicit exception in ``.errors``.
 """
 
+import html
 import json
 import logging
 from dataclasses import dataclass
@@ -75,8 +79,11 @@ SYSTEM_AUTHOR_FIREBASE_ID = "system:official-ingest"
 class RawPost:
     """One provider post, normalized but otherwise untouched.
 
-    ``text`` is verbatim (never translated or normalized) and ``raw`` is the
-    provider's own object, persisted as ``raw_payload`` for export fidelity.
+    ``text`` is verbatim apart from HTML-entity decoding, which
+    ``tweet_to_raw_post`` (the single mapping into this dataclass) has already
+    applied — it is never translated or normalized afterwards. ``raw`` is the
+    provider's own object, persisted as ``raw_payload`` for export fidelity, and
+    keeps the still-encoded form.
     """
 
     platform: str
@@ -190,6 +197,21 @@ def tweet_to_raw_post(tweet: dict[str, Any], handle: str) -> RawPost:
     Shared by the live fetch, the fixture loader **and** the webhook parser
     (``services/x_webhooks.py``) so all three produce identical rows from the
     same provider object; tweets without a usable id are skipped by the caller.
+
+    **This is the single HTML-entity decode point.** X delivers post text with
+    ``&amp;`` / ``&lt;`` / ``&gt;`` / ``&quot;`` / ``&#39;`` and numeric
+    references still encoded, and every ingest path (poll, fixture, webhook)
+    arrives here, so decoding once here stores the characters the operator
+    actually published instead of forcing every reader to know about escaping.
+    ``RawPost.text`` — and therefore ``SocialMediaLink.title`` (truncated to
+    ``TITLE_MAX_LENGTH``) and ``SocialMediaLink.description`` — is
+    verbatim-after-decoding. ``RawPost.raw`` is left exactly as the provider sent
+    it, so the stored payload keeps the encoded original for export fidelity.
+
+    Never decode a second time: ``&amp;amp;`` would be stored as ``&amp;`` and
+    a re-decode on the way out would silently turn it into ``&``. Likewise there
+    is nothing to unescape for a plain ``&`` — ``html.unescape`` leaves it
+    alone, which is the behaviour the tests pin.
     """
     post_id = str(tweet.get("id") or "").strip()
     if not post_id:
@@ -200,8 +222,9 @@ def tweet_to_raw_post(tweet: dict[str, Any], handle: str) -> RawPost:
         platform=IngestPlatform.X,
         post_id=post_id,
         handle=handle,
-        # Verbatim, byte for byte: BM post text is never translated or cleaned.
-        text=str(tweet.get("text") or ""),
+        # Verbatim, byte for byte, except for the one decode documented above:
+        # BM post text is never translated or cleaned.
+        text=html.unescape(str(tweet.get("text") or "")),
         posted_at=_parse_created_at(tweet.get("created_at") or ""),
         url=f"https://x.com/{handle}/status/{post_id}",
         has_media=_has_media(tweet),

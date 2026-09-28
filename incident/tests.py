@@ -59,6 +59,7 @@ from incident.services.official_posts import (
     latest_post_id,
     load_fixture_posts,
     resolve_handle_for_user_id,
+    tweet_to_raw_post,
 )
 from incident.services.urls import canonicalize_url
 from incident.services.x_webhooks import (
@@ -1566,6 +1567,96 @@ class OfficialPostIngestTests(TestCase):
         self.assertEqual(summary.created, 2)
         self.assertEqual(summary.created_ids, ())
         self.assertEqual(SocialMediaLink.objects.count(), 0)
+
+
+class OfficialPostEntityDecodingTests(TestCase):
+    """HTML entities are decoded once, at the ingest boundary.
+
+    ``tweet_to_raw_post`` is the single mapping behind the poll, the fixture
+    loader and the webhook parser, so a test here covers all three callers; the
+    webhook case additionally asserts what the stored row looks like.
+    """
+
+    #: X sends ``&amp;``/``&lt;``/``&gt;``/``&quot;``/``&#39;`` and numeric
+    #: references still encoded. The expected value is written out in full
+    #: rather than computed with ``html.unescape``, so the test states the
+    #: contract rather than restating the implementation.
+    ENCODED = (
+        "Jln &amp; LRT &lt;utara&gt; &quot;quote&quot; "
+        "&#39;apostrophe&#39; &#8212; 2026"
+    )
+    DECODED = "Jln & LRT <utara> \"quote\" 'apostrophe' — 2026"
+
+    def setUp(self):
+        self.author = get_system_author()
+
+    def _tweet(self, text, *, post_id="1791552310047416320"):
+        return {
+            "id": post_id,
+            "text": text,
+            "created_at": "2026-09-28T04:05:00.000Z",
+            "author_id": "2244994945",
+        }
+
+    def test_the_shared_mapping_decodes_named_and_numeric_entities(self):
+        post = tweet_to_raw_post(self._tweet(self.ENCODED), "askrapidkl")
+
+        self.assertEqual(post.text, self.DECODED)
+        # The provider object is untouched, so the stored payload keeps the
+        # encoded original for export fidelity.
+        self.assertEqual(post.raw["text"], self.ENCODED)
+
+    def test_a_plain_ampersand_is_left_exactly_as_sent(self):
+        plain = "Taman Bahagia & USJ 21, Selangor."
+
+        post = tweet_to_raw_post(self._tweet(plain), "askrapidkl")
+
+        self.assertEqual(post.text, plain)
+
+    def test_text_is_decoded_exactly_once(self):
+        # ``&amp;amp;`` is an escaped entity, not a literal ``&amp;``. Decoding
+        # twice would store ``&`` and quietly corrupt the post.
+        post = tweet_to_raw_post(self._tweet("a &amp;amp; b"), "askrapidkl")
+
+        self.assertEqual(post.text, "a &amp; b")
+
+    def test_the_fixture_loader_decodes_too(self):
+        # The other two callers of the shared mapping, so both store the same
+        # characters: a saved payload goes through the identical code path.
+        posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+
+        # The fixture holds a plain ``&``; decoding must leave it alone.
+        self.assertIn("&", posts[0].text)
+        self.assertNotIn("&amp;", posts[0].text)
+
+    def test_the_stored_row_is_decoded_and_the_raw_payload_is_not(self):
+        ingest_posts(
+            [tweet_to_raw_post(self._tweet(self.ENCODED), "askrapidkl")],
+            handle="askrapidkl",
+            author=self.author,
+        )
+
+        link = SocialMediaLink.objects.get(platform=IngestPlatform.X)
+        self.assertEqual(link.description, self.DECODED)
+        self.assertEqual(link.title, self.DECODED[:256])
+        self.assertEqual(link.raw_payload["text"], self.ENCODED)
+
+    def test_title_truncation_counts_decoded_characters(self):
+        # Longer than the CharField(256) once decoded: truncation must measure
+        # the decoded text, so ``description`` keeps every character and
+        # ``title`` is the first 256 of what the operator actually published.
+        decoded = "&" * 40 + "ekor " * 80
+        encoded = "&amp;" * 40 + "ekor " * 80
+        ingest_posts(
+            [tweet_to_raw_post(self._tweet(encoded), "askrapidkl")],
+            handle="askrapidkl",
+            author=self.author,
+        )
+
+        link = SocialMediaLink.objects.get(platform=IngestPlatform.X)
+        self.assertEqual(link.description, decoded)
+        self.assertEqual(link.title, decoded[:256])
+        self.assertEqual(len(link.title), 256)
 
 
 class OfficialPostTaskGuardTests(TestCase):
@@ -3184,6 +3275,9 @@ TEST_LEGACY_SECRET = "test-legacy-consumer-secret"
 WEBHOOK_AUTHOR_ID = "2244994945"
 WEBHOOK_POST_ID = "1791552310047416320"
 WEBHOOK_POST_TEXT = "Gangguan laluan utama &amp; penyehjangan(types): MTR"
+#: What the stored text must be: entities are decoded once, at the ingest
+#: boundary, so the row carries the characters the operator published.
+WEBHOOK_POST_TEXT_DECODED = "Gangguan laluan utama & penyehjangan(types): MTR"
 WEBHOOK_CREATED_AT = "2026-09-28T04:05:00.000Z"
 #: Header name for each signing candidate, kept next to the secret it pairs with
 #: so a test never has to guess which one the app prefers.
@@ -3771,6 +3865,36 @@ class XWebhookHandleResolutionTests(TestCase):
         self.assertIsNone(resolve_handle_for_user_id(""))
 
 
+class XWebhookEntityDecodingTests(TestCase):
+    """A real delivery stores decoded text while keeping the payload encoded.
+
+    The webhook is the primary ingest path, so this pins the end-to-end
+    contract: what the row says and what the export copy says.
+    """
+
+    def test_a_delivery_stores_decoded_text_and_keeps_the_encoded_payload(self):
+        result = ingest_webhook_payload(xaa_post_create_payload())
+
+        self.assertEqual(result.ingested, 1)
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        self.assertEqual(link.description, WEBHOOK_POST_TEXT_DECODED)
+        self.assertEqual(link.title, WEBHOOK_POST_TEXT_DECODED[:256])
+        # Export fidelity: the provider object is stored exactly as it arrived.
+        self.assertEqual(link.raw_payload["text"], WEBHOOK_POST_TEXT)
+
+    def test_a_delivery_with_an_already_escaped_entity_is_not_decoded_twice(self):
+        result = ingest_webhook_payload(
+            xaa_post_create_payload(text="a &amp;amp; b &#38;#39;")
+        )
+
+        self.assertEqual(result.ingested, 1)
+        link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
+        # One decode only: ``&amp;amp;`` is an escaped entity and ``&#38;#39;``
+        # an escaped numeric reference. A second pass would store a bare ``&``.
+        self.assertEqual(link.description, "a &amp; b &#39;")
+        self.assertEqual(link.raw_payload["text"], "a &amp;amp; b &#38;#39;")
+
+
 @no_debug_toolbar
 @override_settings(
     # Same reasoning as XWebhookHandleResolutionTests: the deprecated AAA
@@ -3844,9 +3968,11 @@ class XWebhookDeliveryViewTests(TestCase):
         self.assertEqual(link.status, SocialMediaLinkStatus.PENDING_APPROVAL)
         self.assertTrue(link.is_automated)
         self.assertEqual(link.user, get_system_author())
-        # Verbatim, byte for byte — including the ampersand.
-        self.assertEqual(link.description, WEBHOOK_POST_TEXT)
-        self.assertEqual(link.title, WEBHOOK_POST_TEXT[:256])
+        # Verbatim after the single entity decode, including the ampersand.
+        self.assertEqual(link.description, WEBHOOK_POST_TEXT_DECODED)
+        self.assertEqual(link.title, WEBHOOK_POST_TEXT_DECODED[:256])
+        # The provider object is kept whole for the export — still encoded.
+        self.assertEqual(link.raw_payload["text"], WEBHOOK_POST_TEXT)
         # The handle comes from includes.users; the permalink is built from it.
         self.assertEqual(link.source_handle, "askrapidkl")
         self.assertEqual(link.url, f"https://x.com/askrapidkl/status/{WEBHOOK_POST_ID}")
