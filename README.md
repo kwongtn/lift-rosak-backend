@@ -1,14 +1,14 @@
 # rosak_backend
 
 Backend for the rosak project — Malaysian public transport community platform.
-Django 4.2 + Strawberry GraphQL (async) on PostGIS, Celery + Redis for async work,
+Django 4.2 + Strawberry GraphQL (async) on PostGIS, Celery + Valkey for async work,
 served by Granian behind nginx. The Angular SPA lives in the sibling `rosak_firebase`
 repo and consumes `POST /graphql/`.
 
 ## Quick start
 
 ```bash
-docker compose up --build -d     # nginx :8000 → granian :8001, db (PostGIS), redis, celery
+docker compose up --build -d     # nginx :8000 → granian :8001, db (PostGIS), valkey, celery
 docker compose exec app python manage.py migrate
 docker compose exec app python manage.py check
 ```

@@ -16,10 +16,10 @@ This project has an OKF knowledge bundle at ./okf_bundle/.
 ## ⚡ Quick Commands
 
 Everything runs through Docker Compose — it is the only path that provides PostGIS,
-Redis and nginx together. Run `manage.py` inside the `app` service, never on the host.
+Valkey and nginx together. Run `manage.py` inside the `app` service, never on the host.
 
 ```bash
-# Dev stack (nginx :8000 → granian :8001, db, redis, celeryworker, celerybeat)
+# Dev stack (nginx :8000 → granian :8001, db, valkey, celeryworker, celerybeat)
 docker compose up --build          # add -d to detach
 docker compose logs -f app         # tail the API
 docker compose down                # stop
@@ -68,7 +68,7 @@ are assembled by _multiple inheritance_ in [rosak/schema.py](rosak/schema.py), s
 is no routing layer. Auth is Firebase bearer-token → lazily `get_or_create`'d
 `common.User` in [rosak/context.py](rosak/context.py), with per-request DataLoaders and
 three Strawberry permission classes (`IsLoggedIn` / `IsAdmin` / `IsRecaptcha`). Async
-work is Celery + Redis with **all six periodic jobs declared centrally** in
+work is Celery + valkey with **all six periodic jobs declared centrally** in
 [rosak/celery.py](rosak/celery.py); served by Granian ASGI behind nginx.
 
 **Do not guess at component interfaces.** Read the docs first:
@@ -141,7 +141,7 @@ table-less shared kernel that contributes zero migrations.
 - Line length 88, `E501` ignored, max mccabe complexity 18 ([.ruff.toml](.ruff.toml)).
   Ruff is authoritative — the stale black/flake8 hints in `.vscode/settings.json` are not.
 
-**Local-vs-prod gotcha:** `DEBUG=True` swaps the Redis cache for `DummyCache` and
+**Local-vs-prod gotcha:** `DEBUG=True` swaps the Valkey cache for `DummyCache` and
 disables GraphQL introspection guarding. Cache-related bugs will not reproduce locally.
 
 ---

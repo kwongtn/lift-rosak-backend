@@ -303,7 +303,7 @@ HEALTH_CHECK = {
     "MEMORY_MIN": 100,
 }
 
-REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
+REDIS_HOST = os.environ.get("REDIS_HOST", "valkey")
 REDIS_USERNAME = os.environ.get("REDIS_USERNAME", None)
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", None)
 REDIS_PORT = os.environ.get("REDIS_PORT", "6379")
