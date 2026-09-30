@@ -551,6 +551,18 @@ def ingest_posts(
     created (``created`` is therefore a projected count) but writes nothing, so a
     manual preview never has to create-then-delete. ``created_ids`` is empty in
     that mode, since no row exists to notify about.
+
+    Every create writes **both** datetime columns from the single
+    ``RawPost.posted_at``: ``occurred_at`` (the user-facing "when did this
+    happen" instant the card and every ordering are built on) and ``posted_at``
+    (read-only provider provenance, read by ``export_official_posts``). This
+    function is the ONLY writer of ``SocialMediaLink`` rows on the automated
+    path — the beat tick (``incident.tasks.ingest_official_posts``), the manual
+    command's live and ``--fixture`` runs, and the X webhook
+    (``services.x_webhooks.ingest_webhook_payload``) all arrive here — so writing
+    the pair in one place is what makes the split drift-proof. A duplicate
+    ``(socmed_account, post_id)`` or ``normalized_url`` match is skipped without
+    a write, so re-ingest never rewrites either column.
     """
     created = 0
     skipped = 0
@@ -598,7 +610,30 @@ def ingest_posts(
                     user=author,
                     socmed_account=account,
                     post_id=post.post_id,
+                    # Two columns, one source value, deliberately.
+                    #
+                    # ``posted_at`` is the read-only PROVIDER PROVENANCE column:
+                    # what the operator's account published, kept verbatim for
+                    # ``manage.py export_official_posts``, which is the one reader
+                    # that needs the provider's own instant rather than ours.
+                    # Nothing may read-modify-write it.
                     posted_at=post.posted_at,
+                    # ``occurred_at`` is the USER-FACING "when did this happen"
+                    # twin of the same instant: what the link card renders, and
+                    # what every feed ordering, day-grouping header and keyset
+                    # cursor is built on. Migration 0030 backfilled it as
+                    # ``COALESCE(posted_at, created)`` for pre-existing rows, so
+                    # an automated row that predates 0030 already carries exactly
+                    # this value and nothing needed repairing there.
+                    #
+                    # Both come from the one ``RawPost.posted_at``, so they cannot
+                    # drift on this path. Do not "fix" a divergence by converting
+                    # one into the other: ``USE_TZ = False`` with
+                    # ``TIME_ZONE = "Asia/Kuala_Lumpur"`` means the aware value
+                    # above is already shifted into naive local by the ORM adapter
+                    # (MISTAKES.md 2026-09-26), so an extra make_aware/astimezone
+                    # here would double-shift every post by +08:00.
+                    occurred_at=post.posted_at,
                     raw_payload=post.raw,
                 )
         except IntegrityError:

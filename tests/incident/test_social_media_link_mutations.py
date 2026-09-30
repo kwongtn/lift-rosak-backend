@@ -391,9 +391,12 @@ async def test_admin_resolver_filters():
             station_ids=(station.id,),
         ),
     )
-    # Force created to a deterministic value for date-range filtering.
+    # Force the event time (and the submission time, for provenance) to a
+    # deterministic value for date-range filtering. The queue windows on
+    # ``occurred_at``: the resolver's args were renamed from
+    # created_after/created_before with the ordering migration.
     await sync_to_async(SocialMediaLink.objects.filter(pk=link_all.id).update)(
-        created=base_time
+        created=base_time, occurred_at=base_time
     )
 
     link_none = await services.submit_social_media_link(
@@ -424,10 +427,10 @@ async def test_admin_resolver_filters():
     assert link_all.id in ids
     assert link_none.id not in ids
 
-    # created_after / created_before range
+    # occurred_after / occurred_before range
     res = await get_social_media_links(
         None,
-        created_after=strawberry.Some(base_time.replace(microsecond=0)),
+        occurred_after=strawberry.Some(base_time.replace(microsecond=0)),
     )
     ids = {link.id for link in res}
     assert link_all.id in ids

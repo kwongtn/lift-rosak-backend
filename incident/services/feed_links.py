@@ -6,6 +6,7 @@ an existing row is never inserted twice — the existing row is returned with a
 duplicate indicator and the submitter is upvoted instead.
 """
 
+import datetime as dt
 import hashlib
 from dataclasses import dataclass
 
@@ -133,7 +134,22 @@ async def submit_feed_link(
     status: str | None,
     delay_minutes: int | None,
     notes: str,
+    occurred_at: dt.datetime | None = None,
 ) -> FeedLinkResult:
+    """Submit a feed link. ``occurred_at`` is the "when did this happen" instant.
+
+    ``occurred_at`` is deliberately a flat kwarg, not a tri-state sentinel like
+    ``social_links.SocialMediaLinkWrite``: this path only ever INSERTS, and the
+    column is NOT NULL, so "omitted" and "explicit null" have exactly one
+    possible meaning — let the model default fire. The kwarg is therefore
+    omitted from the INSERT when None (passing None would raise IntegrityError).
+
+    A duplicate canonical URL still short-circuits to the pre-existing row and
+    the submitter is upvoted instead: that dedup is the feed path's whole point
+    (one row per canonical URL, not one per submission), so a re-submission
+    does NOT update the original's ``occurred_at`` — the first report's event
+    time is kept, and the duplicate is a second report *of that same event*.
+    """
     canonical = canonicalize_url(url)
     if status is not None and not line_ids:
         raise FeedLinkValidationError(
@@ -177,6 +193,11 @@ async def submit_feed_link(
                 title=final_title[:256],
                 user=user,
                 status=SocialMediaLinkStatus.LIVE,
+                # Omitted, never None: NOT NULL column with
+                # ``default=timezone.now`` — "it happened now" has to be the
+                # model's one source of truth, not a second timezone.now()
+                # evaluated here.
+                **({"occurred_at": occurred_at} if occurred_at is not None else {}),
             )
 
             if line_ids:

@@ -5,6 +5,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.gis.db import models
 from django.contrib.gis.db.models import Q
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django_choices_field import TextChoicesField
@@ -489,6 +490,51 @@ class SocialMediaLink(TimeStampedModel):
     # Untouched provider payload, kept for export fidelity. No raw-audit table.
     raw_payload = models.JSONField(default=dict, blank=True)
 
+    # --- Display datetime + thread grouping -----------------------------------
+    # ``occurred_at`` is the user-facing "when did this happen" instant: what the
+    # card renders and what every feed/queue ordering is built on. It is NOT the
+    # same thing as ``created`` (submission time), which stays the provenance
+    # column for moderation ("when did someone report this?").
+    #
+    # Deliberately NON-NULL. Keyset pagination orders by ``-occurred_at, -id``
+    # and needs a *total* order; a nullable column would push ``Coalesce`` into
+    # every filter and every ``.order_by()`` and would silently sort NULLs last
+    # (Postgres default) instead of first on a DESC scan.
+    #
+    # ``posted_at`` remains the read-only provider provenance column for
+    # ``export_official_posts``; ingestion writes BOTH from the same value, and
+    # the 0030 backfill seeds ``occurred_at`` from ``COALESCE(posted_at, created)``.
+    # ``db_index=True`` is technically subsumed by the composite index below,
+    # whose leading column is ``occurred_at`` (a btree serves both scan
+    # directions), so it is redundant-but-harmless rather than load-bearing. It
+    # is kept because ``occurred_at`` is a public, widely-queried contract and
+    # the composite index is DESC-only in intent.
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    # Self-referencing grouping. A thread is represented by its ROOT row: the
+    # root has ``thread_id is None`` and IS the thread; every other member points
+    # at that root through this FK.
+    #
+    # INVARIANT (documented here, enforced by the grouping service, not by the DB):
+    # ``thread`` ALWAYS points at a ROOT — i.e. ``link.thread.thread_id is None``.
+    # A member never points at another member, and the graph is therefore exactly
+    # one level deep with no cycles. A resolver can safely assume
+    # ``thread.thread_members`` are all direct members with no further hop.
+    #
+    # ``on_delete=SET_NULL`` is a deliberate trade: deleting a root UN-THREADS its
+    # members (they become singletons, ``thread_id`` back to NULL) instead of
+    # cascading a group-delete the operator never asked for. Losing the grouping
+    # is recoverable; losing the links is not. Group deletions are a separate,
+    # explicit act (``thread=None`` per link, then delete), not a cascade.
+    thread = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        related_name="thread_members",
+    )
+
     class Meta:
         constraints = [
             # Structural idempotency backstop for re-scrape; the service also
@@ -497,6 +543,18 @@ class SocialMediaLink(TimeStampedModel):
                 fields=["socmed_account", "post_id"],
                 condition=Q(socmed_account__isnull=False, post_id__isnull=False),
                 name="socialmedialink_unique_account_post",
+            ),
+        ]
+        indexes = [
+            # The keyset-pagination path: every ordered feed/queue page is
+            # ``WHERE <window> ORDER BY occurred_at DESC, id DESC LIMIT n``, and
+            # the keyset cursor is the ``(occurred_at, id)`` pair. ``-id`` is the
+            # tie-break that makes the order total, so it has to be IN the index —
+            # an index on ``occurred_at`` alone would still need a sort once two
+            # links share an instant. Explicit name because the auto-generated
+            # one is hashed to fit Django's 30-char ``Index`` name budget.
+            models.Index(
+                fields=["-occurred_at", "-id"], name="socialmedialink_occurred_idx"
             ),
         ]
 

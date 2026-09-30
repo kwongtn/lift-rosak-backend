@@ -28,6 +28,16 @@ Semantics worth knowing before running it:
   ``socmed_account`` export ``""``. ``text`` is the stored
   ``description`` **verbatim**, and ``posted_at`` is that column's own
   ISO-8601 form (``null`` stays ``null``).
+* The export deliberately stays on ``posted_at`` and not on the newer
+  ``occurred_at``. The two are the same instant, split by role: ``occurred_at``
+  is the user-facing twin the feed card renders, backfilled from ``posted_at`` by
+  migration 0030 and written alongside it by ``ingest_posts`` ever since;
+  ``posted_at`` remains the read-only provider provenance column, and this
+  command's entire purpose is to leave the system carrying the provider's own
+  value. So a consumer that wants "when the platform renders this" should read
+  ``occurred_at``; one that wants provider fidelity — which is what an archive
+  is — keeps reading ``posted_at``, and swapping the column would quietly change
+  the meaning of every previously published export.
 * Rows stream out of the database via ``.iterator()``, so an export never
   materialises the table. ``--push-to-hub`` is the one exception:
   ``Dataset.from_dict`` takes the whole record set, not a cursor.

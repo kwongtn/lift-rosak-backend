@@ -123,10 +123,17 @@ async def batch_load_incident_links(keys):
         CalendarIncident
     )
 
+    # ``-occurred_at, -id`` (NOT ``-created``): every other link list in the
+    # schema orders on the event instant, and this one has to match so a nested
+    # card list and a feed page cannot disagree about which link is "newest" —
+    # an incident whose newest submission was about last Tuesday must not sort
+    # its newest-event link below a fresher report. The ``(occurred_at, id)``
+    # pair is also what the keyset cursor encodes, so ordering here and the
+    # cursor in ``CalendarIncidentScalar.links`` cannot drift apart.
     links = SocialMediaLink.objects.filter(
         content_type=content_type,
         object_id__in=incident_ids,
-    ).order_by("-created", "-id")
+    ).order_by("-occurred_at", "-id")
 
     target = max_first + 1
     by_incident = defaultdict(list)
@@ -140,6 +147,54 @@ async def batch_load_incident_links(keys):
     return [by_incident.get(key[0], [])[: key[1] + 1] for key in keys]
 
 
+async def batch_load_thread_members(keys):
+    """
+    Batch load the members of each link thread.
+
+    Keys: list of ``SocialMediaLink`` ids (``int``) — ``SocialMediaLinkScalar
+    .threadLinks`` / ``.threadSize``. Callers pass ``self.id`` unconditionally
+    rather than branching on root-ness first: only a root has members, and a
+    non-root simply has nothing pointing at it, so it comes back empty. Working
+    that out per row would cost a second round trip (is this id a root?) to
+    learn something the answer already implies.
+
+    Returns: list of lists of SocialMediaLink, aligned to keys. Each list holds
+    the thread MEMBERS only — never the root row itself, which the caller already
+    has — ordered ``occurred_at ASC, id ASC``. A thread reads oldest-first
+    because the root is its earliest link by construction, so its followers sort
+    after it; ``id`` is the tie-break that keeps the order total when two members
+    share an instant. Every key gets a list back (empty for no members), never
+    a missing key, hence the ``defaultdict`` + ``.get``.
+
+    Deliberately NOT filtered for public visibility: this loader is the data
+    layer, and the moderation rule lives in exactly one place
+    (``incident.services.social_link_visibility.is_publicly_visible``). Duplicating
+    it as a queryset ``.exclude()`` here is how two copies drift, and a stale
+    copy in a loader is the copy that leaks hidden rows through a thread badge.
+    The scalar field filters the returned rows with the shared predicate
+    instead — same rows, one rule.
+
+    There is deliberately NO sibling member-COUNT loader. ``threadSize`` and
+    ``threadLinks`` both read THIS loader: the count is derived from the same
+    filtered list, which is one query instead of two (the loader caches per
+    request) and makes it structurally impossible for the badge to disagree with
+    the list it labels. A separate raw count loader — "how many rows point at
+    this root, regardless of moderation" — was written and removed: no field
+    consumed it, and adding one is the first step towards a public field reading
+    it and quietly exposing hidden members. If a moderation surface ever needs a
+    raw count, count the rows it already loaded.
+    """
+    members = SocialMediaLink.objects.filter(thread_id__in=keys).order_by(
+        "occurred_at", "id"
+    )
+
+    by_root = defaultdict(list)
+    async for member in members:
+        by_root[member.thread_id].append(member)
+
+    return [by_root.get(key, []) for key in keys]
+
+
 IncidentContextLoaders = {
     "medias_from_calendar_incident_loader": DataLoader(
         load_fn=batch_load_medias_from_calendar_incident
@@ -148,4 +203,5 @@ IncidentContextLoaders = {
     "vote_breakdown": DataLoader(batch_load_vote_breakdown),
     "user_vote_value": DataLoader(batch_load_user_vote_value),
     "incident_links": DataLoader(batch_load_incident_links),
+    "thread_members": DataLoader(batch_load_thread_members),
 }

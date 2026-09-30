@@ -1,5 +1,7 @@
 """Vote, social media link, and extraction mutations."""
 
+from typing import List, Optional
+
 import strawberry
 from graphql.error import GraphQLError
 from strawberry.types import Info
@@ -13,6 +15,17 @@ from incident.schema.inputs import (
     SocialMediaLinkInput,
 )
 from incident.schema.scalars import ExtractedIncidentDataScalar, FeedLinkPayload
+
+# Imported from the submodule, NOT as ``services.UNSET``: the service package
+# re-exports the write helpers, and this sentinel is a detail of the write
+# dataclass's tri-state, not a public service API. Do not "tidy" it into the
+# package namespace.
+#
+# ``social_link_threads`` follows the same rule as the sentinel above and
+# ``social_link_visibility`` does: grouping is a self-contained service, so it
+# is referenced by module rather than added to the package re-export.
+from incident.services import social_link_threads
+from incident.services.social_links import UNSET as OCCURRED_AT_UNSET
 from rosak.permissions import IsAdmin, IsLoggedIn, has_admin_claim
 
 from .shared import maybe_value, raise_service_error
@@ -108,6 +121,9 @@ class SocialMediaLinkMutations:
                     line_ids=tuple(maybe_value(input.line_ids) or ()),
                     vehicle_ids=tuple(maybe_value(input.vehicle_ids) or ()),
                     station_ids=tuple(maybe_value(input.station_ids) or ()),
+                    # Omitted and explicit null both mean "now()": there is no
+                    # null state at insert time, the column is NOT NULL.
+                    occurred_at=maybe_value(input.occurred_at),
                 ),
             )
         except services.IncidentServiceError as exc:
@@ -153,6 +169,17 @@ class SocialMediaLinkMutations:
                     vehicle_ids=tuple(maybe_value(input.vehicle_ids) or ()),
                     station_ids=tuple(maybe_value(input.station_ids) or ()),
                     status=input.status.value if input.status else None,
+                    # Tri-state, and all three states differ: UNSET (a falsy
+                    # Maybe — Strawberry's ``Some.__bool__`` is always True, so
+                    # this is exactly "omitted") must reach the service as its
+                    # own sentinel. Collapsing it into the explicit null would
+                    # silently reset the event time to the submission instant
+                    # on every partial re-send.
+                    occurred_at=(
+                        OCCURRED_AT_UNSET
+                        if not input.occurred_at
+                        else input.occurred_at.value
+                    ),
                 ),
             )
         except services.IncidentServiceError as exc:
@@ -168,6 +195,54 @@ class SocialMediaLinkMutations:
                 info.context.user,
                 link_id=int(social_media_link_id),
                 is_admin=True,
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def group_social_media_links(
+        self,
+        info: Info,
+        link_ids: List[strawberry.ID],
+        thread_id: Optional[strawberry.ID] = None,
+    ) -> GenericMutationReturn:
+        """Group links into one thread; omit ``threadId`` to start a new one.
+
+        Deliberately a dedicated id-only mutation rather than a mode of
+        ``updateSocialMediaLink``: that input is REPLACE-NOT-PATCH (it blanks
+        ``title`` and strips four M2M tag sets on every call), so routing a
+        grouping action through it would silently destroy the links' metadata.
+
+        Returns the root's id in ``id`` so the client can refetch that one
+        thread (root + members) instead of guessing which row it now belongs
+        to — the same convention ``submitLineStatusReport`` uses.
+        """
+        is_admin = await has_admin_claim(info.context.user)
+        try:
+            root = await social_link_threads.group_social_media_links(
+                info.context.user,
+                is_admin=is_admin,
+                link_ids=[int(link_id) for link_id in link_ids],
+                thread_id=(int(thread_id) if thread_id is not None else None),
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True, id=root.id)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def ungroup_social_media_links(
+        self, info: Info, link_ids: List[strawberry.ID]
+    ) -> GenericMutationReturn:
+        """Detach the given links from their threads. ``ok`` only — there is no
+        row to name back, since ungrouping a root leaves its members in place.
+        """
+        is_admin = await has_admin_claim(info.context.user)
+        try:
+            await social_link_threads.ungroup_social_media_links(
+                info.context.user,
+                is_admin=is_admin,
+                link_ids=[int(link_id) for link_id in link_ids],
             )
         except services.IncidentServiceError as exc:
             raise_service_error(exc)
@@ -192,6 +267,9 @@ class SocialMediaLinkMutations:
                 status=maybe_value(input.status),
                 delay_minutes=maybe_value(input.delay_minutes),
                 notes=maybe_value(input.notes, "") or "",
+                # Omitted and explicit null both mean "now()": the column is
+                # NOT NULL, so the default has to fire in the INSERT.
+                occurred_at=maybe_value(input.occurred_at),
             )
         except services.IncidentServiceError as exc:
             raise_service_error(exc)

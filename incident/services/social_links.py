@@ -1,6 +1,8 @@
 """Social media link submission and completion business logic."""
 
+import datetime as dt
 from dataclasses import dataclass
+from typing import Any
 
 from asgiref.sync import sync_to_async
 from django.contrib.contenttypes.models import ContentType
@@ -12,6 +14,26 @@ from incident.models import CalendarIncident, SocialMediaLink
 
 from .access import get_incident
 from .errors import IncidentServiceError
+
+
+class _Unset:
+    """Sentinel type for "the caller never mentioned this field".
+
+    Named and shaped after ``strawberry.UNSET`` so the mutation layer can hand
+    an omitted GraphQL field straight through instead of inventing a private
+    vocabulary. Falsy, so ``if not write.x`` treats it as absent.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+UNSET = _Unset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +49,17 @@ class SocialMediaLinkWrite:
     station_ids: tuple[int, ...] = ()
     # None = don't change (update); enum value = set to that value.
     status: str | None = None
+    # TRIP-STATE, and the three states do NOT mean the same thing on the two
+    # write paths, so read the call site before reusing this field:
+    #   UNSET         -> update: leave the stored value alone;
+    #                    submit: omit the kwarg so the column default fires.
+    #   datetime      -> set verbatim, both paths.
+    #   None          -> update: reset to ``link.created`` ("this happened when
+    #                    it was reported"), the one always-present non-null
+    #                    fallback since a community link has no provider post
+    #                    time; submit: no explicit-null state exists, the
+    #                    column is NOT NULL, so it collapses to the default.
+    occurred_at: dt.datetime | None | _Unset = UNSET
 
 
 async def submit_social_media_link(
@@ -46,6 +79,16 @@ async def submit_social_media_link(
         if is_admin
         else SocialMediaLinkStatus.PENDING_APPROVAL
     )
+    # Omitted entirely (not passed as None) when the caller gave no
+    # ``occurred_at``: the column is NOT NULL with ``default=timezone.now``, and
+    # the INSERT already generates ``created`` in the same statement, so the
+    # default lands within microseconds of it. Passing None here would violate
+    # NOT NULL (IntegrityError), and passing timezone.now() ourselves would
+    # duplicate the model's one source of truth for "when nothing was supplied".
+    occurred_at_kwargs: dict[str, Any] = {}
+    if isinstance(write.occurred_at, dt.datetime):
+        occurred_at_kwargs["occurred_at"] = write.occurred_at
+
     link = await sync_to_async(SocialMediaLink.objects.create)(
         url=write.url,
         title=write.title or "",
@@ -54,6 +97,7 @@ async def submit_social_media_link(
         status=status,
         content_type=content_type,
         object_id=object_id,
+        **occurred_at_kwargs,
     )
     if write.category_ids:
         await sync_to_async(link.categories.set)(write.category_ids)
@@ -101,6 +145,15 @@ async def update_social_media_link(
             link.description = write.description
         if write.status is not None:
             link.status = write.status
+        if isinstance(write.occurred_at, dt.datetime):
+            link.occurred_at = write.occurred_at
+        elif write.occurred_at is None:
+            # Explicit null, not an omission: the caller wants the "happened
+            # when it was reported" reading back. ``link.created`` is the only
+            # non-null value guaranteed to exist on every link (occurred_at is
+            # NOT NULL, posted_at is provider-only and usually NULL here).
+            link.occurred_at = link.created
+        # else: UNSET — leave whatever the card already renders alone.
         if write.incident_id is not None:
             content_type = ContentType.objects.get_for_model(CalendarIncident)
             link.content_type = content_type

@@ -1325,7 +1325,14 @@ class PublicFeedContractTests(TestCase):
             url=f"https://example.com/{slug}", title=slug, user=self.user
         )
         if created is not None:
-            SocialMediaLink.objects.filter(id=link.id).update(created=created)
+            # ``created`` comes from TimeStampedModel (auto_now_add) and cannot
+            # be set through create(). ``occurred_at`` IS the column the feed
+            # orders and windows on (the ordering migration), so the fixtures
+            # move both: setting only ``created`` would now be a no-op as far as
+            # the feed is concerned.
+            SocialMediaLink.objects.filter(id=link.id).update(
+                created=created, occurred_at=created
+            )
             link.refresh_from_db()
         return link
 
@@ -1413,8 +1420,15 @@ class PublicFeedLastWeekAndDayAlignTests(TestCase):
             url=f"https://example.com/{slug}", title=slug, user=self.user
         )
         # created comes from TimeStampedModel (auto_now_add): it cannot be set
-        # through create(), only updated afterwards.
-        SocialMediaLink.objects.filter(pk=link.pk).update(created=created)
+        # through create(), only updated afterwards. The feed orders, windows
+        # and aligns days on ``occurred_at`` (the ordering migration), so the
+        # fixture moves both columns; keeping them equal is what makes these
+        # tests still be about the feature they were written for. The
+        # disagreeing-columns version of the same contract lives in
+        # tests/incident/test_social_link_feed_ordering.py.
+        SocialMediaLink.objects.filter(pk=link.pk).update(
+            created=created, occurred_at=created
+        )
         link.refresh_from_db()
         return link
 

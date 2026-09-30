@@ -326,7 +326,11 @@ class CalendarIncidentLinksTests(TransactionTestCase):
         connection = await self._links(incident.id)
         cursor = connection["edges"][0]["cursor"]
         reloaded = await sync_to_async(SocialMediaLink.objects.get)(id=link.id)
-        self.assertEqual(decode_keyset_cursor(cursor), (reloaded.created, reloaded.id))
+        # Both link surfaces order on ``occurred_at`` (the ordering migration),
+        # so that is what the shared cursor carries.
+        self.assertEqual(
+            decode_keyset_cursor(cursor), (reloaded.occurred_at, reloaded.id)
+        )
         self.assertEqual(encode_keyset_cursor(*decode_keyset_cursor(cursor)), cursor)
 
         # The same cursor drives the root resolver's keyset predicate — walk one
@@ -554,8 +558,11 @@ class PublicSocialMediaLinkTests(TransactionTestCase):
 
         now = timezone.now()
         back_dated = _make_link(120)
+        # The service-day window is on ``occurred_at`` (the ordering migration),
+        # so the fixture has to move that column, not just ``created``.
         SocialMediaLink.objects.filter(id=back_dated.id).update(
-            created=service_day_start(now) - timedelta(minutes=1)
+            created=service_day_start(now) - timedelta(minutes=1),
+            occurred_at=service_day_start(now) - timedelta(minutes=1),
         )
         current = _make_link(121)
 

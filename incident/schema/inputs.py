@@ -72,6 +72,20 @@ class SocialMediaLinkInput:
     station_ids: Maybe[List[strawberry.ID] | None] = strawberry.UNSET
     # Tri-state: omit to leave unchanged on update; set explicitly to change.
     status: Maybe[SocialMediaLinkStatusInput | None] = strawberry.UNSET
+    # When the linked event HAPPENED, as opposed to ``created`` ("when someone
+    # reported it"). Tri-state, and the third state is meaningful:
+    #   omitted  -> update: leave unchanged.  submit: now().
+    #   a value  -> set it (this is what every feed ordering is built on).
+    #   explicit null -> update: reset to the submission time, i.e. "this
+    #               happened when it was reported" — the documented escape
+    #               hatch, since the column is NOT NULL and cannot hold null.
+    # TRAP: this input is REPLACE-NOT-PATCH. The service assigns ``title`` and
+    # calls ``.set()`` on four M2Ms unconditionally, so any caller re-sending a
+    # payload that drops ``occurredAt`` also silently resets the event time to
+    # "submitted" (on update: unchanged; on a re-create: now()). Every console
+    # status change — Approve, Hide, Mark completed — must round-trip this
+    # field, exactly like the fields above.
+    occurred_at: Maybe[dt.datetime | None] = strawberry.UNSET
 
 
 @strawberry.input
@@ -84,6 +98,17 @@ class FeedLinkInput:
     status: Maybe[PassengerStatusInput | None] = strawberry.UNSET
     delay_minutes: Maybe[int | None] = strawberry.UNSET
     notes: Maybe[str | None] = strawberry.UNSET
+    # When the linked event HAPPENED, as opposed to ``created`` ("when someone
+    # reported it"). Two states, because this path only ever INSERTS and the
+    # column is NOT NULL:
+    #   omitted / explicit null -> now(); the model default fires in the INSERT.
+    #   a value                 -> stored verbatim, and it is what every feed
+    #                             ordering (and thread-root selection) reads.
+    # Unlike SocialMediaLinkInput there is no "reset to submitted" state to
+    # express: the feed has no update path, so a second submission of the same
+    # canonical URL is a duplicate, not an edit — the pre-existing row is
+    # returned untouched (see ``services.feed_links.submit_feed_link``).
+    occurred_at: Maybe[dt.datetime | None] = strawberry.UNSET
 
 
 @strawberry.input

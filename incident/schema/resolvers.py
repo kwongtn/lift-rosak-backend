@@ -6,7 +6,7 @@ import pendulum
 import strawberry
 from asgiref.sync import sync_to_async
 from django.contrib.contenttypes.models import ContentType
-from django.db.models import Count, Min, Q
+from django.db.models import Count, Exists, Min, OuterRef, Q
 from django.utils import timezone
 from strawberry.exceptions import GraphQLError
 from strawberry.types import Info
@@ -230,12 +230,36 @@ async def get_social_media_links(
     line_id: strawberry.Maybe[strawberry.ID] = None,
     vehicle_id: strawberry.Maybe[strawberry.ID] = None,
     station_id: strawberry.Maybe[strawberry.ID] = None,
-    created_after: strawberry.Maybe[datetime] = None,
-    created_before: strawberry.Maybe[datetime] = None,
+    occurred_after: strawberry.Maybe[datetime] = None,
+    occurred_before: strawberry.Maybe[datetime] = None,
 ) -> List[SocialMediaLink]:
-    """Console social-media-link queue, newest submissions first."""
+    """Console social-media-link queue, newest *occurrence* first.
 
-    queryset = SocialMediaLink.objects.all().order_by("-created")
+    Ordered ``-occurred_at, -id``. The queue answers "what happened most
+    recently?", which is the same question the public feed answers, so an admin
+    moderating the top of this list is looking at the rows a visitor sees at the
+    top of the feed. The ``-id`` tie-break makes the order total: ``occurred_at``
+    is NOT NULL but is not unique (an admin can group posts that share a
+    minute), and a single-key order would leave equal rows in an arbitrary order
+    that can change between two identical queries — which, with no cursor here,
+    looks like the queue shuffling under the admin.
+
+    ``occurred_after`` / ``occurred_before`` are inclusive (``>=`` / ``<=``) and
+    window on ``occurred_at`` — the same column the sort uses, so the filter can
+    never exclude the very rows at the top of the list. An admin who needs the
+    *submission*-time view ("what did we just get handed?") still has it: it is
+    the ``created`` column on every row below.
+
+    ⚠️ **Breaking GraphQL argument rename** (accepted deliberately): the filters
+    were ``createdAfter`` / ``createdBefore`` and are now ``occurredAfter`` /
+    ``occurredBefore``. The old names are *not* aliased — passing them is a
+    GraphQL validation error ("Unknown argument"), not a silent no-op, so a
+    stale client fails loudly instead of quietly filtering on the wrong column.
+    The admin console is updated in the same change; any other caller must be
+    renamed too.
+    """
+
+    queryset = SocialMediaLink.objects.all().order_by("-occurred_at", "-id")
 
     if search is not None and (term := search.value.strip()):
         queryset = queryset.filter(Q(url__icontains=term) | Q(title__icontains=term))
@@ -255,11 +279,11 @@ async def get_social_media_links(
     if station_id is not None:
         queryset = queryset.filter(stations__id=int(station_id.value))
 
-    if created_after is not None:
-        queryset = queryset.filter(created__gte=created_after.value)
+    if occurred_after is not None:
+        queryset = queryset.filter(occurred_at__gte=occurred_after.value)
 
-    if created_before is not None:
-        queryset = queryset.filter(created__lte=created_before.value)
+    if occurred_before is not None:
+        queryset = queryset.filter(occurred_at__lte=occurred_before.value)
 
     return [link async for link in queryset.distinct()]
 
@@ -271,8 +295,59 @@ def last_week_start(now: datetime) -> datetime:
     is the local midnight six days before ``now`` — the window covers today plus
     the previous six calendar days (seven date groups, inclusive). Mirrors the
     naive-day arithmetic of ``service_day_start``.
+
+    The window is applied to ``occurred_at``, not ``created``: it answers "which
+    days is this view showing?", and a backdated report belongs to the day it
+    happened. Filtering on ``created`` instead would open the window on
+    submission time and admit (or hide) rows whose *event* day is outside it,
+    which contradicts the ``occurred_at`` ordering the same page is rendered in.
     """
     return datetime.combine((now - timedelta(days=6)).date(), time.min)
+
+
+def _event_window(bound: datetime, *, collapse: bool) -> Q:
+    """``occurred_at >= bound``, widened to the whole thread when collapsed.
+
+    On the flat feed a row IS an event, so the window is one comparison. Under
+    ``collapse_threads`` a row is a THREAD rendered by its root, and the two are
+    no longer the same question: the window asks "did this happen in this
+    window?", and a collapsed card's answer is "did *anything* in this
+    conversation happen in this window?". Filtering on the root alone answers a
+    stricter question than the flag advertises — ``currentServiceDayOnly`` reads
+    as "today's activity", not "threads that started today".
+
+    The root-only reading is not a near-miss: grouping elects the EARLIEST link
+    as root precisely so a thread reads oldest-first, which means every member
+    is LATER than its root by construction. A conversation that opened before
+    the window and got a follow-up inside it therefore has a root outside the
+    window and a member inside it, and the root-keyed filter drops the entire
+    thread from the feed the follow-up belongs in. Since the collapsed surface
+    renders the ROOT, the member is then not merely unlisted — it is
+    unreachable, which is what makes this worth fixing rather than documenting.
+    That shape needs no ``occurredAt`` edit; the editable event time only adds
+    the mirror-image case on top of it, where an admin moves a member EARLIER
+    than its root and the "root is earliest" premise stops holding outright.
+
+    The converse is accepted, not fixed: a root admitted only because a member
+    is in the window carries the ROOT's (older) timestamp on the card, so a
+    "today" feed can show a card stamped before today. Ordering stays on the
+    root for the same reason the keyset cursor does — the row is the page unit,
+    so a mixed-thread page still has one deterministic order. The card nests the
+    in-window member next to it, which is the honest rendering: the
+    conversation did have something today.
+
+    Implemented as a correlated ``EXISTS`` rather than a join to
+    ``thread_members`` on purpose: a join multiplies a root by its number of
+    in-window members, which would inflate ``totalCount`` and repeat edges
+    within one page unless every downstream filter also carried ``.distinct()``.
+    ``Exists`` cannot multiply rows, so the collapsed page, its count and its
+    keyset are byte-identical to the flat path apart from the extra predicate.
+    """
+    if not collapse:
+        return Q(occurred_at__gte=bound)
+    return Q(occurred_at__gte=bound) | Exists(
+        SocialMediaLink.objects.filter(thread_id=OuterRef("pk"), occurred_at__gte=bound)
+    )
 
 
 async def get_public_social_media_links(
@@ -287,37 +362,128 @@ async def get_public_social_media_links(
     current_service_day_only: bool = False,
     last_week_only: bool = False,
     align_page_to_day: bool = False,
+    collapse_threads: bool = False,
 ) -> SocialMediaLinkConnection:
     """Public social-media-link feed, cursor-paginated.
 
-    Cursor is base64("<created_iso>|<id>"); ordering is created DESC, id DESC
-    (id as tiebreaker) so keyset cursors never skip/duplicate. ``mine`` returns
-    only the caller's own links (status-independent); anonymous ``mine`` returns
-    an empty page. ``status`` optionally narrows the feed to one approval status;
-    omitted, both LIVE and PENDING_APPROVAL are returned (unchanged default) —
-    except for automatically ingested posts, which are excluded while
-    ``PENDING_APPROVAL`` so an official announcement only becomes public once
-    an admin approves it. ``HIDDEN`` rows are never returned on this public
-    feed, not even when asked for by name. ``current_service_day_only`` keeps
-    only links created within the current service day (03:00 rollover, see
-    ``service_day_start``). ``last_week_only`` keeps only links created at/after
-    local midnight six days ago — today plus the previous six calendar days, a
-    seven-day window (see ``last_week_start``); it composes with
-    ``current_service_day_only`` (both narrow the same queryset). ``totalCount``
-    is the size of the whole filtered set, unaffected by the ``after`` cursor
-    and by ``align_page_to_day``.
+    **Ordering —** ``occurred_at DESC, id DESC``. The feed answers "what
+    happened most recently?", so the leading key is the *event* time
+    (``occurred_at``), not the submission time (``created``), which stays the
+    provenance column an admin moderates against. ``occurred_at`` is NOT NULL, so
+    the order is total; ``id`` is the tie-break because it is not unique (an
+    admin can group posts that share a minute), and without it a cursor could
+    both skip and duplicate rows sharing a timestamp. Both window flags below
+    are on the same column, deliberately: ordering by ``occurred_at`` while
+    windowing by ``created`` puts a backdated report at the top of a day it does
+    not belong to.
+
+    **Cursor —** base64("<occurred_at isoformat>|<id>"), the same helper
+    ``incident.schema.keyset`` provides. The keyset predicate is
+    ``occurred_at < cursor OR (occurred_at = cursor AND id < cursor_id)``. An
+    old cursor (one whose payload is a submission timestamp) still *decodes* —
+    the payload is an opaque ISO datetime — but it now means "the row after
+    this ``occurred_at``", so a cursor minted by an older deployment resumes at
+    a position that may skip or repeat rows. In-flight cursors across a deploy
+    are therefore not guaranteed to be seamless; relaunch the feed from page one.
+
+    ``mine`` returns only the caller's own links (status-independent);
+    anonymous ``mine`` returns an empty page. ``status`` optionally narrows the
+    feed to one approval status; omitted, both LIVE and PENDING_APPROVAL are
+    returned (unchanged default) — except for automatically ingested posts,
+    which are excluded while ``PENDING_APPROVAL`` so an official announcement
+    only becomes public once an admin approves it. ``HIDDEN`` rows are never
+    returned on this public feed, not even when asked for by name.
+    ``current_service_day_only`` keeps only links that *occurred* within the
+    current service day (03:00 rollover, see ``service_day_start``).
+    ``last_week_only`` keeps only links occurring at/after local midnight six
+    days ago — today plus the previous six calendar days, a seven-day window
+    (see ``last_week_start``); it composes with ``current_service_day_only``
+    (both narrow the same queryset).
+
+    ``collapse_threads`` (default ``False``) swaps the flat member list for
+    thread roots — see below. ``totalCount`` is the size of the whole filtered
+    set after *every* narrowing (window flags, ``status``, and thread collapse
+    when requested), unaffected by the ``after`` cursor and by
+    ``align_page_to_day``, so "Showing N of M" stays truthful: M counts what the
+    surface can show, not what a flat list would have contained.
 
     ``align_page_to_day`` makes a page never end mid-day. After the standard
     ``first + 1`` lookahead fetch, if the lookahead row falls on the same local
-    calendar day as the page's last row, every remaining row of that day is
-    appended, so the page may exceed ``first`` — there is **no cap**: a whole
-    day lands on one page even when that day alone is larger than ``first``.
-    ``endCursor`` then points at that day's last row and ``hasNextPage`` probes
-    for any row after it. A lookahead on a different day leaves the page exactly
-    as it would be without alignment. Both flags default to ``False``.
+    calendar day as the page's last row — compared on ``occurred_at``, so "the
+    day" means the event day, the day the card groups under — every remaining
+    row of that day is appended, so the page may exceed ``first`` — there is
+    **no cap**: a whole day lands on one page even when that day alone is larger
+    than ``first``. ``endCursor`` then points at that day's last row and
+    ``hasNextPage`` probes for any row after it. A lookahead on a different day
+    leaves the page exactly as it would be without alignment. Both flags default
+    to ``False``.
+
+    ``collapse_threads`` — thread-root pages.
+
+    When ``true`` the queryset is narrowed to thread roots
+    (``thread IS NULL``) and each root carries its members through the scalar's
+    ``threadLinks`` / ``threadSize``, so a page of N cards shows N conversations
+    rather than the first N fragments of them. The narrowing happens *before*
+    the count and before the cursor, so ``totalCount`` counts roots.
+
+    Why roots must be paginated rather than grouped client-side: with
+    ``occurred_at`` ordering, a thread's members are **not** adjacent. An admin
+    can group a 09:00 post with an 11:00 post, and between them sit whatever
+    else happened — including members of *other* threads. A flat page is
+    therefore not a superset of whole threads, so no post-processing of one page
+    can reconstruct the grouping: a member's root may not even be on the page.
+    Paginating over roots and nesting the members is the only shape in which
+    "every conversation that starts here is fully shown" is true.
+
+    The visibility rule that follows from it: **a thread is public iff its root
+    is public**, so hiding a root hides its whole thread on a collapsed surface
+    (the gates below are queryset-level and see the root row). That coupling is
+    accepted rather than worked around — the console shows each row's
+    ``threadSize``, so an admin can see what a moderation decision will take
+    with it before making it.
+
+    ⚠️ **The time windows are NOT resolved on the root — the moderation gates
+    are, and the asymmetry is deliberate.** A collapsed row is admitted into
+    ``currentServiceDayOnly`` / ``lastWeekOnly`` if the ROOT *or any of its
+    members* occurred at/after the bound (``_event_window``), while visibility
+    and status are still decided on the root alone. Both are the fail-safe
+    direction for their own question: a window asks "what happened in this
+    window", and a thread is in it if any part of it was, whereas a moderation
+    gate asks "may this be shown", and the cautious answer for a shared object
+    is that hiding any representative removes the whole group. Conflating them
+    would either leak a hidden member into a day-grouped feed or drop a
+    just-reported link from today's activity.
+
+    This is not a rare corner. Grouping elects the earliest link as root so the
+    thread reads oldest-first, so members are LATER than the root by
+    construction: any conversation that opened before the window and got a
+    follow-up inside it has a root outside the window and a member inside it.
+    Resolved on the root, the whole thread — and with it the follow-up, since
+    the collapsed surface renders the root — vanished from the day's feed.
+    Making ``occurredAt`` editable adds the mirror case (an admin moves a member
+    earlier than its root, so "the root is earliest" stops being an invariant),
+    which is why the root-only reading could not be left as a documented quirk.
+
+    The accepted consequence: a root admitted only because a member is in the
+    window renders with the ROOT's older ``occurredAt`` on its card, so a
+    "today" feed can show a card stamped before today. It is a rendering quirk,
+    not a filter bug — the link is reachable, and its thread is exactly where
+    the user expects it. Re-grouping the thread (the console's "Group into
+    thread" over the whole set) re-elects the earliest link as root and makes
+    the card's timestamp correct again.
+
+    ``collapse_threads`` is **ignored when ``mine`` is requested**: "My
+    Submitted Links" is the caller's own list of their own submissions, where
+    every row they submitted is the row they expect to find, so members are
+    never collapsed there. ``mine`` also stays ungated by moderation, for the
+    same personal reason (see the excludes below).
     """
 
     mine_requested = mine is not None and mine.value
+    # Thread collapse is a *feed* affordance, so it is suppressed for ``mine``:
+    # that page is the caller's own list of their own submissions, and hiding
+    # their own members behind a root would be data loss on a personal list.
+    collapse_requested = collapse_threads and not mine_requested
     if mine_requested:
         user = info.context.user
         if not user:
@@ -350,6 +516,14 @@ async def get_public_social_media_links(
     # defeat-by-exclusion shape as the automated-pending gate below, and before
     # the count so totalCount and the page always agree.
     #
+    # The same rule exists as a per-row predicate,
+    # ``incident.services.social_link_visibility.is_publicly_visible``, which is
+    # the single source of truth and is what non-queryset code (the scalar
+    # thread fields) imports. These two excludes are its queryset-level twin and
+    # are deliberately NOT replaced by it: a per-row Python filter would not
+    # shrink ``totalCount`` or the fetched page, so page and count would stop
+    # agreeing. Any change to the rule must be made in the shared predicate first.
+    #
     # Deliberately not applied to ``mine``: that page is the owner's own
     # submission list, not a public feed, so a person can still see (and seek
     # admin help with) a submission an admin has hidden from everyone else.
@@ -362,25 +536,44 @@ async def get_public_social_media_links(
     # and still surfaces (with its pending icon), so hiding pending rows
     # wholesale would silently hide hand-submitted reports too. Applied before
     # the count so totalCount and the page both agree with what is published.
+    # See the shared-predicate note above: same rule, queryset-level form.
     queryset = queryset.exclude(
         is_automated=True, status=SocialMediaLinkStatus.PENDING_APPROVAL
     )
 
+    # Thread collapse, before both the count and the cursor: a collapsed page
+    # paginates over roots and nests the members on each root, so "M of M" must
+    # count roots too. Placed after the moderation gates because visibility is
+    # decided on the root row — a thread is public iff its root is public.
+    if collapse_requested:
+        queryset = queryset.filter(thread__isnull=True)
+
+    # The windows run AFTER the collapse narrowing above, so on a collapsed page
+    # they are evaluated over the whole thread, not over the root that represents
+    # it — see ``_event_window``. Without the collapse they are the plain
+    # single-column comparison, unchanged.
     if current_service_day_only:
-        queryset = queryset.filter(created__gte=service_day_start(timezone.now()))
+        queryset = queryset.filter(
+            _event_window(
+                service_day_start(timezone.now()), collapse=collapse_requested
+            )
+        )
 
     if last_week_only:
-        queryset = queryset.filter(created__gte=last_week_start(timezone.now()))
+        queryset = queryset.filter(
+            _event_window(last_week_start(timezone.now()), collapse=collapse_requested)
+        )
 
     # Count before the cursor filter: a cursor narrows the page, not the feed.
     total_count = await queryset.acount()
 
-    queryset = queryset.order_by("-created", "-id")
+    queryset = queryset.order_by("-occurred_at", "-id")
 
     if after is not None:
-        cursor_created, cursor_id = decode_keyset_cursor(after)
+        cursor_occurred_at, cursor_id = decode_keyset_cursor(after)
         queryset = queryset.filter(
-            Q(created__lt=cursor_created) | Q(created=cursor_created, id__lt=cursor_id)
+            Q(occurred_at__lt=cursor_occurred_at)
+            | Q(occurred_at=cursor_occurred_at, id__lt=cursor_id)
         )
 
     # Fetch first + 1 to determine has_next_page without a separate count.
@@ -395,33 +588,37 @@ async def get_public_social_media_links(
     # pull in the lookahead and every remaining row of that same day (no cap, so
     # a whole day lands together even if it exceeds ``first``). The keyset
     # predicate starts *at* the lookahead, so no row is dropped between the page
-    # and the continuation; the queryset's own ordering preserves -created, -id.
+    # and the continuation; the queryset's own ordering preserves -occurred_at, -id.
     if (
         align_page_to_day
         and lookahead is not None
         and rows
-        and lookahead.created.date() == rows[-1].created.date()
+        and lookahead.occurred_at.date() == rows[-1].occurred_at.date()
     ):
         rows = rows + [lookahead]
-        # Half-open naive-local day range instead of ``created__date`` so the
-        # range can use a ``created`` index (a date cast cannot).
-        day_start = datetime.combine(lookahead.created.date(), time.min)
+        # Half-open naive-local day range instead of ``occurred_at__date`` so
+        # the range can use the ``occurred_at`` index (a date cast cannot).
+        day_start = datetime.combine(lookahead.occurred_at.date(), time.min)
         rows += [
             link
             async for link in queryset.filter(
-                Q(created__gte=day_start, created__lt=day_start + timedelta(days=1)),
-                Q(created__lt=lookahead.created)
-                | Q(created=lookahead.created, id__lt=lookahead.id),
+                Q(
+                    occurred_at__gte=day_start,
+                    occurred_at__lt=day_start + timedelta(days=1),
+                ),
+                Q(occurred_at__lt=lookahead.occurred_at)
+                | Q(occurred_at=lookahead.occurred_at, id__lt=lookahead.id),
             )
         ]
         last = rows[-1]
         has_next_page = await queryset.filter(
-            Q(created__lt=last.created) | Q(created=last.created, id__lt=last.id)
+            Q(occurred_at__lt=last.occurred_at)
+            | Q(occurred_at=last.occurred_at, id__lt=last.id)
         ).aexists()
 
     edges = [
         SocialMediaLinkEdge(
-            node=link, cursor=encode_keyset_cursor(link.created, link.id)
+            node=link, cursor=encode_keyset_cursor(link.occurred_at, link.id)
         )
         for link in rows
     ]

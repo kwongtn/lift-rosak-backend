@@ -12,6 +12,11 @@ from common.schema.scalars import UserScalar
 from incident import models
 from incident.enums import PassengerStatus
 from incident.schema.keyset import decode_keyset_cursor, encode_keyset_cursor
+
+# Module-level (not a re-export via ``incident.services``) on purpose: importing
+# the one predicate every thread field needs must not drag the whole service
+# package — and its own imports — into a scalar's import graph.
+from incident.services.social_link_visibility import is_publicly_visible
 from operation.schema.scalars import Line, PassengerStatusCount, Station, Vehicle
 
 
@@ -117,6 +122,15 @@ class SocialMediaLinkScalar:
     description: str
     status: strawberry.auto
     created: datetime
+    # "When did this happen" — the instant the card renders and every feed /
+    # queue ordering is built on. Distinct from ``created`` above ("when did
+    # someone report this?"), which stays the moderation provenance column and
+    # is deliberately NOT what the UI shows. NOT NULL on the model (a nullable
+    # column would sort NULLs last on a DESC keyset scan instead of first), so
+    # this is a plain non-optional ``datetime`` — no null branch to forget.
+    # Naive local wall time: ``USE_TZ = False``, so Strawberry serialises it with
+    # no offset. Never make_aware/astimezone it.
+    occurred_at: datetime
     completed: bool
     completed_at: Optional[datetime]
     # True for rows written by the official-post ingestion (polling or webhook);
@@ -124,6 +138,82 @@ class SocialMediaLinkScalar:
     # ingestion. Exposed so the console/feed can badge a capture as official
     # rather than inferring it from a status.
     is_automated: bool
+
+    # --- Thread grouping (see ``SocialMediaLink.thread``) ----------------------
+    # ``thread_id`` is a plain model attribute (the FK's attname), so this is a
+    # free field read — no query, no loader. Null exactly when this link IS a
+    # thread root, which is also what makes it the client-side "render me as a
+    # root with N links" signal.
+    thread_id: Optional[strawberry.ID]
+
+    @strawberry_django.field
+    async def is_thread_root(self) -> bool:
+        # Derived from the already-loaded ``thread_id`` attribute: a query here
+        # would buy nothing (``thread is None`` IS the definition) and would turn
+        # a 20-row feed into 20 extra round trips. Null ``thread_id`` covers
+        # BOTH the root of a real thread and an ordinary unthreaded link — the
+        # degenerate one-member thread — which is why this is true for a plain
+        # link too.
+        return self.thread_id is None
+
+    @strawberry_django.field
+    async def thread_size(self, info: Info) -> int:
+        """How many links this thread has, counting the root as 1.
+
+        This is the number the "N links" badge shows, so it counts only
+        publicly-visible members: a hidden or unapproved-automated member is
+        attached to the thread but not openable by a visitor, and counting it
+        would advertise a link that 404s into moderation.
+
+        A **member** also reports ``1``, and must: the loader is keyed by this
+        row's own id, and nothing carries ``thread_id == member.id`` (a member
+        points at the root, never the reverse), so a member's member-list is
+        empty by the same model invariant that makes depth 1. So ``1`` means
+        "no publicly-visible members hang off me", which is the true answer for
+        a member *and* for an ordinary unthreaded link — the two are
+        indistinguishable from this field. Do not read it as the group's size
+        for any row that is not a root.
+
+        That is the same trap as ``isThreadRoot`` (``thread_id is None`` is
+        true for a plain link too), so a client must gate on
+        ``threadSize > 1`` / ``threadLinks.length > 0`` and not on
+        ``isThreadRoot``. ``1`` is the "not a group" sentinel for both.
+
+        Derived from the SAME loader call as ``threadLinks`` (which caches per
+        request) rather than from a separate count query. Both fields therefore
+        read one filtered list, so the badge and the expanded thread are
+        structurally incapable of disagreeing.
+        """
+        members = await info.context.loaders["incident"]["thread_members"].load(self.id)
+        return 1 + sum(1 for member in members if is_publicly_visible(member))
+
+    @strawberry_django.field
+    async def thread_links(self, info: Info) -> List["SocialMediaLinkScalar"]:
+        """The thread's members, oldest first — for the expanded thread list.
+
+        Members only, never the root itself (the caller already renders it), and
+        empty for an unthreaded link. Depth is exactly 1 by model invariant
+        (``thread`` always points at a root), so there is no recursion here and
+        no further hop to guard against a cycle.
+
+        Also empty for a **member**: the loader is keyed by this row's id, and
+        by the same invariant no row points at a member, so asking a member for
+        its thread yields nothing — even though the member visibly belongs to one
+        (``threadId`` names it, ``threadSize`` says 1). Query the ROOT for the
+        member list; this is why a client must not reconstruct a thread from an
+        arbitrary row it happens to be holding. ``[]`` therefore means "nothing
+        hangs off me", not "I am in no thread" — see ``threadSize``.
+
+        Visibility-filtered with the shared predicate: returning a hidden member
+        would leak its URL/title through a nested field, which is exactly the
+        moderation decision the feed-level ``.exclude()`` exists to honour. The
+        filter is applied on EVERY surface, ``mine`` included — only the
+        queryset-level gates in ``get_public_social_media_links`` are exempt
+        there. See ``services/social_link_visibility.is_publicly_visible`` for
+        why the two deliberately differ.
+        """
+        members = await info.context.loaders["incident"]["thread_members"].load(self.id)
+        return [member for member in members if is_publicly_visible(member)]
 
     @strawberry_django.field
     async def vote_score(self, info: Info) -> int:
@@ -258,9 +348,11 @@ class CalendarIncidentScalar:
     async def links(
         self, info: Info, first: int = 10, after: Optional[str] = None
     ) -> SocialMediaLinkConnection:
-        """Per-incident submitted links, newest first (``created DESC, id DESC``).
+        """Per-incident submitted links, newest first (``occurred_at DESC, id DESC``).
 
-        Same ordering, keyset-cursor format and connection shape as the root
+        "Newest" is the EVENT instant, not the submission time: an incident whose
+        newest report describes last Tuesday sorts that link first. Same ordering,
+        keyset-cursor format and connection shape as the root
         ``publicSocialMediaLinks(incidentId, first, after)`` resolver (see
         incident.schema.keyset), so a cursor from this nested field can be handed
         to the root query for continuation pages.
@@ -285,16 +377,20 @@ class CalendarIncidentScalar:
                 (self.id, first)
             )
         else:
-            cursor_created, cursor_id = decode_keyset_cursor(after)
+            # The cursor carries ``(occurred_at, id)``, matching the ordering
+            # above — a cursor built on ``created`` would skip or duplicate rows
+            # whenever the two columns disagree, which is the whole point of
+            # having a separate event time.
+            cursor_occurred_at, cursor_id = decode_keyset_cursor(after)
             rows = [
                 link
                 async for link in models.SocialMediaLink.objects.filter(
                     content_type=content_type, object_id=self.id
                 )
-                .order_by("-created", "-id")
+                .order_by("-occurred_at", "-id")
                 .filter(
-                    Q(created__lt=cursor_created)
-                    | Q(created=cursor_created, id__lt=cursor_id)
+                    Q(occurred_at__lt=cursor_occurred_at)
+                    | Q(occurred_at=cursor_occurred_at, id__lt=cursor_id)
                 )[: first + 1]
             ]
 
@@ -302,7 +398,7 @@ class CalendarIncidentScalar:
         rows = rows[:first]
         edges = [
             SocialMediaLinkEdge(
-                node=link, cursor=encode_keyset_cursor(link.created, link.id)
+                node=link, cursor=encode_keyset_cursor(link.occurred_at, link.id)
             )
             for link in rows
         ]
