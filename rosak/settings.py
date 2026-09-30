@@ -530,7 +530,7 @@ X_API_BEARER_TOKEN = os.environ.get("X_API_BEARER_TOKEN", "")
 X_API_SECRET_KEY = os.environ.get("X_API_SECRET_KEY", "")
 X_API_OAUTH2_CLIENT_SECRET = os.environ.get("X_API_OAUTH2_CLIENT_SECRET", "")
 OFFICIAL_POST_INGESTION_ENABLED = bool(
-    strtobool(os.getenv("OFFICIAL_POST_INGESTION_ENABLED", "false"))
+    strtobool(os.getenv("OFFICIAL_POST_INGESTION_ENABLED", "true"))
 )
 OFFICIAL_POST_POLLING_ENABLED = bool(
     strtobool(os.getenv("OFFICIAL_POST_POLLING_ENABLED", "false"))
