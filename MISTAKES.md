@@ -1,526 +1,119 @@
 # MISTAKES.md — rosak_backend Known Defects & Traps
 
-> Compiled from `docs/APPS.md` § Known Defects & Traps (lines 282–306) and the per-app component docs in `docs/components/*.md`.
-> Every entry is a proven bite — either already fixed or still live. Grouped by component so you can scan what will break you when you touch that app.
-> Dates are catalogue date (Phase 1 audit) unless a fix commit exists, in which case both are shown.
+> Catalog of known defects, traps and cross-component gaps so future agents don't repeat them.
+> Entries use **Problem** / **Root Cause** / **Fix** / **Prevention**; fixed items carry a fix commit.
+> Squashed **2026-09-30** (previous compaction `f30c313`, 2026-09-15): entries sharing a root cause are
+> merged into one entry with a bullet per case, narratives are cut to the actionable rule, and fully
+> historical fixes are one-liners under `## Fixed`. Earlier detail lives in `git log -p -- MISTAKES.md`.
+> Dates are catalogue dates unless a fix commit is shown.
 
 ---
 
-## common
+## Traps
 
-### [2026-09-15] common: S3 uploads fail on OCI Object Storage — "AWS chunked encoding not supported"
+### [2026-09-30] incident: `SocialMediaLinkInput` is replace-not-patch — `occurredAt: null` is destructive
 
-**Problem**: Every `TemporaryMedia` save (incl. Telegram image attaches via `POST /upload/`) raised `botocore.exceptions.ClientError: An error occurred (NotImplemented) when calling the PutObject operation: AWS chunked encoding not supported.` Uploads reached OCI but were rejected with 501.
-**Root Cause**: botocore >= 1.35 defaults `request_checksum_calculation` to `when_supported`, which adds a CRC32 trailer checksum to streaming `PutObject` (`Transfer-Encoding: chunked` + `Content-Encoding: aws-chunked` + `X-Amz-Trailer`). OCI's S3-compat endpoint rejects aws-chunked. `AWS_S3_SIGNATURE_VERSION="s3v4"` does NOT help — the default is already `s3v4`; this is a checksum-trailer issue, not a signature issue.
-**Fix**: `os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")` in `rosak/settings.py` — disables the default checksum so `PutObject` goes out as a plain body. Verified botocore honors the env var on the django-storages client; `signature_version`/`addressing_style` unchanged.
-**Prevention**: Any bump of botocore/boto3 must re-check this — newer SDKs may flip behavior again. If uploads regress with this error, re-apply `when_required`. The alternative `AWS_S3_CLIENT_CONFIG={"request_checksum_calculation": ...}` (plain dict) crashes botocore in django-storages 1.14.6 — only an env var or a `botocore.config.Config` instance works.
+**Problem**: `update_social_media_link` treats the input as a **full replacement**: `link.url = write.url`, `link.title = write.title or ""`, and four unconditional `.set()` calls (`categories`, `lines`, `vehicles`, `stations`). Only `description`, `status`, `incident_id` and `occurred_at` are conditional, so a partial payload silently blanks the title and strips all four tag sets. `occurred_at` is `NOT NULL`, and its tri-state is deliberately asymmetric: omitted = unchanged, a value = set, explicit `null` = **reset to `link.created`** — so the usual `?? null` serialisation of an optional field is a destructive write, not a no-op, and moves the row to a different calendar day in every feed ordering built on `occurred_at`.
+**Root Cause**: An input that doubles as a patch payload invites partial construction sites; "absent" had no safe meaning before the tri-state, and `null` (previously only "clear this optional field") had to be redefined for a `NOT NULL` column.
+**Fix**: _Documented, not structurally enforced._ The contract is written into the field comment on `SocialMediaLinkInput.occurred_at` (`incident/schema/inputs.py`) and the service's branch comments, and pinned by `tests/incident/test_social_link_occurred_at_write.py` (`UpdateOccurredAtTests`, `OccurredAtMutationTriStateTests`). The GraphQL layer maps `Maybe` to the service sentinel by hand (`OCCURRED_AT_UNSET if not input.occurred_at else input.occurred_at.value`) because `Some.__bool__` is always `True`. Every existing construction site was audited in the same change — that audit is the actual deliverable.
+**Prevention**: Adding a field to a replace-not-patch input changes **every** existing caller — grep every construction site and confirm each re-sends the field or may reset it. Treat `null` as a value with meaning: document it, and never let a `?? null` default stand in for "unchanged". The structural fix — split `updateSocialMediaLink` into a patch input — is not done; treat replace semantics as a known sharp edge.
 
-### [2026-08-24] common: NSFW moderation bypassed — all uploads convert unchecked — FIXED (2026-08-24) `1e2a421`
+### [2026-09-26 → 2026-09-30] incident: every stored datetime is naive **local** time (`USE_TZ = False`) — axis of two traps
 
-**Problem**: `common/signals.py` had the `check_temporary_media_nsfw` import and `apply_async` call commented out. Every `TemporaryMedia(PENDING)` went straight to `convert_temporary_media_to_media_task` with no moderation check (`docs/APPS.md:288`, `docs/components/common.md:24,73`).
-**Root Cause**: Commented gate left in place during Discord migration; orphaned task `check_temporary_media_nsfw` had no caller.
-**Fix**: Re-enabled `check_temporary_media_nsfw.apply_async` for non-trusted uploaders in `common/signals.py`; trusted path `TRUSTED_MEDIA_UPLOADER → TRUSTED_CLEARED` preserved. Commit `1e2a421` `fix(common): re-enable NSFW moderation in upload pipeline` (2026-08-24).
-**Prevention**: Gate moderation on `TemporaryMediaType` + `TRUSTED_MEDIA_UPLOADER` clearance; add integration test that `PENDING` from untrusted user reaches `BLOCKED`/`CLEARED` via classifier mock.
+**Problem**: With `USE_TZ = False` and `TIME_ZONE = "Asia/Kuala_Lumpur"`, every stored datetime is naive local wall time. Two surfaces turned that long-internal convention into an external hazard:
 
-### [2026-08-24] common: `get_default_start_time()` crashes on YEAR/MONTH/WEEK — FIXED (2026-08-24) `bb1e519`
+- **Export**: `manage.py export_official_posts` writes `posted_at` as the stored column's own `isoformat()`, so a post the X API reported as `2026-09-26T03:15:00Z` is exported as `2026-09-26T11:15:00` — a true instant with no offset, in a file whose purpose is to leave this system. The `--since`/`--until` window is unaffected (aware bounds convert into the same storage frame, so a UTC calendar day really is a UTC calendar day).
+- **Migrations**: `0030`'s `occurred_at = COALESCE(posted_at, created)` must be a straight byte copy. The obvious Python loop (`link.occurred_at = link.posted_at or link.created` + `bulk_update`) round-trips every value through the field adapter and shifts the table by +08:00. The shift is invisible at the UI's minute precision and surfaces later as links ordered into the wrong calendar day against `currentServiceDayOnly` / `lastWeekOnly`.
 
-**Problem**: `common/utils.py:get_default_start_time()` did `today.month = 1` / `today.day = 1` on immutable `datetime.date` — `YEAR`, `MONTH`, `WEEK` branches raise `AttributeError: attribute 'month' of 'datetime.date' objects is not writable`. Only `DAY` worked, so every caller hardcoded `DateGroupings.DAY` (`docs/APPS.md:292`, `docs/components/common.md:76`, `docs/components/generic.md:208`).
-**Root Cause**: Mutating immutable date object; only `DAY` branch exercised in production, so bug was latent.
-**Fix**: Already uses `today.replace(month=..., day=...)`. Commit `bb1e519` `refactor(graphql): Migrate Phase 1 leaf inputs and utils from UNSET to Maybe[T]` (2026-08-19), catalogued FIXED 2026-08-24. Unlocks monthly/weekly/yearly analytics across `common` + `operation` + `chartography`.
-**Prevention**: Add unit test exercising each `DateGroupings` branch; exhaustive switch already raises `RuntimeError` on unknown member — keep it.
+**Root Cause**: `USE_TZ = False` makes the storage frame an application-level convention rather than a DB guarantee — nothing raises, nothing warns, and the naive value looks correct everywhere it is read. A per-row Python loop is the shape almost every Django data migration takes, and the one shape that silently re-interprets stored bytes.
+**Fix**: _By design, documented._ Exported value is the stored column verbatim (spec §6.1); consumers re-anchor with `settings.TIME_ZONE`. `0030` uses `update(occurred_at=Coalesce("posted_at", "created"))` (reverse: `update(occurred_at=F("created"))`) and its docstring bans `make_aware`/`make_naive`/`astimezone`/`localtime`. Values are pinned by literal in `tests/incident/test_social_link_occurred_at_backfill.py` and `test_official_post_occurred_at.py`.
+**Prevention**: Whenever a value crosses the app boundary (export, GraphQL, webhook), decide explicitly between "the stored value" and "the same instant in UTC", and pin the choice with a docstring and a test. Any migration copying a datetime between columns is a single SQL expression (`Coalesce`, `F`), never a loop. Do not "repair" a divergence between `posted_at` and `occurred_at` by converting one into the other — both come from the same `RawPost.posted_at` on the automated path, and an added `make_aware`/`astimezone` would double-shift every post. The only legitimate divergence is the `Some(None) → link.created` reset. If `USE_TZ` ever flips to `True`, re-check the export: strings gain an offset and any published dataset shifts with them.
 
-### [2026-08-24] common: `ImgurStorage` — write path hot on every upload + silent credential failure
+### [2026-09-30] incident: the keyset cursor is field-agnostic — a stale token still decodes
 
-**Problem**: Two coupled defects left over from the Imgur → Discord migration:
-- **Hot path**: `common/tasks.py:202` creates `Media` with `file=ContentFile(temp_media.file.url, ...)`, routing every upload through `ImgurStorage._save` and a live Imgur API call, despite `Media.file` being marked `# TODO: Deprecate` and Discord CDN being the real host (`docs/APPS.md:293`, `docs/components/common.md:72,95`).
-- **Silent degrade**: `ImgurStorage.__init__` and module-level `ImgurClient` swallow all exceptions and print `functionality disabled`; eight `IMGUR_*` settings default to `""` (`rosak/settings.py:357-364`), so a deployment without Imgur credentials dies with `AttributeError` inside `convert_temporary_media_to_media_task`'s broad `except Exception` and only increments `fail_count` — no upload can succeed despite Discord being the host (`docs/components/common.md:72`).
+**Problem**: `incident/schema/keyset.py` encodes a timestamp and a row id and **no column name**, so two things go wrong silently:
 
-**Root Cause**: Migration left `Media.file` wired as write path; no one removed the five call sites (`STORAGE = ImgurStorage()`, `MediaMixin.__str__`, `add_width_height_to_media_task` filter, `medias_group_by_period ~Q(file="")`, `MediaAdmin.fields`). Fail-open init plus a broad exception hides the root error.
-**Fix**: _Not fixed._ Requires re-host backfill for pre-`0013` rows (fetch `i.imgur.com/<file>` → Discord webhook → fill `file_id`/`file_name`), then drop `Media.file` column and delete `imgur_field.py`, `imgur_storage.py`, `management/commands/get_imgur_token.py`. Meanwhile, make init fail loudly if `Media.file` is still required.
-**Prevention**: Feature-flag the storage backend; block new `Media.file` writes behind flag and alert on `ImgurStorage._save` calls after cutoff. Validate required credentials at `check` time; never swallow storage init errors; replace broad `except Exception` with typed handling plus explicit dead-letter.
+- **(a) A cursor minted before the column change still decodes.** A pre-`0030` token (a `created` timestamp) is still accepted by the post-`0030` resolver and silently means "resume after this `occurred_at`" — skipped or repeated rows, no error, no empty page. The same applies to `CalendarIncidentScalar.links`, and the frontend can hand a nested page-1 cursor to the root query, so one stale token crosses surfaces.
+- **(b) The shared helper now serves two columns.** `SocialMediaLink` orders on `occurred_at`; `get_line_status_reports` still orders on `LineStatusReport.created` (deliberately — a status report *is* its creation instant). The helper's name and parameters are not field-specific, so a copied resolver can silently paginate the wrong column; only the caller's variable names say which column it is.
 
-### [2026-08-24] common: `TemporaryMediaAdmin.prettified_metadata` crashes + `RETRY_ELAPSED` never assigned
+**Root Cause**: One wire format shared by several surfaces is the right design (it is what lets the frontend hand a nested cursor to the root query), but "which column is this?" is a property of the caller, enforced only by convention. Changing a sort column additionally changes the *meaning* of an opaque token, and an opaque token cannot signal that.
+**Fix**: _Not fixed — accepted, documented._ `get_public_social_media_links`'s docstring states that in-flight cursors across the deploy are not guaranteed seamless and the feed should be relaunched from page one. `keyset.py`'s module docstring names both consumers and states hazard (a) outright ("an opaque payload for one column is happily accepted by a consumer on another").
+**Prevention**: (a) Changing a cursor's sort column requires either a **versioned encoding** (`"o1:"`/`"c1:"`, rejected loudly on mismatch) or **forcing clients to restart from page one**; when reviewing an `.order_by()` change on a paginated resolver, inspect every producer of that resolver's cursors. (b) When copying the helpers into a new resolver, **rename the local variables to the column you are actually ordering on** and add the resolver to the module docstring. A third column needing its own cursor is the moment to version the encoding.
 
-**Problem**: `TemporaryMediaAdmin` declares `prettified_metadata` calling `self.prettify_json()` but inherits `admin.ModelAdmin` not `generic.admin.JsonPrettifyAdminMixin`, so the admin page raises `AttributeError` and never `return`s; `TemporaryMediaStatus.RETRY_ELAPSED` is declared (`common/enums.py:23`) and assigned nowhere — permanently dead uploads sit in `PENDING` indistinguishable from fresh rows (`docs/APPS.md:294`, `docs/components/common.md:99`).
-**Root Cause**: Missing mixin plus dead status enum never wired into retry cutoff.
-**Fix**: _Not fixed._ Inherit `JsonPrettifyAdminMixin` and `return` the highlighted HTML; in the re-drive loop (`common/tasks.py:255-264`) assign `RETRY_ELAPSED` at `fail_count >= 5` and persist exception string into `metadata` JSON.
-**Prevention**: Admin smoke test hitting every `ModelAdmin` change view; exhaustive status-transition test that asserts every enum member is reachable.
+### [2026-09-30] tests: `created` is `auto_now_add` — `create(created=…)` is silently ignored
 
-### [2026-08-24] common: `Media` scalar non-null mismatch + admin search_fields broken
+**Problem**: Tests that need a `SocialMediaLink` (or any `TimeStampedModel`) at a specific `created` datetime — e.g. the `publicSocialMediaLinks` week-window and complete-day-page tests — cannot use `create(..., created=<datetime>)`: `auto_now_add` overwrites it, so every row gets "now", day-grouping assertions collapse into one day, and the test passes for the wrong reason (or fails confusingly). Same for `LineStatusReport.created`.
+**Root Cause**: `TimeStampedModel.created` is `auto_now_add=True`, which Django applies at insert and which ignores any explicit value; only a subsequent `QuerySet.update()` writes the column directly.
+**Fix**: Create the row first, then stamp it: `SocialMediaLink.objects.filter(pk=link.pk).update(created=<naive datetime>)` and `link.refresh_from_db()` (`PublicFeedContractTests._link`, `PublicFeedLastWeekAndDayAlignTests._link`). With `USE_TZ=False` the stamped value is naive Asia/Kuala_Lumpur local and maps straight onto the calendar day the resolver groups by.
+**Prevention**: Never expect `create(created=…)` to stick on a `TimeStampedModel`; insert then `.update()`. When a pagination/grouping test asserts days, assert against distinct stamped days, not wall-clock now, so a silently-ignored stamp is caught rather than masked.
 
-**Problem**: `MediaScalar`/`MediaType` declare `width: int` / `height: int` non-null while `Media.width`/`height` are `null=True, default=None` — exposing more rows raises non-null resolution errors on legacy media. `MediaAdmin` and `TemporaryMediaAdmin` use `search_fields = ["uploader"]` which is a FK, not a text field, so admin search raises `FieldError` (`docs/components/common.md:93,99`).
-**Root Cause**: Scalar nullability not matched to model; admin `search_fields` not using lookup path `uploader__nickname`.
-**Fix**: _Not fixed._ Make scalar widths nullable `Optional[int]` or backfill dimensions; fix `search_fields` to `["uploader__nickname"]`.
-**Prevention**: Contract test asserting model nullability matches Strawberry scalar nullability.
+### [2026-09-12 → 2026-09-30] rosak: the test-runner ground truth (five ways the gate lies)
 
-### [2026-08-24] common: `FeatureFlag` missing row silently disables + GC gated on same flag
+**Problem**: The documented test gate quietly does not do what it says:
 
-**Problem**: `should_upload_media()` treats missing `FeatureFlag` row as disabled (`feat_flag is not None and feat_flag.enabled`), so fresh env with no fixture is silently off. `cleanup_temporary_media_task` early-returns on that same flag, so disabling upload also halts 30-day `TO_DELETE` GC — staging bucket grows unbounded (`docs/components/common.md:101`).
-**Root Cause**: Ambiguous "missing = off" plus coupling upload gate to garbage collection.
-**Fix**: _Not fixed._ Seed one row per `FeatureFlagType` via data migration; split GC flag from upload flag.
-**Prevention**: Data migration creating flag rows on deploy; separate `IMAGE_UPLOAD` vs `STORAGE_GC_ENABLED` flags.
+- **`--parallel` is broken.** It crashes with `TypeError: cannot pickle 'traceback' object` as soon as any test outcome carries a traceback. The serial runner is the only reliable gate.
+- **`--keepdb` loses migration-seeded rows.** `TransactionTestCase` truncates tables, including rows written by data migrations, and `--keepdb` never re-runs them — tests fail with `Clearance.DoesNotExist` and seed assertions. `get_or_create` what a test needs, or recreate the database if it degrades.
+- **Concurrent runs collide.** Two `manage.py test` runs share the single `test_postgres` database and truncate/recreate each other's tables mid-run. The wreckage looks like real failures: a storm of `common_vote.content_type_id` FK violations and dozens of `DuplicateDatabase` setup errors. Run one process at a time; suspect a collision before hunting a code bug.
+- **The top-level `tests/` tree is invisible.** It has no `__init__.py`, so `manage.py test tests.operation` dies in discovery (`TypeError: expected str, bytes or os.PathLike object, not NoneType`) and plain discovery skips the ~300 pytest tests entirely. pytest is not installed in the `app` container nor the host `.venv`. Module labels *do* resolve (`manage.py test tests.incident.test_social_link_threads --keepdb`) — that asymmetry is the only reason any of this is knowable.
+- **The 2026-09-30 wave made it worse.** Six new modules under `tests/incident/` (**119** test functions, re-counted by AST) are invisible to the bare run. The host's system pytest 9.1.1 lacks `pytest-django`/`pytest-asyncio`, so its `pytest.ini` settings have nothing to honour them: `python3 -m pytest tests/incident --collect-only` reports 7 collected and 40 collection errors.
 
-### [2026-09-12] common: PIL Image.open crashed temporary-media conversion for video uploads — FIXED (2026-09-12) `82addcc`
+**Root Cause**: The `tests/` directory is a namespace package, so Django's label discovery cannot resolve it and plain discovery skips it; nothing enforces that a suite joins a gate.
+**Fix**: _Workaround._ Runnable tests live in app modules (`operation/tests.py`, `incident/tests.py`, `rosak/tests/…`) and run with app labels (`manage.py test operation incident rosak`). `tests/` tests need pytest installed or an `__init__.py` conversion before they join the gate.
+**Prevention**: **A new backend test nobody's gate runs is not a test.** Put it where `manage.py test` collects it (app `tests.py` / `rosak/tests/`), or — if it must live under `tests/` — run it by its **full dotted module label** in the same change and say so in the progress entry. Never report "N tests added" without the command that executes them, and never quote a passing pytest suite as verification when the environment cannot run it. Keep the serial gate until the parallel runner is fixed.
 
-**Problem**: `convert_temporary_media_to_media_task` called `Image.open()` unconditionally. For a video this raised `UnidentifiedImageError`, which the generic `except Exception` swallowed into `fail_count++`, so the file was never converted and the video never appeared.
-**Root Cause**: The pipeline assumed every `TemporaryMedia` was a Pillow-readable image and never consulted `metadata["mime_type"]` before the PIL/EXIF block.
-**Fix**: Branch on `metadata["mime_type"].startswith("video/")`; for video skip `Image.open`/`verify`/EXIF and default `exif`/`image_get_exif` to `{}`. Commit `82addcc` `feat(common): support video in temporary media pipeline` (2026-09-12).
-**Prevention**: Keep conversion content-type aware, and add video fixtures to the pipeline tests so the non-image path is exercised.
+### [2026-09-28] incident: the official-post poll's opt-in is read twice with different lifetimes — only `celerybeat` dispatch sees it
 
-### [2026-09-12] common: --keepdb test DB lost migration-seeded rows after TransactionTestCase — WORKAROUND
-
-**Problem**: The shared `test_postgres` database was missing the migration-seeded `Clearance`/`FeatureFlag` rows and incident categories, so tests failed with `Clearance.DoesNotExist` and seed assertions.
-**Root Cause**: `TransactionTestCase` truncates tables, including rows written by data migrations, and `--keepdb` does not re-run those data migrations afterwards.
-**Fix**: _Workaround._ Tests must `get_or_create` the rows they need; recreate the test database if it degrades.
-**Prevention**: Do not rely on migration-seeded rows in tests sharing a `--keepdb` database; seed explicitly in `setUp`.
-
-### [2026-09-12] common/telegram: JSONField metadata lookups must match stored types — GOTCHA
-
-**Problem**: `TemporaryMedia.metadata` stores Telegram `message_id`/`chat_id` as ints, so `Q(metadata__telegram_message_id=source.message_id)` only matches on int-vs-int equality. A stringified id silently matches nothing and `approve()` reports no media awaiting review.
-**Root Cause**: JSON number/string typing survives into the JSONB lookup; the Python value's type is preserved as stored.
-**Fix**: _By design._ Store native ints in `metadata` and compare against the native `message_id`; do not stringify ids.
-**Prevention**: Add a round-trip test asserting the stored `metadata["telegram_message_id"]` type matches the lookup argument type.
-
----
-
-## incident
-
-### [2026-09-26] incident: auto-ingested official posts are publicly visible before approval — FIXED (2026-09-26)
-
-**Problem**: `incident.tasks.ingest_official_posts` writes `SocialMediaLink` rows with
-`status=PENDING_APPROVAL`, but `get_public_social_media_links` returns `PENDING_APPROVAL`
-rows **alongside** `LIVE` ones in the anonymous public feed. So every post the 5-minute beat
-pulls from the tracked X accounts appears on the public front page the moment it is
-ingested, with no human ever approving it. That defeats the point of the approval queue for
-the one source that does not need approval.
-**Root Cause**: `SocialMediaLinkStatus` is a strict 2-state vocabulary (`LIVE`,
-`PENDING_APPROVAL`) with no "auto-approved" member, and the public feed filters on
-`completed`, not on a provenance distinction. Ingestion had to pick a status at insert time
-and picked the moderation-first one.
-**Fix**: the feed filter keyed on `is_automated` — the option this entry predicted.
-`get_public_social_media_links` now applies
-`exclude(is_automated=True, status=SocialMediaLinkStatus.PENDING_APPROVAL)`, placed after
-the `status` filter and before `total_count` so the count and the page agree. No migration
-and no third status member were needed. Approval is reachable two ways: the console queue
-(`{settings.FRONTEND_BASE_URL}/console/insiden/links`, linked from the notification) and
-replying `/approve` to the Telegram notification, which resolves through
-`TelegramSocialMediaLinkLog`. Covered by `PublicFeedApprovalGateTests`.
-**Prevention**: The "do not hide pending rows wholesale" warning below still stands — the
-`exclude()` is scoped to `is_automated` precisely so the community submit path keeps its
-visible pending rows. Any future change to that queryset must preserve that distinction.
-
-### [2026-09-16] incident: `update_social_media_link` silently detached links when `incident_id` omitted — FIXED (2026-09-16) (uncommitted)
-
-**Problem**: Editing a `SocialMediaLink` through `update_social_media_link` severed its incident
-association — the resolver wrote `incident_id=None` whenever the input omitted `incident_id`, so
-any non-incident-scoped edit (e.g. the public submitter edit flow) could drop a link off its
-incident card. The submit-only path had the same footgun but was never hit (submission of a link
-never passes an existing `incident_id` context... it does for card-hosted links).
-**Root Cause**: The write path treated absent input as "clear the field" for `incident_id`,
-matching how scalar fields are cleared, without distinguishing tri-state unset from explicit null.
-**Fix**: In `update_social_media_link`, omit `incident_id` from the write when the input omits it —
-the association is preserved — while an explicit `incident_id: null` still detaches.
-**Prevention**: For any nullable FK accepted through `strawberry.Maybe[T]` updatable inputs, absent
-≠ null. Follow the tri-state semantics in `docs/STRAWBERRY_MIGRATION.md` — only write the field
-when the caller sent a value.
-
-### [2026-09-16] incident: public link edit — admin lands LIVE, submitter forced back to PENDING_APPROVAL (Task 24)
-
-**Problem**: `update_social_media_link` was admin-only (`IsAdmin`), so there was no backend rule
-for a submitter editing their own link: admin edits should land live, non-admin edits must go back
-into the approval queue (a submitter must not relabel their own link as approved-completed).
-**Root Cause**: None — the capability simply didn't exist; the mutation predated the public edit flow.
-**Fix**: Mutation switched to `IsLoggedIn`; `update_social_media_link(user, *, is_admin, link_id,
-write)` enforces: non-admin can edit only own links (`IncidentServiceError` otherwise) and forces
-`status=PENDING_APPROVAL, completed=False, completed_at=None, completed_by=None`; admin keeps
-status/completed.
-**Prevention**: Role rules for shared mutations live in the service layer with `is_admin` resolved
-from `rosak.permissions` at the schema boundary — the frontend `canEditLink` gate is UI-only;
-backend is authoritative.
-
-### [2026-08-24] incident: `StationIncident` UniqueConstraint missing condition — FIXED (2026-08-24) `1e2a421`
-
-**Problem**: `VehicleIncident` guards `UniqueConstraint(fields=["is_last","vehicle"], condition=Q(is_last=True))` but `StationIncident` declared `UniqueConstraint(fields=["is_last","station"])` without `condition` — a station could hold at most one historical (`is_last=False`) incident before `IntegrityError` (`docs/APPS.md:289`, `docs/components/incident.md:72`).
-**Root Cause**: Copy-paste omission; constraint copied without condition.
-**Fix**: Added `condition=Q(is_last=True)` to `StationIncident`. Commit `1e2a421` `fix(incident): add condition=Q(is_last=True) to StationIncident UniqueConstraint` (2026-08-24). Migration `RemoveConstraint` + `AddConstraint` required on legacy data.
-**Prevention**: Model constraint review checklist; test creating two historical incidents for same station.
-
-### [2026-08-24] incident / operation: Dual `Line ↔ CalendarIncident` join tables — GraphQL field permanently empty
-
-**Problem**: `CalendarIncident.lines` (`related_name="incidents"`, migration `0013`) and `operation.Line.calendar_incidents` are two separate M2M join tables. Admin `filter_horizontal` edits the former; GraphQL `Line.calendarIncidents` reads the latter, so that field is expected to be permanently empty (`docs/APPS.md:290`, `docs/components/incident.md:71`, `docs/components/operation.md:48`).
-**Root Cause**: Both sides declared `ManyToManyField` to each other instead of one side using reverse accessor; `through` left commented on `Line`.
-**Fix**: _Not fixed._ Consolidate on `Line.incidents` reverse accessor; remove `Line.calendar_incidents` field.
-**Prevention**: Single source of truth for cross-app M2M; forbid duplicate M2M declarations across apps via `tach` rule.
-
-### [2026-08-24] incident: `CalendarIncidentFilter.date` bare assert + month off-by-one
-
-**Problem**: Range width enforced with `assert … <= timedelta(days=60)` — surfaces as 500 and stripped under `python -O`; `month` branch does `month__lte=value.month.exact + 1` assuming 0-indexed JS month (`docs/components/incident.md:21`).
-**Root Cause**: `assert` used for validation; JS month indexing leaked into Python.
-**Fix**: _Not fixed._ Replace `assert` with `GraphQLError`/`ValidationError`; fix month arithmetic to `__month=value.month.exact`.
-**Prevention**: Ban bare `assert` for request validation (repo convention); add filter unit tests for 60-day boundary and month exact.
-
-### [2026-08-24] incident: `last_updated` N+1 hotspot — 3 queries per node
-
-**Problem**: `CalendarIncidentScalar.last_updated` re-fetches the row then `.count()` + ordered slice on `chronologies` to compute `max(modified)`. Three extra queries per node invisible to `DjangoOptimizerExtension` (`docs/components/incident.md:36,68`).
-**Root Cause**: Resolver not using DataLoader/annotate; per-node sync fetch.
-**Fix**: _Not fixed._ Annotate with `Greatest(F("modified"), Max("chronologies__modified"))` or batch via DataLoader.
-**Prevention**: Load-test with `assertNumQueries`; forbid per-node re-fetch in resolvers.
-
-### [2026-08-24] incident: `medias_from_calendar_incident_loader` discards ordering and dedupes
-
-**Problem**: `batch_load_medias_from_calendar_incident` returns a `set` per key though field is typed `List[MediaScalar]` — media silently de-duplicated and `CalendarIncidentMedia.timestamp` ordering discarded (`docs/components/incident.md:68`).
-**Root Cause**: Wrong collection type for ordered M2M through table.
-**Fix**: _Not fixed._ Return `list` preserving through-table ordering.
-**Prevention**: Type-check loader return shapes; test that media order matches admin inline order.
-
-### [2026-09-13] incident: new `status` field's `DRAFT` default silently reclassified every legacy row — FIXED (2026-09-13) (uncommitted)
-
-**Problem**: Migrations `0015`/`0016` added `CalendarIncident.status` / `CalendarIncidentChronology.status` with `default="draft"`. Because `AddField`'s default also backfills existing rows, all 280 existing incidents and 417 chronologies would have become `DRAFT` on deploy — mislabelling real published history for any status-aware flow (console queue, future `status=LIVE` filters).
-**Root Cause**: The default was chosen for *future* rows but applied to *existing* rows; no data migration corrected the backfill.
-**Fix**: Added a reversible `RunPython` to `0015`/`0016` — at the instant `status` is introduced, every pre-existing row is legacy, so backfill `LIVE`; the model's `DRAFT` default still governs rows created afterwards. Regression test `tests/incident/test_legacy_status_backfill.py`.
-**Prevention**: When introducing a state/status field, always pair the schema change with a data migration whose backfill reflects the field's *historical* semantics, never the new creation default.
-
-### [2026-09-22] incident: `test_chronology_upvote_changes_downvote` is order-dependent — PRE-EXISTING FLAKE
-
-**Problem**: `tests/incident/test_chronology_mutations.py::test_chronology_upvote_changes_downvote` asserts on `Vote.objects.filter(object_id=...)` without filtering by `content_type`, so a leaked `Vote` row from an earlier test in the same module (same `object_id`, different content type) can make it fail. Observed failing in some runs and passing in others with byte-identical code.
-**Root Cause**: The assertion scopes only by `object_id`; `Vote` is keyed by `(user, content_type, object_id)` and object ids are only unique within a content type, so the filter can match another model's vote.
-**Fix**: _Not fixed (pre-existing)._ Scope the assertion by `content_type` (and ideally `user`).
-**Prevention**: Always filter `Vote` assertions by `content_type`; never treat `object_id` alone as identifying a vote.
-
-### [2026-09-26] incident: an exported `posted_at` is naive **local** time, not the post's UTC time — TRAP
-
-**Problem**: `manage.py export_official_posts` writes `posted_at` as the stored column's own `isoformat()`. With `USE_TZ = False` and `TIME_ZONE = "Asia/Kuala_Lumpur"` that column holds naive local wall time, so a post the X API reported as `2026-09-26T03:15:00Z` is exported as `2026-09-26T11:15:00` — a true instant, but with no offset, in a file whose whole purpose is to leave this system.
-**Root Cause**: Ingestion stores an aware UTC value through the ORM, which drops the tzinfo and shifts to local (the same conversion the Phase 1 tests work around with `timezone.make_naive`). The export is the first surface that *republishes* that value outside the app, so a long-internal ambiguity becomes an external one. The `--since`/`--until` window is unaffected: its bounds stay aware and Django's adapter converts them into the same storage frame, so a UTC calendar day really is a UTC calendar day.
-**Fix**: _By design, documented._ The exported value is the stored column verbatim (spec §6.1), and the command docstring plus `test_date_bounds_are_whole_utc_days_not_local_ones` both say so. A consumer that needs UTC must re-anchor with `settings.TIME_ZONE`; do not "fix" the export by re-interpreting the stored value, which would shift it twice.
-**Prevention**: Whenever a value crosses the app boundary (export, GraphQL, webhook), decide explicitly between "the stored value" and "the same instant in UTC", and pin the choice with a docstring and a test. If `USE_TZ` ever flips to `True`, re-check this command: the exported strings gain an offset and any published dataset shifts with them.
-
-### [2026-09-30] incident: `SocialMediaLinkInput` is replace-not-patch — adding `occurredAt` widened the blast radius — TRAP
-
-**Problem**: `SocialMediaLinkInput` is the only input `updateSocialMediaLink` accepts, and `services/social_links.py::update_social_media_link` treats it as a **full replacement**: `link.url = write.url`, `link.title = write.title or ""`, and four unconditional `.set()` calls (`categories`, `lines`, `vehicles`, `stations`). Only `description`, `status`, `incident_id` and `occurred_at` are conditional. So a caller that re-sends a *partial* payload silently blanks the title and strips all four tag sets — and it has to re-send them, because `url` is non-nullable. The 2026-09-30 wave added `occurred_at` to that input and thereby turned every existing construction site into a potential time editor. The field's tri-state is deliberately **asymmetric**: *omitted* = unchanged, *a value* = set, *explicit `null`* = **reset to `link.created`** (the documented escape hatch, since the column is `NOT NULL` and cannot hold null). That is the dangerous one: a `?? null` in a client payload — the single most common way to serialise an optional field — is **destructive, not a no-op**, and it moves the row to a different calendar day in every feed ordering built on `occurred_at`. A console status change (Approve / Hide / Mark completed) that used to send `{id, status}` now has to round-trip the event time too, and a client that sends `occurredAt: null` thinking it is "leaving it alone" resets a hand-typed event time to the submission instant.
-**Root Cause**: An input object that doubles as a patch payload invites partial construction sites, and this one predates the tri-state, so "absent" already had no safe meaning. `null` was previously only ever "clear this optional field", which is harmless on an optional column; `occurred_at` is `NOT NULL`, so its "clear" state had to be redefined as "reset to the submission time" — and that definition is indistinguishable from a bug to anyone who reads the payload as a patch.
-**Fix**: _Documented, not structurally enforced._ The trap is written into the field comment on `SocialMediaLinkInput.occurred_at` in `incident/schema/inputs.py` and into the service's own branch comments, and the contract is pinned by `tests/incident/test_social_link_occurred_at_write.py` (`UpdateOccurredAtTests` + `OccurredAtMutationTriStateTests`) — omitted leaves the stored value, a value sets it, explicit null resets to `created`. The GraphQL layer translates the `Maybe` into the service sentinel by hand (`OCCURRED_AT_UNSET if not input.occurred_at else input.occurred_at.value`) precisely because Strawberry's `Some.__bool__` is always `True`, so `Some(None)` and omission cannot be told apart that way. Every existing construction site of `SocialMediaLinkInput` was required to be audited and fixed in the same change — that audit is the actual deliverable, not the field.
-**Prevention**: When a field is added to a replace-not-patch input, **grep every construction site of that input** and confirm each one either re-sends the field or is deliberately allowed to reset it — a new field is a change to every existing caller, not just to the one that needed it. Treat `null` as a value with meaning: if a client can send it, document what it does, and never let a `?? null` default stand in for "unchanged". A better structural fix, not done here, is splitting `updateSocialMediaLink` into a patch input; treat the replace semantics as a known sharp edge until that happens.
-
-### [2026-09-30] incident: the `0030` backfill must be one SQL `COALESCE` — a Python loop would re-shift every row — TRAP
-
-**Problem**: With `USE_TZ = False` and `TIME_ZONE = "Asia/Kuala_Lumpur"`, **every stored datetime in this database is naive LOCAL wall time** — the ORM shifts an aware value into the local frame and drops the tzinfo on the way in (the original trap is the 2026-09-26 entry above, "an exported `posted_at` is naive **local** time"). So migration `0030`'s `occurred_at = COALESCE(posted_at, created)` is a straight copy of bytes already in one frame. Writing it the obvious way — `for link in SocialMediaLink.objects.all(): link.occurred_at = link.posted_at or link.created` followed by `bulk_update(...)` — performs **exactly the conversion the design avoids**: the loop round-trips every value through the field adapter and shifts the table by +08:00. The shift is *invisible at the UI's minute precision*; it surfaces later and elsewhere, as links ordered into the wrong calendar day against the `currentServiceDayOnly` / `lastWeekOnly` windows, and as a feed whose "Today" section is quietly eight hours out.
-**Root Cause**: `USE_TZ = False` makes the *storage frame* an application-level convention rather than a database-level guarantee, so it is invisible at every call site — nothing raises, nothing warns, and the naive value looks correct everywhere it is read. A per-row Python loop is the shape almost every Django data migration takes, which is exactly why it is dangerous here: it is the one shape that silently re-interprets stored bytes.
-**Fix**: _By design, documented._ Migration `0030` uses `SocialMediaLink.objects.all().update(occurred_at=Coalesce("posted_at", "created"))` — one statement, no Python read/modify/write — and the rationale (including the explicit ban on `make_aware`/`make_naive`/`astimezone`/`localtime`) is written into the migration module's docstring. The reverse half is `update(occurred_at=F("created"))`, equally loop-free. The stored values are pinned by literal in `tests/incident/test_social_link_occurred_at_backfill.py` and `tests/incident/test_official_post_occurred_at.py`, so a future refactor to a loop fails loudly rather than by eight invisible hours.
-**Prevention**: Any data migration that copies a datetime between two columns of the same table is a **single SQL expression** (`Coalesce`, `F`) — not a loop. If a loop is genuinely unavoidable, assert the round trip on one row first. The safety is structural, so leave it structural. Do not "repair" a divergence between `posted_at` and `occurred_at` by converting one into the other: both come from the same `RawPost.posted_at` on the automated path, and an added `make_aware`/`astimezone` there would double-shift every post. See also the `Some(None) → link.created` reset path, which is the one *legitimate* reason the two columns can differ.
-
-### [2026-09-30] incident: the keyset cursor is field-agnostic — a stale token still decodes, and one shared helper now serves two columns — TRAP
-
-**Problem**: Two hazards with one cause. `incident/schema/keyset.py` encodes a timestamp and a row id and **no column name**, so two separate things go wrong — silently, with no raised error and no empty page.
-
-- **(a) A cursor minted before the column change still decodes.** A token handed out by the pre-`0030` deployment — payload a `created` timestamp — is still *accepted* by the post-`0030` resolver, and it then silently means "resume after this `occurred_at`". No error, no visible symptom: just a page that skips or repeats rows, which on a feed that also re-orders is indistinguishable from "the feed is a bit jumpy". The same applies to `CalendarIncidentScalar.links`, and the frontend is documented to take a nested page-1 cursor and continue through the root query, so one stale token can cross surfaces.
-- **(b) The shared helper now has two columns behind it.** `encode_keyset_cursor(ts, row_id)` / `decode_keyset_cursor(cursor)` are used by `SocialMediaLink`'s two surfaces (now `occurred_at`) **and** by `get_line_status_reports` (still `LineStatusReport.created`, deliberately — a status report *is* its creation instant). The helpers were renamed off their old `created`/`link_id` parameter names for exactly this reason, but the sharing is not the hazard; the hazard is that the helper's *name and parameters are not field-specific*, so a stale docstring or a copy-paste into a new resolver silently paginates the wrong column. Nothing fails, nothing raises — the page is merely wrong. The live `get_line_status_reports` (`resolvers.py`, `cursor_created, cursor_id = decode_keyset_cursor(after)` over `LineStatusReport.created`) is right *because the variable name says which column it is*; that name is the only thing standing between the shared helper and a wrong answer, so it must travel with any code that is copied.
-
-**Root Cause**: The cursor format was field-agnostic from the start, which was a deliberate simplification that was safe only while every consumer ordered on the same column. One wire format shared by several surfaces is the right design (it is what lets the frontend hand a nested incident-page cursor to the root query), but it makes "which column is this?" a property of the *caller*, enforced only by convention and by reading the caller. Changing the sort column additionally changes the *meaning* of an existing opaque token, and an opaque token cannot signal that.
-
-**Fix**: _Not fixed — accepted, documented._ `get_public_social_media_links`'s docstring states that in-flight cursors across the deploy are not guaranteed to be seamless and that the feed should be relaunched from page one. The general rule is recorded where the code lives, in `incident/schema/keyset.py`'s module docstring: it names both consumers, states that the encoding is shareable only while they order on the SAME column, and states hazard (a) outright (an opaque payload for one column is "happily accepted" by a consumer on another).
-
-**Prevention**: Two rules, one per hazard. **(a)** When a keyset cursor's sort column changes, either **version the encoding** (a prefix such as `"o1:"`/`"c1:"` in the decoded payload, rejected loudly on mismatch) or **force clients to restart from page one** by bumping the argument name or a schema version. Never ship a sort-column change to a cursor-paginated surface without one of the two; when reviewing a change that alters an `.order_by()` on a paginated resolver, check every producer of that resolver's cursors, not just the consumer. **(b)** When you copy either helper into a new resolver, **rename the local variables to the column you are actually ordering on** and add that resolver to the module docstring's list. A third column needing its own cursor is the moment to version the encoding — not the moment to add a third cross-reference to this entry, which is why both hazards share this one.
-
-### [2026-09-22] incident: `lineStatusHistory` stopped at the current hour — the chart lost its later labels — FIXED (2026-09-22)
-
-**Problem**: `bucket_hourly` walked from the service-day start to `now.replace(minute=0, …)` inclusive, so the bucket count grew through the day. A browser measurement at ~17:00 found only 15 hour labels (`03`–`17`) on the front page's "Reports by hour — today" chart instead of the 24 the service day (03:00 → 02:00) should always show; the frontend was faithfully rendering what the API returned.
-**Root Cause**: The bucket range was derived from wall-clock `now` rather than the fixed 24-hour service-day contract, and the resolver docstring codified the wrong behaviour ("to the current hour inclusive"). The "no data" state (empty list) lived at the same layer, so naively emitting 24 zero-filled buckets would have broken it.
-**Fix**: `bucket_hourly` returns `[]` when the line has no report in the service day (preserving the frontend's "No data" placeholder), otherwise all `HOURS_IN_SERVICE_DAY` (24) buckets from the service-day start through 02:00, zero-filling hours without reports. Docstrings corrected; the pytest mirror updated and runnable coverage added in `incident/tests.py::LineStatusHistoryTests`.
-**Prevention**: Fixed-length domain ranges (a 24-hour service day) must come from the domain constant, never from `now`; keep the empty state distinguishable from "all-zero data" and assert both shapes at the service boundary.
-
-### [2026-09-28] incident: the official-post poll's opt-in is read twice with different lifetimes — only **celerybeat** dispatch sees it — TRAP
-
-**Problem**: `OFFICIAL_POST_POLLING_ENABLED` (default off) is read in two places with different lifetimes. `rosak/celery.py` builds `beat_schedule` **at import**, so toggling the env var and restarting only `celeryworker` changes nothing — the 5-minute `ingest_official_posts` tick keeps (or never starts) running until `celerybeat` is restarted. Meanwhile `incident/tasks.py` re-reads the setting on every run, so a manually-enqueued run and a beat-dispatched run can disagree with the value the operator just toggled.
+**Problem**: `OFFICIAL_POST_POLLING_ENABLED` (default off) is read in two places with different lifetimes: `rosak/celery.py` builds `beat_schedule` **at import**, so toggling the env var and restarting only `celeryworker` changes nothing — the 5-minute `ingest_official_posts` tick keeps running (or never starts) until `celerybeat` is restarted. Meanwhile `incident/tasks.py` re-reads the setting every run, so a manually-enqueued run and a beat-dispatched run can disagree with the value the operator just toggled.
 **Root Cause**: The schedule is a module-level dict evaluated once at import; the task guard is a per-run read. The two layers are deliberately independent (dispatch gate + execution gate), which makes "did my env change apply?" ambiguous if only one service is restarted.
 **Fix**: _By design, documented._ The settings comment and the `docs/APPS.md` beat table both state that toggling requires restarting `celerybeat`. Verify with `docker compose exec app python -c "from rosak.celery import beat_schedule; print('ingest_official_posts' in beat_schedule)"` after the restart.
 **Prevention**: Every new env-gated beat entry must state the restart requirement in its settings comment and the APPS.md beat table; never verify a schedule toggle by looking at the worker alone.
 
-### [2026-09-28] incident: the webhook read `includes` from the wrong envelope level — every real delivery was dropped — FIXED (2026-09-28)
+### [2026-09-28] tests: the debug toolbar breaks every `self.client` request, and the cache is Redis
 
-**Problem**: A correctly signed `post.create` delivery to `POST /webhooks/x-api` answered `200 {"events": 1, "ingested": 0, "unresolved": 1}`. The whole ingest path was dead in production while the test suite was green.
-**Root Cause**: `services/x_webhooks.py::_usernames_by_id` read `payload["includes"]["users"]` at the **top level**, but X nests the expansion on the event object — `ActivityStreamResponse.data.includes`, per X's published OpenAPI schema (the `data` object carries `event_type` / `event_uuid` / `filter` / `includes` / `payload` / `tag`). With no expansion found, the resolver fell through to the reverse user-id lookup, which fails offline, so the post was correctly reported as `unresolved` — and correctly dropped. The bug was in the test helper *and* the parser: `xaa_post_create_payload` built the payload with the same wrong top-level shape, so the fixture agreed with the bug. The failure is silent by construction — the defensive `unresolved` counter that protects against inventing a permalink is exactly what hid it.
-**Fix**: New `_expansion_containers` yields `data` first, then the payload itself, and `_usernames_by_id` merges with `setdefault` so the nested (authoritative) entry wins and a top-level duplicate is ignored. Tolerant of missing/non-dict/non-list shapes. The test helper now defaults to the real nested location, so the whole suite exercises the shape X sends. Commit `fix(incident): read the X includes expansion from data` (2026-09-28). `_create_items`'s `data.payload` / `data.filter` were audited against the same schema and are correct.
-**Prevention**: Build third-party webhook test payloads by transcribing a real captured body (or the vendor's own OpenAPI schema), never by inventing a shape — a hand-built fixture validates the parser against itself. When a parser has a defensive fallback, assert the *primary* path with a test that fails if the fallback is reached (here: patch the network lookup to raise).
+**Problem**: All 30 `XWebhook*` tests errored with `NoReverseMatch: 'djdt' is not a registered namespace`, and handle-resolution tests failed like a logic bug (a cache hit from a previous run changed the answer). Two environment traps that contradict the docs.
+**Root Cause**: (1) `DEBUG_TOOLBAR_CONFIG["SHOW_TOOLBAR_CALLBACK"]` closes over the **module global** `DEBUG` (true in dev), but the test runner sets `settings.DEBUG = False` — `rosak/urls.py` withholds the `djdt` routes while the middleware (gated on `SENTRY_DSN`, not `DEBUG`) still renders and `_postprocess` reverses `djdt:render_panel` unconditionally. (2) `CACHES["default"]` is `RedisCache`, **not** `DummyCache` — the documented swap only applies when `DEBUG` is true, and this environment is the opposite; user-id caches use `timeout=None`, so keys survive across runs and test classes.
+**Fix**: Client-based test classes carry `@modify_settings(MIDDLEWARE={"remove": ["strawberry_django.middlewares.debug_toolbar.DebugToolbarMiddleware"]})` (the `no_debug_toolbar` alias used by `operation/tests.py`, `rosak/tests/test_version.py`); cache-sensitive classes pin `CACHES` to a private `LocMemCache` and use a distinct user id per test.
+**Prevention**: Any new test class using `self.client` needs `no_debug_toolbar`; any test whose assertions depend on a cache *hit* must pin `CACHES` to `LocMemCache` with its own `LOCATION` and must not reuse a cached key across tests. Do not trust the `DummyCache` note for this environment — check `settings.CACHES` first. A module-level `from … import _resolve_user_id` also defeats `mock.patch.object` on the source module; import it inside the function that uses it.
 
-### [2026-09-28] incident: stored post text is decoded, `raw_payload` is not — a second decode silently corrupts it — FIXED (2026-09-28)
+### [2026-09-26] incident/telegram_provider: an outbound audit row with no `payload["message"]` is silently un-approvable
 
-**Problem**: Official posts rendered in the feed with their HTML entities intact (`Gangguan laluan utama &amp; penyehjangan(types): MTR`), because X sends post text escaped and ingestion stored it byte-for-byte. The opposite failure is the quieter one: a naive fix that also unescapes on read, or on export, turns `&amp;amp;` (an *escaped* entity, which a real post can contain) into a bare `&`, and nothing fails — the text is still valid UTF-8, just wrong.
-**Root Cause**: The decode decision had never been made explicit, so every layer assumed someone else owned it. Two long-standing tests made the coupling worse: `test_a_signed_delivery_creates_exactly_one_pending_row` asserted `description == WEBHOOK_POST_TEXT` against the *encoded* literal, so the "verbatim" contract was pinned to the encoded form, and `RawPost.text` was documented as verbatim with no mention of escaping at all.
-**Fix**: `html.unescape` (stdlib) applied exactly once in `official_posts.tweet_to_raw_post` — the single mapping behind the poll, the fixture loader and the webhook parser — so every ingest path stores decoded text. `RawPost.raw` is left as the provider sent it, keeping `raw_payload` encoded for export fidelity, and both docstrings say so. `title` therefore truncates to 256 *decoded* characters. The two delivery-view assertions now compare against a decoded constant and additionally assert `raw_payload["text"]` is still the encoded original; new tests pin the single-decode property (`&amp;amp;` → `&amp;`, `&#38;#39;` → `&#39;`) and the plain-`&`-untouched property.
-**Prevention**: One decode point per stored representation, named in the docstring, with the other representation's state stated next to it. When a "verbatim" claim in a test or docstring meets a stored string that looks escaped, the claim is the bug — and any new display/export layer must read the decoded column, never `raw_payload`, and must not call `unescape` itself.
+**Problem**: `handlers.approve` resolves a replied-to message by JSONB lookup on `telegram_log__payload__message__message_id` + `__chat__id`. That block is written by `views.TelegramInbound` for **inbound** rows, so an admin replying `/approve` to an official-post notification got the generic "No media awaiting review found for this message." — indistinguishable from replying to an ordinary chat message, with no error and no hint the notification was real.
+**Root Cause**: `TelegramLogs.payload` is a free-form `JSONField` with no constraint, and `send_message` created its OUTBOUND row *before* the send, so the row had no `message` block at all. Nothing asserted that an outbound row is reply-resolvable.
+**Fix**: `send_message` gained keyword-only `return_log=False`; when set it stamps `payload["message"]` (`message_id` + `chat.id`, mirroring the inbound shape) before `asave()` and returns `(message, log)`, which `incident.tasks._notify_new_link` joins to the `SocialMediaLink` via `TelegramSocialMediaLinkLog`. The default path deliberately does **not** stamp, so existing callers are unchanged — the trap is now opt-in and silent by design. Tests: `SendMessageTests`, `ApproveHandlerTests`.
+**Prevention**: Any new "reply to this message to act on it" feature must call `send_message(..., return_log=True)` and persist the returned log. If a reply handler reports "not found" for a message the bot demonstrably sent, check `TelegramLogs.payload->'message'` on that row before suspecting the handler.
 
----
+### [2026-09-22 → 2026-09-26] tests: entering async code and scoping assertions
 
-## spotting
+**Problem**: Three ways a test asserted nothing (or against the wrong row):
 
-### [2026-09-22] spotting: Firebase credential mount became a root-owned directory — FIXED (2026-09-22) `46cfde5`
+- **`asyncio.run` sees no test data.** `asyncio.run(handlers.approve(update))` inside a `TestCase` "found nothing" the test had just created: the async ORM ran on a different connection than the test transaction. `async_to_sync` made the same test pass with no other change — it runs the coroutine on the calling thread, so the wrapping transaction applies. Relatedly, a sync `Model.objects.create` inside async code raises `SynchronousOnlyOperation`; async code must use `acreate`/`asave`.
+- **Patching an async symbol.** A `MagicMock` over an async function fails, because `async_to_sync` awaits the *call result* — use a real `async def`/`AsyncMock`, and patch the symbol **where it is imported** (`incident.tasks.send_message`, not `telegram_provider.utils.send_message`).
+- **`Vote` assertions were unscoped.** `Vote.objects.filter(object_id=…)` can match another content type's row (object ids are unique only per content type), making `tests/incident/test_chronology_mutations.py::test_chronology_upvote_changes_downvote` order-dependent. Not fixed — scope by `content_type` (and ideally `user`); never treat `object_id` alone as identifying a vote.
 
-**Problem**: Firebase id-token verification raised `IsADirectoryError` from `google.auth` on the first authenticated request even though the service booted and answered `/graphql/` fine. The mounted credential path was not a file at all.
-**Root Cause**: `docker-compose.yml` bind-mounted a literal host path that did not exist. Docker auto-creates a missing bind source as an **empty root-owned directory** rather than failing, so the container saw a directory at `GOOGLE_APPLICATION_CREDENTIALS`; `firebase_admin` only reads that path at **request** time (`verify_id_token`), which is why a misconfigured mount looked like a generic auth failure instead of a boot-time config error.
-**Fix**: Mount from `${HOME}/.firebase/…` (the real host path) and add a fail-fast check in `SpottingConfig.ready()` — raise `ImproperlyConfigured` when `GOOGLE_APPLICATION_CREDENTIALS` is set but `os.path.isfile` is false. `.firebase/` added to `.gitignore`. Commit `46cfde5` `fix(spotting): mount the firebase credential from the real home path` (2026-09-22).
-**Prevention**: Never bind-mount a source that might not exist — Docker silently substitutes a directory. Validate credential paths at startup (app `ready()` / `manage.py check`) so a bad mount fails immediately instead of surfacing as an auth error at request time.
+**Root Cause**: Connection/transaction identity is invisible in test code, and identity is compound (`user`, `content_type`, `object_id`) where the assertion used one part.
+**Fix**: Patch the admin check where it is looked up — `rosak.permissions.has_admin_claim` for function-local imports, the consumer module for module-level ones — and never let a `MagicMock` user reach it unmocked (`51f2f69`). Use `async_to_sync`, never `asyncio.run`, to enter real async code from a `TestCase`.
+**Prevention**: If a query inside async code "finds nothing" that the test just created, suspect the connection, not the filter — assert against a known-id lookup before rewriting the query. Always filter `Vote` assertions by `content_type`.
 
-### [2026-08-24] spotting: `markAsRead` gated `IsAdmin` — per-user read state unreachable — FIXED (2026-08-24) `1e2a421`
+### [2026-09-24] telegram_provider: `error_handler` only prints and `/dadjoke` blocks; retry is now bounded
 
-**Problem**: `EventScalar.is_read` / `EventFilter.is_read` are user-scoped and `IsLoggedIn`, but `markAsRead` required `IsAdmin` (`spotting/schema/schema.py:180`) — complete feature switched off for non-admins (`docs/APPS.md:295`, `docs/components/spotting.md:34,93`).
-**Root Cause**: Permission copy-paste; `IsAdmin` left on mutation that writes per-user `EventRead`.
-**Fix**: Ungated from `IsAdmin` to `IsLoggedIn`; resolver already uses `info.context.user.id` + `abulk_create(ignore_conflicts=True)`. Commit `1e2a421` `fix(spotting): ungate markAsRead mutation from IsAdmin to IsLoggedIn` (2026-08-24).
-**Prevention**: Permission matrix test asserting each mutation's required clearance.
+**Problem**: `error_handler` only `print`s while `TELEGRAM_ADMIN_CHAT_ID` is unused, and `/dadjoke` does a blocking `requests.get` inside an async handler, blocking the event loop. `utils.infinite_retry_on_error` (a `while True` loop with 10s sleeps) could pin a worker forever.
+**Root Cause**: Ad-hoc resilience plus a commented-out admin alert path; retries were unbounded.
+**Fix**: Retry portion fixed — `infinite_retry_on_error` no longer exists; replaced by the bounded `telegram_provider.utils.retry_on_error` (`max_retries=3`, exponential backoff), landed with the governed egress path in `0d1c3a4`. Still open: `error_handler` prints instead of paging admins, `/dadjoke` still blocks, and `AGENTS.md` still names the old function.
+**Prevention**: Route all outbound messaging through the governed `send_message` path (it logs `OUTBOUND`, splits at 4096 chars, dead-letters); make third-party fetches async or `sync_to_async`; alert instead of printing on handler errors.
 
-### [2026-08-24] spotting: `eventsCount` unfiltered + `with_most_entries` IndexError
+### [2026-09-24] compose: recreate the credential-mounting services one at a time
 
-**Problem**: `spotting.schema.resolvers.get_events_count` is bare `Event.objects.acount()` ignoring `EventFilter` — paginated UI shows wrong total. `UserScalar.with_most_entries` indexes `[0]` into aggregate queryset and raises `IndexError` for user with zero events (`docs/APPS.md:296`, `docs/components/spotting.md:17,103`).
-**Root Cause**: Resolver not reusing filter Q; missing empty-queryset guard.
-**Fix**: _Not fixed._ Pass filtered queryset into count; guard `with_most_entries` with empty check. Commented `ListConnectionWithTotalCount` is intended fix.
-**Prevention**: Always derive count from same filtered queryset; test zero-event user profile.
-
-### [2026-08-24] spotting: `CheckConstraint` never requires coordinates for `LOCATION`
-
-**Problem**: `spotting_event_value_relevant` governs only station columns; `type=LOCATION` can be saved with no `PointField` (`docs/APPS.md:297`, `docs/components/spotting.md:67,106`).
-**Root Cause**: Constraint modeled station invariants only; GraphQL `add_event` creates `LocationEvent` only if `input.location != UNSET`, so type is decorative.
-**Fix**: _Not fixed._ Extend `CheckConstraint` or validate in mutation to require `LocationEvent` row for `type=LOCATION`; enforce OneToOne migration from FK after dedup.
-**Prevention**: DB-level invariant tests for each `SpottingEventType` variant.
-
-### [2026-08-24] spotting / telegram_provider: `get_daily_updates()` ignores its `spotting_date` argument
-
-**Problem**: `telegram_provider.utils.get_daily_updates(line_id, spotting_date)` overwrites `spotting_date` with `date.today()` on first line; `spotting.tasks.report_spotting_today` passes `yesterday = date.today() - 1` but digest reports today (`docs/APPS.md:291`, `docs/components/spotting.md:75,91`, `docs/components/telegram_provider.md:91`).
-**Root Cause**: Stale overwrite left after refactor; Beat job intent (03:00 yesterday) silently ignored.
-**Fix**: _Not fixed._ Remove overwrite and honor argument; pass timezone-aware `yesterday` explicitly.
-**Prevention**: Unit test asserting digest date equals injected date, not `today()`.
-
-### [2026-08-24] spotting: `LocationEvent` FK not OneToOne + divergent deletion rules
-
-**Problem**: `LocationEvent.event` is `ForeignKey` not `OneToOne`; `batch_load_location_event_from_event` keeps last row silently. Deletion rule duplicated: `Event.auser_deletion()` raises vs `deleteEvent` mutation returns `ok=False` with subtly different 3-day window (`created__gte=now()-3d`) (`docs/components/spotting.md:60,69,106`).
-**Root Cause**: FK chosen without uniqueness; deletion logic expressed twice.
-**Fix**: _Not fixed._ Migrate to `OneToOneField` after dedup; hoist window into `Event.is_within_edit_window()` used by both paths.
-**Prevention**: Choose `OneToOneField` for 1:1 payloads; single model method for policy, not queryset filter duplication.
-
----
-
-## operation
-
-### [2026-09-24] operation: `LineAdmin` change form loaded every `CalendarIncident` — FIXED (2026-09-24)
-
-**Problem**: Opening `/admin/operation/line/<id>/change/` was very slow. `LineAdmin` declared no `fields`/`exclude`, so Django auto-rendered the `Line.calendar_incidents` M2M as a `<select multiple>` that fetched every `CalendarIncident` row; its default `blank=False` also made the field required, so a Line could not be saved without tagging incidents.
-**Root Cause**: A model M2M with no admin exclusion is editable by default; the related model grows without bound, so the widget's query cost grows with it.
-**Fix**: `LineAdmin.exclude = ("calendar_incidents",)` — the field is gone from the form (no incident query, no required validation). The relation is still edited from `CalendarIncidentAdmin` via `filter_horizontal = ("lines", …)`. Regression test `operation/tests.py::LineAdminConfigTests`.
-**Prevention**: When a Line/Station/Vehicle admin gains a M2M to a high-cardinality model, exclude it or use `autocomplete_fields`; never let a default M2M widget pull an unbounded table.
-
-### [2026-08-24] operation: Write API imports non-existent `operation.schema.enums`
-
-**Problem**: Commented `operation/schema/inputs.py` does `from operation.schema.enums import AssetType` but module does not exist — enums live in `operation/enums.py`. `StationInput.internal_representation` is a `StationLine` field misplaced on `Station`; no `VehicleInput` exists at all (`docs/APPS.md:298`, `docs/components/operation.md:80`).
-**Root Cause**: Refactor moved enums but inputs stub not updated; `Station` vs `StationLine` confusion.
-**Fix**: _Not fixed._ Repoint import to `operation.enums` or use generated enum; drop `internal_representation` from `StationInput` or nest `StationLine` rows; add `VehicleInput`/`VehiclePartialInput`.
-**Prevention**: Keep commented scaffolding importable under `if TYPE_CHECKING`; CI `ruff check` on commented files.
-
-### [2026-08-24] operation: `StationLine` has no ordinal — lexicographic ordering breaks route order
-
-**Problem**: `StationLine.Meta.ordering = ["internal_representation"]` sorts lexicographically (`KJ10` before `KJ2`); `StationLine` has no `order` field, so `Line.station_lines` cannot render travel order for strip maps / "next stations" (`docs/APPS.md:299`, `docs/components/operation.md:71`).
-**Root Cause**: Missing `OrderedModel` despite `django-ordered-model` already being a dependency for `incident`.
-**Fix**: _Not fixed._ Inherit `OrderedModel` with `order_with_respect_to="line"`, data-migrate `order` from numeric tail of `internal_representation`, switch admin to `OrderedTabularInline`.
-**Prevention**: Explicit route order field; never rely on code string ordering for sequence.
-
-### [2026-08-24] operation: `spotting_count_from_vehicle_loader` key collision on date window
-
-**Problem**: `batch_load_spotting_count_from_vehicle` aliases aggregate as `Count(filter=Q(...))` on `key[0]` only while key is `(vehicle_id, Q(date_filter))` — two different date windows for same vehicle in one request collide and return same count (`docs/APPS.md:304`, `docs/components/operation.md:51`).
-**Root Cause**: Batch key's filter part not included in SQL alias.
-**Fix**: _Not fixed._ Alias on full composite key or issue separate aggregates per distinct `(vehicle_id, Q)` key.
-**Prevention**: Loader unit test with same vehicle queried for two windows in one request.
-
-### [2026-08-24] operation: DataLoader batch assumes uniform filter + scalar field mismatches
-
-**Problem**: `batch_load_vehicle_from_line` reads `keys[0][1]` assuming every key in batch shares same `spotted_today`; `VehicleType` scalar declares `info: str` vs model `description`; `Asset.stations`/`StationLine.lines` declare plural list over singular FKs; `LineAdmin` assigns `list_editable` twice, second wins and drops `status` inline editing (`docs/components/operation.md:52`).
-**Root Cause**: Batch ergonomic shortcut; copy-paste scalar naming; duplicate attribute overwrite.
-**Fix**: _Not fixed._ Group keys by `spotted_today` before single query; rename scalar fields to match model; fix `list_editable`.
-**Prevention**: Never index `keys[0]` for per-key state; lint for duplicate class attribute assignment.
-
----
-
-## telegram_provider
-
-### [2026-08-24] telegram_provider: `handlers.spot` provenance missing chat filter — cross-chat collision
-
-**Problem**: `spot` joins `TelegramSpottingEventLog` via `telegram_log__payload__message__message_id` with no `__chat__id` filter (unlike `/delete`), so `message_id` (unique only per chat) can bind spotting to another chat's message (`docs/APPS.md:300`, `docs/components/telegram_provider.md:64,119`).
-**Root Cause**: Incomplete JSONB lookup; `payload` has no DB index (`Meta` absent).
-**Fix**: _Not fixed._ Add `payload__message__chat__id` filter; add `UniqueConstraint(spotting_event, telegram_log)` and GIN/expression index on `payload`.
-**Prevention**: Always qualify Telegram `message_id` with `chat_id`; index JSONB lookups used in prod queries.
-
-### [2026-08-24] telegram_provider: Unbounded retry + silent error reporting + blocking I/O — retry FIXED (2026-08-25) `0d1c3a4`
-
-**Problem**: `utils.infinite_retry_on_error` was `while True` with 10s `sleep` — could pin a worker forever; `error_handler` only `print`s while `TELEGRAM_ADMIN_CHAT_ID` is unused; `/dadjoke` does blocking `requests.get` inside an async handler, blocking the event loop (`docs/components/telegram_provider.md:48,90,91`).
-**Root Cause**: Ad-hoc resilience plus a commented-out admin alert path.
-**Fix**: Retry portion fixed. `infinite_retry_on_error` no longer exists; it was replaced by the bounded `telegram_provider.utils.retry_on_error` (`max_retries=3`, exponential backoff), landed with the governed egress path in commit `0d1c3a4` `feat(telegram_provider): single governed egress path for outbound messaging` (2026-08-25). Still open: `error_handler` only prints, and `/dadjoke` still blocks. `AGENTS.md` still references the old `infinite_retry_on_error` name.
-**Prevention**: Bounded retry policy (now in place); centralised `send_message` helper that logs `OUTBOUND` and handles 4096-char split in one place.
-
-### [2026-09-12] telegram_provider: /approve admin identity needs a linked user + Firebase claim — GOTCHA
-
-**Problem**: `approve()` resolves `common.User` by `telegram_id`, then checks `has_admin_claim`. An admin who has never run `/verify` has no `User` row and is rejected before the claim is ever consulted.
-**Root Cause**: The handler reuses the same "verified Telegram user" precondition as the other commands and layers the admin claim on top.
-**Fix**: _By design._ Resolve the user first, then call `has_admin_claim`; the import is function-local to avoid an app-loading cycle.
-**Prevention**: Document that admin bot commands require a linked `User` (`/verify`) in addition to the Firebase admin claim.
-
-### [2026-09-16] telegram_provider: media uploads silently dropped while uploads disabled
-
-**Problem**: `handlers.media` returned "Media uploads are currently disabled" before creating anything, so a photo/video replied to a spotting entry was dropped entirely with no `TemporaryMedia` row for later recovery once uploads were re-enabled.
-**Root Cause**: The uploads feature flag was treated as a hard gate at the entry point instead of being enforced where publication happens (`convert_temporary_media_to_media_task`).
-**Fix**: The handler now always records the `TemporaryMedia` row (flagged `metadata["uploads_disabled"] = True`) and merely defers publication; the conversion task's existing `should_upload_media()` re-check keeps the row queued until re-enabled. Reply on the disabled path now says the media is queued.
-**Prevention**: Gate publication (task dispatch / feature on/off), not ingestion — always persist the user's submission so the flag flips without losing data.
-
-### [2026-09-24] telegram_provider: `/spotting_today` referenced a non-existent `VehicleStatus` member — FIXED `6075118`
-
-**Problem**: `utils.get_daily_updates` excluded `vehicle__status=VehicleStatus.NOT_IN_SERVICE`, but `operation.VehicleStatus` has no such member (it is `OUT_OF_SERVICE`; only `spotting.SpottingVehicleStatus` keeps `NOT_IN_SERVICE`). Every `/spotting_today` call and the 03:00 `report_spotting_today` digest raised `AttributeError` before rendering.
-**Root Cause**: The flag was written against the spotting-event enum's member name while filtering the operation `Vehicle.status`, and no test exercised `get_daily_updates` against real rows, so the bad attribute reference survived review (it was only ever mocked).
-**Fix**: Use `VehicleStatus.OUT_OF_SERVICE`; added `telegram_provider/tests.py::GetDailyUpdatesTests` (real ORM) covering default exclusion and `include_not_in_service=True` inclusion.
-**Prevention**: Give every enum-attribute reference at least one real-query test — `AttributeError` on a `TextChoices` member is invisible to mocks; confirm which app owns the model before reusing an enum member name.
-
-### [2026-09-26] telegram_provider: an outbound audit row with no `payload["message"]` is silently un-approvable — TRAP
-
-**Problem**: `handlers.approve` resolves a replied-to message by JSONB lookup on
-`telegram_log__payload__message__message_id` + `__chat__id`. That block is written by
-`views.TelegramInbound` for **inbound** rows, so an admin replying `/approve` to one of
-the official-post notifications got the generic "No media awaiting review found for this
-message." — indistinguishable from replying to an ordinary chat message, with no error
-anywhere and no hint that the notification was real.
-**Root Cause**: `TelegramLogs.payload` is a free-form `JSONField` with no constraint, and
-`send_message` created its OUTBOUND row *before* the send, so at the moment the row
-existed its payload had no `message` block at all. Nothing in the code asserted that an
-outbound row is reply-resolvable, so the gap was invisible.
-**Fix**: `send_message` gained the keyword-only `return_log=False`; when set it stamps
-`payload["message"]` (`message_id` + `chat.id`, mirroring the inbound shape) before
-`asave()` and returns `(message, log)`, which `incident.tasks._notify_new_link` joins to the
-`SocialMediaLink` via `TelegramSocialMediaLinkLog`. The default path deliberately does **not**
-stamp, so existing callers are unchanged — which means the trap is now opt-in and silent by
-design. Tests: `SendMessageTests` (stamp on / bare `Message` off / `None` when dead-lettered)
-and `ApproveHandlerTests` (an outbound notification publishes, another chat's reply does not).
-**Prevention**: Any new feature that says "reply to this message to act on it" must call
-`send_message(..., return_log=True)` and persist the returned log. If a reply-based handler
-ever reports "not found" for a message the bot demonstrably sent, check
-`TelegramLogs.payload->'message'` on that row before suspecting the handler.
-
----
-
-## chartography
-
-### [2026-08-24] chartography: `SourceCustomLine` admin mapping unreachable + MTREC task incomplete
-
-**Problem**: `SourceCustomLine.mapped_lines` uses explicit `through=SourceCustomLineLineMapping`, so Django omits it from admin form; `SourceCustomLineLineMapping` unregistered and `SourceCustomLineAdmin` has no inline — admin-editable reconciliation escape hatch is unreachable. `aggregate_line_vehicle_status_mtrec_task` accepts neither `force` nor `triggered_by_id`, and no mutation can trigger it (`docs/APPS.md:301`, `docs/components/chartography.md:76,82`).
-**Root Cause**: Explicit through not paired with inline; MTREC path not given same kwargs as MLPTF path.
-**Fix**: _Not fixed._ Add `TabularInline` for through model; give MTREC task `force`/`triggered_by_id` plus sibling mutation; wire `force=True` to `delete` conflicting `Snapshot` in `transaction.atomic()` (currently `force` is dead parameter and `bulk_create(ignore_conflicts=True)` discards corrections).
-**Prevention**: Admin smoke test creating mapping via UI; mutation parity test for both sources.
-
-### [2026-08-24] chartography: Hardcoded PK map + implicit datetime coercion + assert guard
-
-**Problem**: MTREC `short_code_line_ids_map` hardcodes numeric `operation.Line` PKs (`KGL→[2]`, `Komuter→[13,14]`) — rots on reseeding. `Snapshot.date` (`DateField`) assigned `datetime` (`now() - timedelta(...)`) relies on implicit coercion, timezone-sensitive at day boundaries. `Snapshot.url` never populated. Guard is `assert isinstance(line_ids, list)` stripped under `python -O` (`docs/components/chartography.md:52,57`).
-**Root Cause**: Seed-data assumptions baked into code; strict validation left as assert.
-**Fix**: _Not fixed._ Always write `custom_line_id` and resolve via `custom_line__mapped_lines` join seeded by data migration; use `.date()` explicitly in defined timezone; raise explicit exception for unknown short code; populate `Snapshot.url`.
-**Prevention**: Forbid hardcoded PKs; validate external payload shapes with explicit errors, not `assert`.
-
----
-
-## reporting
-
-### [2026-08-24] reporting: Missing `reporting/schema/enums.py` + plain `TextField` not enum
-
-**Problem**: Commented `reporting/schema/filters.py:7` and `inputs.py:7` do `from reporting.schema.enums import ReportType` but file does not exist; `Report.type` is `TextField(choices=...)` so `strawberry.auto` renders `String` not `ReportType` enum (`docs/APPS.md:302`, `docs/components/reporting.md:21,76`).
-**Root Cause**: Scaffolded GraphQL layer never completed; model used plain choices instead of `TextChoicesField`.
-**Fix**: _Not fixed._ Create `@strawberry.enum` wrapper over `reporting.enums.ReportType` per `generic/schema/enums.py`; change `Report.type` to `TextChoicesField(choices_enum=ReportType)`.
-**Prevention**: Generate Strawberry enum from model field; CI import-check even for dormant apps.
-
-### [2026-08-24] reporting: `ReportFilter.filter_types` wrong field + ballot stuffing
-
-**Problem**: `ReportFilter.filter_types` filters `report_type__in` while model field is `type`; no `UniqueConstraint` on `Vote(report, user)` so repeated `createVote` stuffs ballot; same missing uniqueness on `ReportMedia`/`ReportResolution` allows duplicate attachments/links (`docs/APPS.md:305`, `docs/components/reporting.md:54,78`).
-**Root Cause**: Field rename not propagated to filter; constraints never added (compare `operation.AssetMedia` which has uniqueness).
-**Fix**: _Not fixed._ Change filter to `type__in`; add `UniqueConstraint(fields=["report","user"])` on `Vote` plus through-table uniqueness; use idempotent `toggle_vote(report_id, is_upvote)` deriving `user_id` from `info.context.user.id` with `IsLoggedIn+IsRecaptcha`.
-**Prevention**: Unique constraint on every vote/through table; filter field name test.
-
-### [2026-08-24] reporting: Drafted mutations missing permissions + voter identity spoofable
-
-**Problem**: Auto-generated `delete_reports` / `delete_vote` carry no `permission_classes`; `VoteInput.user_id` and `ReportInput.reporter_id` are client-supplied — any caller can vote/file as any user (`docs/components/reporting.md:78`).
-**Root Cause**: Scaffold left without authz.
-**Fix**: _Not fixed._ Derive voter/reporter server-side from `info.context.user.id`; gate all mutations `IsLoggedIn+IsRecaptcha` and owner-delete checks.
-**Prevention**: Never trust client-supplied `user_id`; authz review for every mutation.
-
----
-
-## generic
-
-### [2026-08-18] generic: `GeoMultiPoint` duplicate GraphQL type name — FIXED (2026-08-18) `c318fd4`
-
-**Problem**: `generic/schema/scalars.py:40` declared `GeoMultiPoint = strawberry.scalar(NewType("GeoLineString", ...))` — reused `GeoLineString` GraphQL name, so referencing both scalars in one schema fails `duplicate type name` (`docs/APPS.md:306`, `docs/components/generic.md:117`).
-**Root Cause**: Copy-paste of `NewType` string.
-**Fix**: Changed to `NewType("GeoMultiPoint", Tuple[GeoPoint])`. Commit `c318fd4` `dev: Add basic tests to prepare for django 5` (2026-08-18), catalogued FIXED 2026-08-24. Latent only because neither scalar was used.
-**Prevention**: Test that `strawberry.Schema(query=Query)` builds with all scalars referenced.
-
-### [2026-08-24] generic: `GeometricForm` dead `required` + Meta mutation order-dependent + `longitude==0` dropped
-
-**Problem**: `GeometricForm.required` is `None` (falsy) but `latitude`/`longitude` built in parent class body with `required=required` while still `None` — subclass `required=False` never read. Subclasses configure by mutating parent's shared `GeometricForm.Meta` (e.g. `Meta.widgets={"location": HiddenInput()}` in `incident` but commented out in `spotting`/`operation`), so whether `location` renders hidden depends on import order. `clean()` does `if latitude and longitude` — legitimate `longitude==0` (prime meridian) silently dropped (`docs/APPS.md:303`, `docs/components/generic.md:82,168`).
-**Root Cause**: Class-attribute mutation not per-subclass `Meta`; truthiness check instead of `is not None`.
-**Fix**: _Not fixed._ Move model/widget config into per-subclass `Meta` or `__init_subclass__` hook; build `latitude`/`longitude` fields in `__init__` from `self.required`; change `clean()` to `if latitude is not None and longitude is not None`.
-**Prevention**: Never mutate parent `Meta`; add test case with `longitude=0`.
-
-### [2026-08-24] generic: `WebLocationInput` UNSET unreachable + empty schema roots + dead code
-
-**Problem**: `WebLocationInput` fields are `Optional[float]` with no default — Strawberry renders nullable-but-required, so `if input.location != strawberry.UNSET` branch in `spotting/schema/schema.py:125-155` is unreachable. `GenericScalars`/`GenericMutations`/`PublicSpottingStats` are empty `@strawberry.type` with no fields — wiring them fails schema construction. `generic/types.py` `Point2D` TypedDicts unused; `generic/schema` has no `__init__.py` (implicit namespace); `generic/tests.py` 0 bytes — primitives used by five apps have no coverage (`docs/components/generic.md:32,110,118`).
-**Root Cause**: Incremental scaffolding left incomplete.
-**Fix**: _Not fixed._ Give each `WebLocationInput` field `= strawberry.UNSET`; add `__init__.py`; promote `Point2D_SearchField` to real `@strawberry.input` with shared `Q`-builder for point-radius search (needed by `operation`, `spotting`, `incident`).
-**Prevention**: Test that `strawberry.UNSET` branches are reachable; require `__init__.py` for every `schema` package.
-
----
-
-## compose
-
-### [2026-09-24] compose: celerybeat override dropped the firebase credential mount
-
-**Problem**: `celerybeat` crash-looped on container recreation with `ImproperlyConfigured: GOOGLE_APPLICATION_CREDENTIALS points at '/google-application-credential.json' which is not a file`.
-**Root Cause**: `celerybeat` declares its own explicit `volumes:` list, which replaces the `*app` YAML anchor's list rather than merging into it (YAML merge does not deep-merge sequences), so the firebase credential bind the anchor provides was dropped for this service.
-**Fix**: Mirror the `app` service's mount (`${HOME}/.firebase/rosak-7223b-firebase-adminsdk-8hcki-f2e0ee7994.json:/google-application-credential.json`) in `celerybeat`. Commit `2acbbc2` `fix(compose): mount firebase credentials into celerybeat` (2026-09-24).
-**Prevention**: When overriding `volumes`/`environment` (or any sequence) on a service that uses a YAML anchor, re-declare every entry the anchor provides; anchors do not deep-merge sequences.
-
-### [2026-09-24] compose: recreating the three credential-mounting services at once fails on Docker Desktop/WSL2
-
-**Problem**: `docker compose up -d` recreating `app` + `celeryworker` + `celerybeat` together intermittently fails with `OCI runtime create failed: ... error mounting ...: not a directory: Are you trying to mount a directory onto a file (or vice-versa)?`; the affected containers exit 127/1 and the stack comes up half-dead.
+**Problem**: `docker compose up -d` recreating `app` + `celeryworker` + `celerybeat` together intermittently fails with `OCI runtime create failed: ... not a directory: Are you trying to mount a directory onto a file (or vice-versa)?`; the affected containers exit 127/1 and the stack comes up half-dead.
 **Root Cause**: Docker Desktop's WSL2 bind-mount backend races when the same host file (`~/.firebase/rosak-...json`) is bind-mounted into several containers created in parallel.
 **Fix**: Recreate sequentially: `docker compose up -d --no-deps app`, then `--no-deps celeryworker`, then `--no-deps celerybeat`, and `docker compose restart web` afterwards (nginx caches the resolved upstream IP and exits if `app` is unresolvable at startup).
-**Prevention**: Same; avoid single-command recreation of the app family on this setup.
+**Prevention**: Avoid single-command recreation of the app family on this setup.
 
----
+### [2026-09-22] rosak: nginx keeps a stale `app` upstream after a container restart — 502 from :8000
 
-## rosak (project)
-
-### [2026-09-24] rosak: has_admin_claim 500s when the Firebase account no longer exists
-
-**Problem**: a `common.User` whose Firebase account was deleted upstream made every conditional-admin path raise `UserNotFoundError` (`No user record found for the provided user ID: …`) — a 500 instead of a permission denial, across `IsAdmin` + 12 resolvers.
-**Root Cause**: `has_admin_claim` awaited `auth.get_user` without handling the not-found case; the DB row and the Firebase account can drift apart.
-**Fix**: catch only `auth.UserNotFoundError` and return False; other Firebase errors still propagate. Commit `6a8f25e`.
-**Prevention**: external-identity lookups must have an explicit missing-record branch that fails closed (deny), and the catch must stay narrow so credential/network errors are not masked.
-
-### [2026-09-24] rosak: test discovery breaks when a `rosak/tests.py` module shadows the `rosak/tests/` package
-
-**Problem**: Adding `rosak/tests.py` to hold the Python-runtime guard tests made `manage.py test` abort during discovery with `ImportError: 'tests' module incorrectly imported from '/code/rosak/tests'. Expected '/code/rosak'` and run 0 tests, because `rosak/tests/` (a package holding 11 project-level tests) already existed alongside it.
-**Root Cause**: Python resolves `rosak.tests` to the `rosak/tests/` package, so the new module's `__file__` does not match the path discovery expects for that name; a module and a package cannot share the `rosak.tests` name.
-**Fix**: Place the guard tests at `rosak/test_python_runtime.py` instead, a distinct `test_*.py` module name discovery collects without colliding. Commit `bc45bf1` `chore(python): upgrade runtime to Python 3.13` (2026-09-24).
-**Prevention**: Never add a `tests.py` module next to an existing `tests/` package; use a distinct `test_*.py` module name within the package's parent.
-
-### [2026-08-24] rosak: Single async GraphQL endpoint — `DEBUG=True` swaps Redis for `DummyCache` + disables introspection guard
-
-**Problem**: Local `DEBUG=True` replaces Redis cache with `DummyCache`; cache bugs not reproducible locally. Introspection disabled only when `DEBUG=False` (`docs/APPS.md` cross-cutting, `rosak/settings.py`).
-**Root Cause**: Dev convenience swallowing cache layer.
-**Fix**: _Not fixed — by design._ Documented trap; use `DummyCache`-aware test harness or run with `DEBUG=False` locally for cache repro.
-**Prevention**: CI runs with prod-like cache; add integration test toggling `DEBUG` flag.
-
-### [2026-08-24] rosak: `common/tasks.py` circular import hazard
-
-**Problem**: `common/tasks.py` imports `spotting` and `incident` at module top level while both apps import `common` — genuine cycle; reason most other imports in that file are function-local (`docs/APPS.md:128`, `docs/components/common.md:60`).
-**Root Cause**: Task needs cross-app models but sits in `common`.
-**Fix**: _Not fixed._ Lazify imports or move task ownership to leaf apps; `tach.yml` already documents allowed edges.
-**Prevention**: Enforce `tach check` in CI; prefer lazy string refs and function-local imports for cross-app models.
-
-### [2026-09-12] rosak: GraphQL schema snapshot must be regenerated when scalars change — FIXED (2026-09-12) `0ff57ec`
-
-**Problem**: `rosak/tests/test_schema_snapshot.py` compares `str(schema)` against `rosak/tests/snapshots/schema.graphql`. Adding the `MediaScalar` fields broke the snapshot test even though the schema change was intended.
-**Root Cause**: The checked-in SDL snapshot was not part of the change that altered the schema.
-**Fix**: Regenerate `rosak/tests/snapshots/schema.graphql` from `str(rosak.schema.schema)`. Commit `0ff57ec` `chore(rosak): refresh GraphQL schema snapshot for media fields` (2026-09-12).
-**Prevention**: Regenerate the snapshot in the same change whenever GraphQL fields or types change.
+**Problem**: After `docker compose restart app` the container gets a new IP, but nginx (started earlier) keeps the old one, so `http://localhost:8000/` returns 502 while granian inside `app` is healthy.
+**Root Cause**: nginx resolves the upstream hostname once at startup and caches the IP; restarting only `app` does not make nginx re-resolve it.
+**Fix**: `docker compose restart web` — restart nginx so it re-resolves the `app` upstream.
+**Prevention**: Restart `web` alongside `app` whenever `app`'s IP changes; don't debug the app when the failure is only visible through :8000.
 
 ### [2026-09-12] rosak: container-created migrations are root-owned and unwritable by the host user — WORKAROUND
 
@@ -529,80 +122,222 @@ ever reports "not found" for a message the bot demonstrably sent, check
 **Fix**: _Workaround._ Chown through the container from the repo root: `docker compose exec app chown -R $(id -u):$(id -g) .`.
 **Prevention**: Re-own container-generated files immediately after `makemigrations`, before running any hook or `ruff format`.
 
-### [2026-09-12] rosak: manage.py test --parallel crashes with "cannot pickle 'traceback' object" — KNOWN
+### [2026-09-15] common: S3 uploads fail on OCI Object Storage — "AWS chunked encoding not supported"
 
-**Problem**: The parallel test runner fails while collecting results with `TypeError: cannot pickle 'traceback' object` whenever a test outcome carries a traceback (the pre-existing suite failures reproduce it). The serial runner is the only reliable gate.
-**Root Cause**: The multiprocessing result path cannot serialise a traceback object, so any failing test poisons the run.
-**Fix**: _Not fixed._ Run `python manage.py test --keepdb` (serial) as the working gate.
-**Prevention**: Keep the documented test gate serial until the parallel runner is fixed.
+**Problem**: Every `TemporaryMedia` save (incl. Telegram image attaches via `POST /upload/`) raised `botocore.exceptions.ClientError ... PutObject: AWS chunked encoding not supported.` Uploads reached OCI but were rejected with 501.
+**Root Cause**: botocore >= 1.35 defaults `request_checksum_calculation` to `when_supported`, adding a CRC32 trailer (`Transfer-Encoding: chunked` + `Content-Encoding: aws-chunked` + `X-Amz-Trailer`) that OCI's S3-compat endpoint rejects. `AWS_S3_SIGNATURE_VERSION="s3v4"` does NOT help — the default is already `s3v4`; this is a checksum-trailer issue, not a signature issue.
+**Fix**: `os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")` in `rosak/settings.py` — `PutObject` goes out as a plain body. Verified botocore honors the env var on the django-storages client; `signature_version`/`addressing_style` unchanged.
+**Prevention**: Any bump of botocore/boto3 must re-check this — newer SDKs may flip behavior again. If uploads regress with this error, re-apply `when_required`. The alternative `AWS_S3_CLIENT_CONFIG={"request_checksum_calculation": ...}` (plain dict) crashes botocore in django-storages 1.14.6 — only an env var or a `botocore.config.Config` instance works.
 
-### [2026-09-22] rosak: concurrent test runs share the single `test_postgres` database — COLLISION
+### [2026-08-24] common: `ImgurStorage` — write path hot on every upload + silent credential failure
 
-**Problem**: Two `python manage.py test` runs started at the same time share the one `test_postgres` database and truncate/recreate each other's tables mid-run. The wreckage looks like real failures: a storm of `common_vote.content_type_id` ForeignKeyViolation errors and dozens of `DuplicateDatabase` setup errors.
-**Root Cause**: Django's test runner uses a single test database per connection and nothing serialises concurrent runs, so both processes create and destroy the same database name.
-**Fix**: _No code change._ Run only one test process at a time; check for a running test process before starting another.
-**Prevention**: Before starting a suite, confirm no other run is active. If dozens of setup errors or an FK-violation storm (especially on `common_vote.content_type_id`) appear, suspect a database collision before hunting a code bug.
+**Problem**: Two coupled defects left over from the Imgur → Discord migration:
 
-### [2026-09-22] rosak: nginx keeps a stale `app` upstream after a container restart — 502 from :8000
+- **Hot path**: `common/tasks.py:202` creates `Media` with `file=ContentFile(temp_media.file.url, …)`, routing every upload through `ImgurStorage._save` and a live Imgur API call, despite `Media.file` being marked `# TODO: Deprecate` and Discord CDN being the real host.
+- **Silent degrade**: `ImgurStorage.__init__` and the module-level `ImgurClient` swallow all exceptions and print `functionality disabled`; eight `IMGUR_*` settings default to `""` (`rosak/settings.py:357-364`), so a deployment without credentials dies with `AttributeError` inside a broad `except Exception` and only increments `fail_count` — no upload can succeed despite Discord being the host.
 
-**Problem**: After `docker compose restart app` the container gets a new IP, but nginx (started earlier) keeps the old one, so `http://localhost:8000/` returns 502 while granian inside `app` is healthy.
-**Root Cause**: nginx resolves the upstream hostname once at startup and caches the IP; restarting only `app` does not make nginx re-resolve it.
-**Fix**: `docker compose restart web` — restart nginx so it re-resolves the `app` upstream.
-**Prevention**: Restart `web` alongside `app` whenever `app`'s IP changes, and don't debug the app when the failure is only visible through :8000.
+**Root Cause**: The migration left `Media.file` wired as write path and never removed the five call sites (`STORAGE = ImgurStorage()`, `MediaMixin.__str__`, `add_width_height_to_media_task` filter, `medias_group_by_period ~Q(file="")`, `MediaAdmin.fields`). Fail-open init plus a broad exception hides the root error.
+**Fix**: _Not fixed._ Requires a re-host backfill for pre-`0013` rows (fetch `i.imgur.com/<file>` → Discord webhook → fill `file_id`/`file_name`), then drop `Media.file` and delete `imgur_field.py`, `imgur_storage.py`, `management/commands/get_imgur_token.py`. Meanwhile, make init fail loudly if `Media.file` is still required.
+**Prevention**: Feature-flag the storage backend; block new `Media.file` writes behind the flag and alert on `ImgurStorage._save` calls after a cutoff. Validate required credentials at `check` time; never swallow storage init errors; replace the broad `except Exception` with typed handling plus an explicit dead-letter.
+
+### [2026-08-24] common: `FeatureFlag` missing row silently disables uploads — and gates the GC
+
+**Problem**: `should_upload_media()` treats a missing `FeatureFlag` row as disabled (`feat_flag is not None and feat_flag.enabled`), so a fresh env with no fixture is silently off. `cleanup_temporary_media_task` early-returns on that same flag, so disabling upload also halts 30-day `TO_DELETE` GC — the staging bucket grows unbounded.
+**Root Cause**: Ambiguous "missing = off" plus coupling the upload gate to garbage collection.
+**Fix**: _Not fixed._ Seed one row per `FeatureFlagType` via data migration; split the GC flag from the upload flag.
+**Prevention**: Data migration creating flag rows on deploy; separate `IMAGE_UPLOAD` vs `STORAGE_GC_ENABLED` flags.
+
+### [2026-08-24] common: `Media` scalar non-null mismatch
+
+**Problem**: `MediaScalar`/`MediaType` declare `width: int` / `height: int` non-null while `Media.width`/`height` are `null=True, default=None` — exposing more rows raises non-null resolution errors on legacy media.
+**Root Cause**: Scalar nullability was not matched to the model.
+**Fix**: _Not fixed._ Make the scalar widths nullable `Optional[int]` or backfill dimensions.
+**Prevention**: Contract test asserting model nullability matches Strawberry scalar nullability.
+
+### [2026-08-24] admin: ModelAdmin configuration defects
+
+**Problem**: Four admin defects, one theme — the admin is never smoke-tested:
+
+- `common.TemporaryMediaAdmin.prettified_metadata` calls `self.prettify_json()` but inherits `admin.ModelAdmin`, not `generic.admin.JsonPrettifyAdminMixin` → `AttributeError` and no `return`.
+- `MediaAdmin` / `TemporaryMediaAdmin` use `search_fields = ["uploader"]` (an FK, not a text field) → admin search raises `FieldError`.
+- `operation.LineAdmin` assigns `list_editable` twice — the second assignment wins and drops `status` inline editing.
+- `TemporaryMediaStatus.RETRY_ELAPSED` (`common/enums.py:23`) is declared but assigned nowhere, so permanently dead uploads sit in `PENDING` indistinguishable from fresh rows. Assign it at `fail_count >= 5` and persist the exception string into `metadata` (`common/tasks.py:255-264`).
+- `chartography.SourceCustomLine.mapped_lines` uses an explicit `through`, so Django omits it from the admin form; `SourceCustomLineLineMapping` is unregistered and `SourceCustomLineAdmin` has no inline — the admin-editable reconciliation escape hatch is unreachable. Add a `TabularInline`.
+
+**Root Cause**: Missing mixin, FK used as a text lookup, duplicate attribute assignment, a dead status enum never wired into the retry cutoff, an explicit through not paired with an inline.
+**Fix**: _Not fixed._ Inherit `JsonPrettifyAdminMixin` and return the highlighted HTML; use `search_fields = ["uploader__nickname"]`; fix `list_editable`; wire `RETRY_ELAPSED`; add the through inline.
+**Prevention**: Admin smoke test hitting every `ModelAdmin` change view; exhaustive status-transition test asserting every enum member is reachable; review `list_editable`/`search_fields` when an admin changes.
+
+### [2026-08-24] resolvers & loaders: per-key batch state and per-node re-fetch
+
+**Problem**: DataLoader/resolver shortcuts that silently return wrong or de-ordered data:
+
+- `batch_load_vehicle_from_line` reads `keys[0][1]`, assuming every key in the batch shares the same `spotted_today` filter — group keys by that filter before the query.
+- `batch_load_spotting_count_from_vehicle` aliases its aggregate on `key[0]` only while the key is `(vehicle_id, Q(date_filter))` — two date windows for the same vehicle in one request collide and return the same count. Alias on the full composite key.
+- `batch_load_medias_from_calendar_incident` returns a `set` though the field is typed `List[MediaScalar]` — media silently de-duplicated and the through-table `timestamp` ordering discarded. Return a `list`.
+- `CalendarIncidentScalar.last_updated` re-fetches its row then `.count()` + an ordered slice on `chronologies` — 3 extra queries per node, invisible to `DjangoOptimizerExtension`. Annotate with `Greatest(F("modified"), Max("chronologies__modified"))` or batch.
+- `batch_load_location_event_from_event` keeps the last `LocationEvent` row silently, because `event` is a FK, not a OneToOne (see the spotting entry).
+
+**Root Cause**: Batch keys carry filter state the SQL alias ignores; "ergonomic" `keys[0]` shortcuts; collection type chosen without the ordering contract; resolvers re-fetching per node.
+**Fix**: _Not fixed._
+**Prevention**: Never index `keys[0]` for per-key state; include the whole key in any SQL alias; type-check loader return shapes against the field type; load-test with `assertNumQueries` and forbid per-node re-fetch in resolvers.
+
+### [2026-08-24] incident / operation: duplicate `Line ↔ CalendarIncident` join tables — GraphQL field permanently empty
+
+**Problem**: `CalendarIncident.lines` (`related_name="incidents"`, migration `0013`) and `operation.Line.calendar_incidents` are two separate M2M join tables. Admin `filter_horizontal` edits the former; GraphQL `Line.calendarIncidents` reads the latter, so that field is expected to be permanently empty.
+**Root Cause**: Both sides declared `ManyToManyField` to each other instead of one side using the reverse accessor; `through` was left commented on `Line`.
+**Fix**: _Not fixed._ Consolidate on the `Line.incidents` reverse accessor; remove the `Line.calendar_incidents` field.
+**Prevention**: Single source of truth for cross-app M2M; forbid duplicate M2M declarations across apps via a `tach` rule.
+
+### [2026-08-24] incident: `CalendarIncidentFilter.date` bare assert + month off-by-one
+
+**Problem**: Range width is enforced with `assert … <= timedelta(days=60)` — a 500, and stripped under `python -O`; the `month` branch does `month__lte = value.month.exact + 1`, assuming a 0-indexed JS month.
+**Root Cause**: `assert` used for validation; JS month indexing leaked into Python.
+**Fix**: _Not fixed._ Replace the `assert` with a `GraphQLError`/`ValidationError`; fix the arithmetic to `__month=value.month.exact`.
+**Prevention**: Ban bare `assert` for request validation (repo convention); filter unit tests for the 60-day boundary and month exact.
+
+### [2026-08-24] operation: write-API scaffolding references non-existent modules + scalar mismatches
+
+**Problem**: Commented `operation/schema/inputs.py` does `from operation.schema.enums import AssetType`, but that module does not exist — enums live in `operation/enums.py`. `StationInput.internal_representation` is a `StationLine` field misplaced on `Station`; no `VehicleInput` exists at all. In the read schema, `VehicleType` declares `info: str` while the model field is `description`, and `Asset.stations` / `StationLine.lines` declare plural lists over singular FKs.
+**Root Cause**: A refactor moved the enums but the inputs stub was not updated; `Station` vs `StationLine` confusion; copy-paste scalar naming.
+**Fix**: _Not fixed._ Repoint the import to `operation.enums` or the generated enum; drop/nest `internal_representation`; add `VehicleInput`/`VehiclePartialInput`; rename the scalar fields to match the model.
+**Prevention**: Keep commented scaffolding importable under `if TYPE_CHECKING`; `ruff check` still covers commented files; generate scalar names from the model.
+
+### [2026-08-24] operation: `StationLine` has no ordinal — lexicographic ordering breaks route order
+
+**Problem**: `StationLine.Meta.ordering = ["internal_representation"]` sorts lexicographically (`KJ10` before `KJ2`), and there is no `order` field, so `Line.station_lines` cannot render travel order for strip maps / "next stations".
+**Root Cause**: Missing `OrderedModel` despite `django-ordered-model` already being a dependency for `incident`.
+**Fix**: _Not fixed._ Inherit `OrderedModel` with `order_with_respect_to="line"`, data-migrate `order` from the numeric tail of `internal_representation`, switch admin to `OrderedTabularInline`.
+**Prevention**: Explicit route-order field; never rely on code-string ordering for sequence.
+
+### [2026-08-24] spotting: `LOCATION` payload invariants are unenforced; deletion policy duplicated
+
+**Problem**:
+
+- `spotting_event_value_relevant` governs only station columns, so `type=LOCATION` can be saved with no `PointField`; GraphQL `add_event` only creates a `LocationEvent` when `input.location != UNSET`, making the type decorative.
+- `LocationEvent.event` is a `ForeignKey`, not a `OneToOne`; the loader keeps the last row silently.
+- The deletion rule is expressed twice: `Event.auser_deletion()` raises, while the `deleteEvent` mutation returns `ok=False` with a subtly different 3-day window (`created__gte=now()-3d`).
+
+**Root Cause**: The constraint models station invariants only; FK chosen without uniqueness; policy expressed as a queryset filter in two places instead of one model method.
+**Fix**: _Not fixed._ Extend the `CheckConstraint` (or validate in the mutation) to require a `LocationEvent` for `type=LOCATION`; migrate to `OneToOneField` after dedup; hoist the window into `Event.is_within_edit_window()` used by both paths.
+**Prevention**: DB-level invariant tests per `SpottingEventType`; `OneToOneField` for 1:1 payloads; one model method for policy.
+
+### [2026-08-24] spotting: `eventsCount` unfiltered + `with_most_entries` IndexError
+
+**Problem**: `spotting.schema.resolvers.get_events_count` is a bare `Event.objects.acount()` ignoring `EventFilter` — a paginated UI shows the wrong total. `UserScalar.with_most_entries` indexes `[0]` into an aggregate queryset and raises `IndexError` for a user with zero events.
+**Root Cause**: The count resolver does not reuse the filter `Q`; missing empty-queryset guard.
+**Fix**: _Not fixed._ Pass the filtered queryset into the count; guard `with_most_entries` with an empty check (the commented `ListConnectionWithTotalCount` is the intended fix).
+**Prevention**: Always derive a count from the same filtered queryset; test the zero-event user profile.
+
+### [2026-08-24] spotting / telegram_provider: `get_daily_updates()` ignores its `spotting_date` argument
+
+**Problem**: `telegram_provider.utils.get_daily_updates(line_id, spotting_date)` overwrites `spotting_date` with `date.today()`, so `spotting.tasks.report_spotting_today` passes `yesterday = date.today() - 1` but the digest reports today; the 03:00 beat intent is silently ignored.
+**Root Cause**: Stale overwrite left after a refactor.
+**Fix**: _Not fixed._ Remove the overwrite and honor the argument; pass a timezone-aware `yesterday` explicitly.
+**Prevention**: Unit test asserting the digest date equals the injected date, not `today()`.
+
+### [2026-08-24 → 2026-09-12] common / telegram_provider: JSONB lookups must match the stored shape and be fully qualified
+
+**Problem**: Three related ways a JSONB lookup silently matches nothing:
+
+- **Types survive into JSONB.** `TemporaryMedia.metadata` stores Telegram `message_id`/`chat_id` as ints, so `Q(metadata__telegram_message_id=source.message_id)` only matches int-vs-int; a stringified id silently matches nothing and `approve()` reports no media awaiting review.
+- **Unqualified `message_id`.** `handlers.spot` joins `telegram_log__payload__message__message_id` with no `__chat__id` filter (unlike `/delete`), so message ids — unique only per chat — can bind spotting to another chat's message. `payload` has no DB index (`Meta` absent).
+- **Unstamped outbound rows.** An outbound row without `payload["message"]` is not reply-resolvable (see the 2026-09-26 trap above).
+
+**Root Cause**: `JSONField`/`JSONB` lookups preserve the stored Python type and are not schema-checked; nothing enforces that an id lookup includes its scoping key.
+**Fix**: _By design / not fixed._ Store native ints and compare with the native type; add the `payload__message__chat__id` filter, a `UniqueConstraint(spotting_event, telegram_log)` and a GIN/expression index on `payload`.
+**Prevention**: Always qualify a Telegram `message_id` with `chat_id`; index JSONB lookups used in production queries; add a round-trip test asserting the stored type matches the lookup argument's type.
+
+### [2026-08-24] telegram_provider: `/approve` admin identity needs a linked user + Firebase claim — GOTCHA
+
+**Problem**: `approve()` resolves `common.User` by `telegram_id`, then checks `has_admin_claim`. An admin who has never run `/verify` has no `User` row and is rejected before the claim is ever consulted.
+**Root Cause**: The handler reuses the same "verified Telegram user" precondition as the other commands and layers the admin claim on top.
+**Fix**: _By design._ Resolve the user first, then call `has_admin_claim`; the import is function-local to avoid an app-loading cycle.
+**Prevention**: Document that admin bot commands require a linked `User` (`/verify`) in addition to the Firebase admin claim.
+
+### [2026-08-24] chartography: `SourceCustomLine` admin mapping unreachable + MTREC task incomplete
+
+**Problem**: `SourceCustomLine.mapped_lines` uses explicit `through=SourceCustomLineLineMapping`, so Django omits it from the admin form — the admin-editable reconciliation escape hatch is unreachable (see the admin entry for the inline fix). `aggregate_line_vehicle_status_mtrec_task` accepts neither `force` nor `triggered_by_id`, and no mutation can trigger it; `force` is a dead parameter and `bulk_create(ignore_conflicts=True)` discards corrections.
+**Root Cause**: Explicit through not paired with an inline; the MTREC path was not given the same kwargs as the MLPTF path.
+**Fix**: _Not fixed._ Give the MTREC task `force`/`triggered_by_id` plus a sibling mutation; wire `force=True` to delete conflicting `Snapshot` rows inside `transaction.atomic()`.
+**Prevention**: Admin smoke test creating a mapping via the UI; mutation parity test for both sources.
+
+### [2026-08-24] chartography: hardcoded PK map + implicit datetime coercion + assert guard
+
+**Problem**: MTREC `short_code_line_ids_map` hardcodes numeric `operation.Line` PKs (`KGL→[2]`, `Komuter→[13,14]`) — rots on reseeding. `Snapshot.date` (a `DateField`) is assigned a `datetime` (`now() - timedelta(...)`), relying on implicit coercion that is timezone-sensitive at day boundaries. `Snapshot.url` is never populated. The shape guard is `assert isinstance(line_ids, list)`, stripped under `python -O`.
+**Root Cause**: Seed-data assumptions baked into code; strict validation left as an assert.
+**Fix**: _Not fixed._ Always write `custom_line_id` and resolve via the `custom_line__mapped_lines` join seeded by a data migration; use `.date()` explicitly in the defined timezone; raise an explicit exception for an unknown short code; populate `Snapshot.url`.
+**Prevention**: Forbid hardcoded PKs; validate external payload shapes with explicit errors, not `assert`.
+
+### [2026-08-24] reporting: dormant GraphQL layer — enums, uniqueness, authz
+
+**Problem**: The `reporting` app is parked with a broken/unfinished surface:
+
+- `reporting/schema/filters.py` and `inputs.py` import `reporting.schema.enums`, which does not exist; `Report.type` is a plain `TextField(choices=...)`, so `strawberry.auto` renders `String`, not the `ReportType` enum.
+- `ReportFilter.filter_types` filters `report_type__in` while the model field is `type`; no `UniqueConstraint` on `Vote(report, user)` (repeated `createVote` stuffs the ballot), and the same missing uniqueness on `ReportMedia`/`ReportResolution` allows duplicate attachments/links (compare `operation.AssetMedia`).
+- Auto-generated `delete_reports` / `delete_vote` carry no `permission_classes`, and `VoteInput.user_id` / `ReportInput.reporter_id` are client-supplied — any caller can vote or file as any user.
+
+**Root Cause**: The scaffolded GraphQL layer was never completed; the model used plain choices instead of `TextChoicesField`; authz was never reviewed.
+**Fix**: _Not fixed._ Create a Strawberry enum over `reporting.enums.ReportType` per `generic/schema/enums.py`, switch `Report.type` to `TextChoicesField(choices_enum=…)`; fix the filter to `type__in`; add uniqueness plus an idempotent `toggle_vote` deriving `user_id` from `info.context.user.id`; derive voter/reporter server-side and gate mutations `IsLoggedIn+IsRecaptcha` with owner-delete checks.
+**Prevention**: Never trust a client-supplied `user_id`; unique constraint on every vote/through table; CI import-check even for dormant apps.
+
+### [2026-08-24] generic: `GeometricForm` dead `required` + shared-`Meta` mutation + `longitude==0` dropped
+
+**Problem**: `GeometricForm.required` is `None` (falsy) but `latitude`/`longitude` are built in the parent class body with `required=required` while it is still `None`, so a subclass's `required=False` is never read. Subclasses configure by mutating the parent's shared `GeometricForm.Meta` (e.g. `Meta.widgets={"location": HiddenInput()}` in `incident` but commented out in `spotting`/`operation`), so whether `location` renders hidden depends on import order. `clean()` does `if latitude and longitude` — a legitimate `longitude==0` (prime meridian) is silently dropped.
+**Root Cause**: Class-attribute mutation instead of per-subclass `Meta`; truthiness check instead of `is not None`.
+**Fix**: _Not fixed._ Move model/widget config into per-subclass `Meta` or an `__init_subclass__` hook; build the fields in `__init__` from `self.required`; change `clean()` to `if latitude is not None and longitude is not None`.
+**Prevention**: Never mutate a parent `Meta`; add a `longitude=0` test case.
+
+### [2026-08-24] generic: `WebLocationInput` UNSET unreachable + empty schema roots + dead code
+
+**Problem**: `WebLocationInput` fields are `Optional[float]` with no default — Strawberry renders them nullable-but-required, so the `if input.location != strawberry.UNSET` branch in `spotting/schema/schema.py:125-155` is unreachable. `GenericScalars`/`GenericMutations`/`PublicSpottingStats` are empty `@strawberry.type`s, so wiring them fails schema construction. `generic/types.py`'s `Point2D` TypedDicts are unused; `generic/schema` has no `__init__.py` (implicit namespace); `generic/tests.py` is 0 bytes — primitives used by five apps have no coverage.
+**Root Cause**: Incremental scaffolding left incomplete.
+**Fix**: _Not fixed._ Give each `WebLocationInput` field `= strawberry.UNSET`; add `__init__.py`; promote `Point2D_SearchField` to a real `@strawberry.input` with a shared `Q`-builder for point-radius search (needed by `operation`, `spotting`, `incident`).
+**Prevention**: Test that `strawberry.UNSET` branches are reachable; require `__init__.py` for every `schema` package.
+
+### [2026-08-24] rosak: single async GraphQL endpoint — `DEBUG=True` swaps Redis for `DummyCache` + disables the introspection guard
+
+**Problem**: Local `DEBUG=True` replaces the Redis cache with `DummyCache` and disables introspection only when `DEBUG=False` — cache bugs are not reproducible locally. (The 2026-09-28 test-env entry shows the inverse trap: a `DEBUG=False` environment with real Redis, so **check `settings.CACHES` rather than trusting this note**.)
+**Root Cause**: Dev convenience swallowing the cache layer; the introspection gate is coupled to `DEBUG`.
+**Fix**: _Not fixed — by design._ Documented trap; use a `DummyCache`-aware test harness or run with `DEBUG=False` locally for cache repro.
+**Prevention**: CI runs with a prod-like cache; add an integration test toggling `DEBUG`.
+
+### [2026-08-24] rosak: `common/tasks.py` circular import hazard
+
+**Problem**: `common/tasks.py` imports `spotting` and `incident` at module top level while both apps import `common` — a genuine cycle, and the reason most other imports in that file are function-local.
+**Root Cause**: The task needs cross-app models but lives in `common`.
+**Fix**: _Not fixed._ Lazify the imports or move task ownership to a leaf app; `tach.yml` already documents the allowed edges.
+**Prevention**: Enforce `tach check` in CI; prefer lazy string refs and function-local imports for cross-app models.
 
 ---
 
-### [2026-09-22] rosak: top-level `tests/` tree is invisible to `manage.py test` and has no pytest — TRAP
+## Fixed
 
-**Problem**: `python manage.py test tests.operation tests.incident` fails with `TypeError: expected str, bytes or os.PathLike object, not NoneType` during discovery, and the ~300 pytest tests under `tests/` (line-pulse fields/loaders, line-status consolidation, feed-link mutations, …) never run in the standard gate. `python -m pytest` fails with `No module named pytest` in the `app` container and in the host `.venv`.
-**Root Cause**: `tests/` (and its subdirectories) carry no `__init__.py`, so they are namespace packages: Django's label discovery cannot resolve `tests.operation`, and plain `manage.py test` skips the non-package directory entirely. `pytest` is declared for dev but is not installed in any current environment, so the pytest-only suite is unrunnable while it silently looks green.
-**Fix**: _Workaround._ Runnable tests live in the app modules (`operation/tests.py`, `incident/tests.py`, `rosak/tests/…`) and are run with app labels (`manage.py test operation incident rosak`). The `tests/` suite needs pytest installed or an `__init__.py` conversion before it can join the gate.
-**Prevention**: Put new DB/schema tests where `manage.py test` actually collects them (app `tests.py` or `rosak/tests/`), or install pytest before relying on `tests/`. Don't quote a passing pytest suite as verification when the environment cannot run it.
+Historical fixes with no live action; kept so the ground isn't re-covered. Full detail in git.
 
-**Update 2026-09-30 — the wave added SIX more files nobody's gate ran.** The `occurred_at` + thread-grouping change shipped six new modules under `tests/incident/` (`test_official_post_occurred_at`, `test_social_link_feed_ordering`, `test_social_link_occurred_at_backfill`, `test_social_link_occurred_at_write`, `test_social_link_thread_fields`, `test_social_link_threads` — **119** test functions, re-counted 2026-09-30 by an AST walk over the six modules' `test_*` methods after a later fix pass grew them from the 109 first recorded here). Confirmed by `manage.py test --keepdb -v 2`: **not one** of them appears in the bare run, while `manage.py test tests.incident` still dies in discovery. So the feature's own tests were invisible to the documented gate. Three facts make the failure quieter than it looks, and all three were re-measured:
-
-- They are **runnable** — `manage.py test tests.incident.test_social_link_threads --keepdb` resolves the *module* label even though the *package* label does not. That asymmetry is the only reason the status was knowable at all, and it is easy to mistake for "the tree is broken".
-- pytest is still **absent from the `app` image**, so the tree is not collectable by pytest either. The host's *system* pytest 9.1.1 exists but `pytest-django` / `pytest-asyncio` do not, so `pytest.ini`'s `DJANGO_SETTINGS_MODULE` and `asyncio_mode` have nothing to honour them: `python3 -m pytest tests/incident --collect-only` reports **7 tests collected, 40 collection errors** across the directory's 42 modules (44 across the whole `tests/` tree), every one an `ImproperlyConfigured` raised while importing `incident/models.py`.
-- Writing those files as plain `django.test.TestCase` + `async_to_sync` (deliberately *not* pytest) is the right call — it makes the module-label route work — but it is invisible to a reviewer who assumes `tests/` means "run by the gate".
-
-**Prevention (restated, because the paragraph above is the counter-example):** a new backend test that nobody's gate runs is not a test. Either put it in an app `tests.py` / `rosak/tests/`, or — if it must live under `tests/` — run it by its **full dotted module label** in the same change and say so in the progress entry. Never report "N tests added" without the command that executes them.
-
----
-
-## tests
-
-### [2026-09-24] tests: reaching the real Firebase Admin check; patch target depends on the import style
-
-**Problem**: 7 tests failed (`ValueError: Invalid uid: "<MagicMock …>"` in 5 `LinkHandlerTests`; `GraphQLError('No user record found for the provided user ID: test-user-sml.')` in 2 `SocialMediaLinkTests`) because they invoked `rosak.permissions.has_admin_claim`, which calls `firebase_admin.auth.get_user` against the live project.
-**Root Cause**: the tests never mocked the admin check (their siblings do); a DB-only `firebase_id` or a `MagicMock` uid reaches the real SDK.
-**Fix**: patch the name where it is looked up — `rosak.permissions.has_admin_claim` for function-local imports (`handlers.submit_link`), the consumer module (`incident.schema.mutations.interactions.has_admin_claim`) for module-level imports. Commit `51f2f69`.
-**Prevention**: any test exercising a resolver/handler with conditional-admin logic must patch the admin check at the module it resolves from; a `MagicMock` user must never reach `has_admin_claim` unmocked.
-
-### [2026-09-26] tests: `async_to_sync` sees the `TestCase` transaction; `asyncio.run` does not — TRAP
-
-**Problem**: While testing the official-post notification, a handler test written the obvious way silently asserted nothing. `asyncio.run(handlers.approve(update))` inside a `TestCase` found the `SocialMediaLink` it had just created **empty** — or rather, could not see it at all — because the async ORM calls ran on a different DB connection than the one holding the test transaction. Rewriting the same test as `async_to_sync(handlers.approve)(update)` made it pass with no other change. In the other direction, a `MagicMock` patched over an async function fails with a `TypeError`/coroutine error, because `async_to_sync` awaits the *call result* — the mock must be an `AsyncMock` or a real `async def`, or the patch must be a coroutine function.
-**Root Cause**: `async_to_sync` runs the coroutine on the calling thread and keeps async-ORM work on that thread's connection, so `TestCase`'s wrapping transaction applies. `asyncio.run` instead drives the loop from a plain thread and the sync-ORM bridge dispatches async ORM work onto a shared executor thread, which opens its own connection — outside the test transaction and therefore blind to rows the test wrote. A second, related trap: a sync `Model.objects.create` inside an async helper raises `SynchronousOnlyOperation`; async code must use `acreate`/`asave` even when it looks like test scaffolding.
-**Fix**: Patch the symbol *where it is imported* (e.g. `incident.tasks.send_message`, not `telegram_provider.utils.send_message`) with a real coroutine function, and use `acreate` for any row it writes. Use `async_to_sync` — never `asyncio.run` — to enter real async code from a `TestCase`.
-**Prevention**: In this repo, any test of an `async def` handler, resolver or task should enter through `async_to_sync`. If a query inside async code "finds nothing" that the test just created, suspect the connection, not the filter — assert against a known-id lookup before rewriting the query.
-
-### [2026-09-28] tests: the debug toolbar breaks every `self.client` request, and the cache is Redis — TRAP
-
-**Problem**: All 30 tests in the new `XWebhook*CrcViewTests` / `XWebhookDeliveryViewTests` errored with `NoReverseMatch: 'djdt' is not a registered namespace`, and the handle-resolution tests failed in a way that looked like a logic bug (a cache hit from a *previous* run changed the answer). Two separate environment traps, both contradicting what the docs say.
-**Root Cause**: (1) `rosak/settings.py`'s `DEBUG_TOOLBAR_CONFIG["SHOW_TOOLBAR_CALLBACK"]` is `lambda _request: DEBUG`, closing over the **module global** — and the dev env sets `DEBUG=True`. The test runner sets `settings.DEBUG = False`, which is why `rosak/urls.py` withholds the `__debug__` routes, but the middleware is still installed (it is gated on `SENTRY_DSN`, not `DEBUG`) and still renders, and `DebugToolbarMiddleware._postprocess` reverses `djdt:render_panel` unconditionally. The closure and the URLconf gate therefore disagree. (2) `CACHES["default"]` is `RedisCache`, **not** `DummyCache` — the documented "DEBUG=True swaps Redis for DummyCache" trap only applies when `DEBUG` is true, and this env is the opposite. The user-id and handle-for-user-id caches use `timeout=None`, so keys survive between runs and between test classes.
-**Fix**: both client-based test classes carry `@modify_settings(MIDDLEWARE={"remove": ["strawberry_django.middlewares.debug_toolbar.DebugToolbarMiddleware"]})` — a local `no_debug_toolbar` alias, the same remedy `operation/tests.py` and `rosak/tests/test_version.py` already use. The cache-sensitive classes pin `CACHES` to a private `LocMemCache` and use a distinct user id per test.
-**Prevention**: any new test class that uses `self.client` needs `no_debug_toolbar`; any test whose assertions depend on a cache *hit* must pin `CACHES` to `LocMemCache` with its own `LOCATION` and must not reuse a cached key (X user id) across tests. Do not trust the `DummyCache` note for this environment — check `settings.CACHES` before reasoning about cache behaviour. A module-level import of a name you intend to patch (`from … import _resolve_user_id`) also defeats `mock.patch.object` on the source module; import it inside the function that uses it.
-
-### [2026-09-30] tests: `created` is `auto_now_add` — `create(created=…)` is silently ignored — TRAP
-
-**Problem**: Tests that need a `SocialMediaLink` (or any `TimeStampedModel`) at a specific `created` datetime — e.g. the `publicSocialMediaLinks` week-window and complete-day-page tests — cannot use `SocialMediaLink.objects.create(..., created=<datetime>)`. `auto_now_add` overwrites the passed value at insert time, so every row gets "now", day-grouping assertions silently collapse into one day, and the test can pass for the wrong reason (or fail confusingly). The same applies to `LineStatusReport.created`.
-**Root Cause**: `TimeStampedModel.created` is `auto_now_add=True`, which Django applies on `pre_save`/insert and which ignores any explicit value on creation. Only a subsequent `QuerySet.update()` writes the column directly.
-**Fix**: create the row first, then stamp it: `SocialMediaLink.objects.filter(pk=link.pk).update(created=<naive datetime>)` and `link.refresh_from_db()`. The existing `PublicFeedContractTests._link` helper and the new `PublicFeedLastWeekAndDayAlignTests._link` do exactly this. With `USE_TZ=False` the datetime is naive Asia/Kuala_Lumpur local, so the stamped value maps straight onto the calendar day the resolver groups by.
-**Prevention**: never expect `create(created=…)` to stick on a `TimeStampedModel`; insert then `.update()`. When a pagination/grouping test asserts days, assert against distinct stamped days, not the wall-clock now, so a silently-ignored stamp is caught rather than masked.
+- **2026-09-28** — `incident`: the X webhook read `includes` from the wrong envelope level (`payload.includes` instead of `data.includes`), so every real delivery was dropped; `_expansion_containers` now checks `data` first (`3f1723f`). Build webhook fixtures from a real captured body or the vendor schema, never by hand.
+- **2026-09-28** — `incident`: `html.unescape` is applied exactly once in `official_posts.tweet_to_raw_post`, so all ingest paths store decoded text while `RawPost.raw`/`raw_payload` stay encoded for export fidelity (`e099157`).
+- **2026-09-26** — `incident`: auto-ingested `PENDING_APPROVAL` links no longer leak into the public feed (`exclude(is_automated=True, status=PENDING_APPROVAL)`); the exclusion stays scoped to `is_automated` so community pending rows remain visible. Approval: console queue or Telegram `/approve` (`a2f92ea`).
+- **2026-09-24** — `rosak`: `has_admin_claim` catches only `auth.UserNotFoundError` and returns False; other Firebase errors still propagate (`6a8f25e`).
+- **2026-09-24** — `rosak`: a `rosak/tests.py` module shadows the `rosak/tests/` package and aborts discovery; use a `test_*.py` name instead (`bc45bf1`).
+- **2026-09-24** — `operation`: `LineAdmin.exclude = ("calendar_incidents",)` — the auto-rendered M2M fetched every incident and was `blank=False` (`6ab47e8`).
+- **2026-09-24** — `telegram_provider`: `/spotting_today` used the spotting enum's `NOT_IN_SERVICE` on `operation.Vehicle.status`; now `VehicleStatus.OUT_OF_SERVICE` (`6075118`).
+- **2026-09-24** — `tests`: patch the admin check where it is looked up (function-local import → `rosak.permissions.has_admin_claim`; module-level → the consumer module) (`51f2f69`).
+- **2026-09-22** — `spotting`: Firebase credential bind-mounted from a nonexistent path → Docker created a root-owned directory; mount `${HOME}/…` and fail fast in `SpottingConfig.ready()` (`46cfde5`).
+- **2026-09-22** — `compose`: `celerybeat`'s explicit `volumes:` replaces the YAML anchor's list (no deep merge for sequences); re-declare the credential mount (`2acbbc2`).
+- **2026-09-22** — `incident`: `bucket_hourly` stopped at the current hour; it now returns all 24 service-day buckets, or `[]` when the line has no report in the day (`e1c64e1`).
+- **2026-09-16** — `incident`: submitter link edits force `PENDING_APPROVAL` and are own-links-only, admin edits keep status, and an omitted `incident_id` preserves the association while an explicit `null` detaches it (`8bc4847`).
+- **2026-09-16** — `telegram_provider`: with uploads disabled, `handlers.media` now records the `TemporaryMedia` row (`metadata["uploads_disabled"] = True`) instead of dropping it — gate publication, not ingestion (`0882c80`).
+- **2026-09-13** — `incident`: migrations `0015`/`0016` backfill pre-existing rows to `LIVE`; the `DRAFT` default governs only rows created afterwards (`038d23b`).
+- **2026-09-12** — `common`: video conversion branches on `metadata["mime_type"]` and skips PIL/EXIF instead of raising `UnidentifiedImageError` (`82addcc`).
+- **2026-09-12** — `rosak`: regenerate `rosak/tests/snapshots/schema.graphql` whenever GraphQL fields or types change (`0ff57ec`).
+- **2026-08-25** — `telegram_provider`: unbounded `infinite_retry_on_error` replaced by bounded `retry_on_error` (`max_retries=3`, exponential backoff) in the governed egress path (`0d1c3a4`); the error handler and blocking fetch remain open (see traps).
+- **2026-08-24** — `common`: NSFW moderation re-enabled for non-trusted uploads, trusted clearance preserved (`1e2a421`).
+- **2026-08-24** — `common`: `get_default_start_time()` uses `date.replace()` so YEAR/MONTH/WEEK no longer raise `AttributeError` (`bb1e519`).
+- **2026-08-24** — `incident`: `StationIncident`'s `UniqueConstraint` gained `condition=Q(is_last=True)`, matching `VehicleIncident` (`1e2a421`).
+- **2026-08-24** — `spotting`: `markAsRead` un-gated from `IsAdmin` to `IsLoggedIn` (`1e2a421`).
+- **2026-08-18** — `generic`: `GeoMultiPoint` no longer reuses the `GeoLineString` GraphQL type name (`c318fd4`).
 
 ---
 
-### Sources
-
-- `docs/APPS.md` — Known Defects & Traps table and Beat schedule / Dependency graph sections.
-- `docs/components/*.md` — common, operation, spotting, incident, chartography, reporting, generic, telegram_provider.
-- Git history — `1e2a421` (2026-08-24, 3 fixes), `bb1e519` (2026-08-19, DateGroupings), `c318fd4` (2026-08-18, GeoMultiPoint), `2af0092` (2026-08-24, docs cataloguing).
+*Sources: `docs/APPS.md` § Known Defects & Traps; `docs/components/*.md`; git history. Entry dates are catalogue dates unless a fix commit is shown.*
