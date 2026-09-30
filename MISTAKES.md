@@ -557,6 +557,13 @@ ever reports "not found" for a message the bot demonstrably sent, check
 **Fix**: both client-based test classes carry `@modify_settings(MIDDLEWARE={"remove": ["strawberry_django.middlewares.debug_toolbar.DebugToolbarMiddleware"]})` — a local `no_debug_toolbar` alias, the same remedy `operation/tests.py` and `rosak/tests/test_version.py` already use. The cache-sensitive classes pin `CACHES` to a private `LocMemCache` and use a distinct user id per test.
 **Prevention**: any new test class that uses `self.client` needs `no_debug_toolbar`; any test whose assertions depend on a cache *hit* must pin `CACHES` to `LocMemCache` with its own `LOCATION` and must not reuse a cached key (X user id) across tests. Do not trust the `DummyCache` note for this environment — check `settings.CACHES` before reasoning about cache behaviour. A module-level import of a name you intend to patch (`from … import _resolve_user_id`) also defeats `mock.patch.object` on the source module; import it inside the function that uses it.
 
+### [2026-09-30] tests: `created` is `auto_now_add` — `create(created=…)` is silently ignored — TRAP
+
+**Problem**: Tests that need a `SocialMediaLink` (or any `TimeStampedModel`) at a specific `created` datetime — e.g. the `publicSocialMediaLinks` week-window and complete-day-page tests — cannot use `SocialMediaLink.objects.create(..., created=<datetime>)`. `auto_now_add` overwrites the passed value at insert time, so every row gets "now", day-grouping assertions silently collapse into one day, and the test can pass for the wrong reason (or fail confusingly). The same applies to `LineStatusReport.created`.
+**Root Cause**: `TimeStampedModel.created` is `auto_now_add=True`, which Django applies on `pre_save`/insert and which ignores any explicit value on creation. Only a subsequent `QuerySet.update()` writes the column directly.
+**Fix**: create the row first, then stamp it: `SocialMediaLink.objects.filter(pk=link.pk).update(created=<naive datetime>)` and `link.refresh_from_db()`. The existing `PublicFeedContractTests._link` helper and the new `PublicFeedLastWeekAndDayAlignTests._link` do exactly this. With `USE_TZ=False` the datetime is naive Asia/Kuala_Lumpur local, so the stamped value maps straight onto the calendar day the resolver groups by.
+**Prevention**: never expect `create(created=…)` to stick on a `TimeStampedModel`; insert then `.update()`. When a pagination/grouping test asserts days, assert against distinct stamped days, not the wall-clock now, so a silently-ignored stamp is caught rather than masked.
+
 ---
 
 ### Sources

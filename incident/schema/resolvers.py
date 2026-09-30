@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from enum import Enum
 from typing import List, Optional
 
@@ -264,6 +264,17 @@ async def get_social_media_links(
     return [link async for link in queryset.distinct()]
 
 
+def last_week_start(now: datetime) -> datetime:
+    """Local midnight starting the 7-day window that ends today.
+
+    With ``USE_TZ = False`` every datetime is naive Asia/Kuala_Lumpur, so this
+    is the local midnight six days before ``now`` — the window covers today plus
+    the previous six calendar days (seven date groups, inclusive). Mirrors the
+    naive-day arithmetic of ``service_day_start``.
+    """
+    return datetime.combine((now - timedelta(days=6)).date(), time.min)
+
+
 async def get_public_social_media_links(
     root,
     info: Info,
@@ -274,6 +285,8 @@ async def get_public_social_media_links(
     mine: strawberry.Maybe[bool] = None,
     status: strawberry.Maybe[SocialMediaLinkStatusInput] = None,
     current_service_day_only: bool = False,
+    last_week_only: bool = False,
+    align_page_to_day: bool = False,
 ) -> SocialMediaLinkConnection:
     """Public social-media-link feed, cursor-paginated.
 
@@ -287,8 +300,21 @@ async def get_public_social_media_links(
     an admin approves it. ``HIDDEN`` rows are never returned on this public
     feed, not even when asked for by name. ``current_service_day_only`` keeps
     only links created within the current service day (03:00 rollover, see
-    ``service_day_start``). ``totalCount`` is the size of the whole filtered
-    set, unaffected by the ``after`` cursor.
+    ``service_day_start``). ``last_week_only`` keeps only links created at/after
+    local midnight six days ago — today plus the previous six calendar days, a
+    seven-day window (see ``last_week_start``); it composes with
+    ``current_service_day_only`` (both narrow the same queryset). ``totalCount``
+    is the size of the whole filtered set, unaffected by the ``after`` cursor
+    and by ``align_page_to_day``.
+
+    ``align_page_to_day`` makes a page never end mid-day. After the standard
+    ``first + 1`` lookahead fetch, if the lookahead row falls on the same local
+    calendar day as the page's last row, every remaining row of that day is
+    appended, so the page may exceed ``first`` — there is **no cap**: a whole
+    day lands on one page even when that day alone is larger than ``first``.
+    ``endCursor`` then points at that day's last row and ``hasNextPage`` probes
+    for any row after it. A lookahead on a different day leaves the page exactly
+    as it would be without alignment. Both flags default to ``False``.
     """
 
     mine_requested = mine is not None and mine.value
@@ -343,6 +369,9 @@ async def get_public_social_media_links(
     if current_service_day_only:
         queryset = queryset.filter(created__gte=service_day_start(timezone.now()))
 
+    if last_week_only:
+        queryset = queryset.filter(created__gte=last_week_start(timezone.now()))
+
     # Count before the cursor filter: a cursor narrows the page, not the feed.
     total_count = await queryset.acount()
 
@@ -355,9 +384,40 @@ async def get_public_social_media_links(
         )
 
     # Fetch first + 1 to determine has_next_page without a separate count.
-    rows = [link async for link in queryset[: first + 1]]
-    has_next_page = len(rows) > first
-    rows = rows[:first]
+    raw_rows = [link async for link in queryset[: first + 1]]
+    # A negative ``first`` must not index the list (raw_rows[first] would raise
+    # IndexError); guard it so the legacy empty-page result is preserved.
+    lookahead = raw_rows[first] if first >= 0 and len(raw_rows) > first else None
+    rows = raw_rows[:first]
+    has_next_page = lookahead is not None
+
+    # Complete-day page: when the lookahead shares the last row's calendar day,
+    # pull in the lookahead and every remaining row of that same day (no cap, so
+    # a whole day lands together even if it exceeds ``first``). The keyset
+    # predicate starts *at* the lookahead, so no row is dropped between the page
+    # and the continuation; the queryset's own ordering preserves -created, -id.
+    if (
+        align_page_to_day
+        and lookahead is not None
+        and rows
+        and lookahead.created.date() == rows[-1].created.date()
+    ):
+        rows = rows + [lookahead]
+        # Half-open naive-local day range instead of ``created__date`` so the
+        # range can use a ``created`` index (a date cast cannot).
+        day_start = datetime.combine(lookahead.created.date(), time.min)
+        rows += [
+            link
+            async for link in queryset.filter(
+                Q(created__gte=day_start, created__lt=day_start + timedelta(days=1)),
+                Q(created__lt=lookahead.created)
+                | Q(created=lookahead.created, id__lt=lookahead.id),
+            )
+        ]
+        last = rows[-1]
+        has_next_page = await queryset.filter(
+            Q(created__lt=last.created) | Q(created=last.created, id__lt=last.id)
+        ).aexists()
 
     edges = [
         SocialMediaLinkEdge(

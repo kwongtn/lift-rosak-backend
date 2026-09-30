@@ -7,7 +7,7 @@ import os
 import sys
 import tempfile
 from contextlib import ExitStack
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from io import StringIO
 from itertools import count
 from pathlib import Path
@@ -1378,6 +1378,205 @@ class PublicFeedContractTests(TestCase):
         self.assertIn(str(current.id), all_ids)
         self.assertIn(str(back_dated.id), all_ids)
         self.assertEqual(unfiltered["totalCount"], 2)
+
+
+class PublicFeedLastWeekAndDayAlignTests(TestCase):
+    """``lastWeekOnly`` (today + the previous six calendar days) and
+    ``alignPageToDay`` (a page never ends mid-day; a whole day lands together,
+    so a page may exceed ``first`` — no cap)."""
+
+    query = """
+        query Feed(
+            $first: Int
+            $after: String
+            $lastWeekOnly: Boolean
+            $alignPageToDay: Boolean
+        ) {
+            publicSocialMediaLinks(
+                first: $first
+                after: $after
+                lastWeekOnly: $lastWeekOnly
+                alignPageToDay: $alignPageToDay
+            ) {
+                totalCount
+                edges { node { id } cursor }
+                pageInfo { hasNextPage endCursor }
+            }
+        }
+    """
+
+    def setUp(self):
+        self.user = User.objects.create(firebase_id="feed-align-user")
+
+    def _link(self, slug, created):
+        link = SocialMediaLink.objects.create(
+            url=f"https://example.com/{slug}", title=slug, user=self.user
+        )
+        # created comes from TimeStampedModel (auto_now_add): it cannot be set
+        # through create(), only updated afterwards.
+        SocialMediaLink.objects.filter(pk=link.pk).update(created=created)
+        link.refresh_from_db()
+        return link
+
+    def _feed(self, **variables):
+        result = execute_graphql(self.query, variables=variables)
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        return result.data["publicSocialMediaLinks"]
+
+    def _ids(self, feed):
+        return [edge["node"]["id"] for edge in feed["edges"]]
+
+    def test_last_week_only_window_is_today_plus_six_calendar_days(self):
+        now = timezone.now()
+        start = datetime.combine((now - timedelta(days=6)).date(), time.min)
+        boundary = self._link("week-boundary", start)
+        self._link("week-before", start - timedelta(minutes=1))
+        self._link("much-older", now - timedelta(days=30))
+
+        feed = self._feed(first=10, lastWeekOnly=True)
+
+        # The exact 00:00 six-days-ago row is in; 23:59 seven days ago and the
+        # older row are not.
+        self.assertEqual(self._ids(feed), [str(boundary.id)])
+        self.assertEqual(feed["totalCount"], 1)
+        # The window narrows the feed, it does not delete the other rows.
+        self.assertEqual(SocialMediaLink.objects.count(), 3)
+
+    def test_align_page_to_day_false_returns_exactly_first_rows(self):
+        now = timezone.now()
+        for index in range(4):
+            self._link(f"no-align-{index}", now)
+
+        feed = self._feed(first=2, alignPageToDay=False)
+
+        self.assertEqual(len(feed["edges"]), 2)
+        self.assertTrue(feed["pageInfo"]["hasNextPage"])
+
+    def test_align_extends_to_finish_the_day_and_cursor_continues(self):
+        a_date = timezone.now().date()
+        b_date = a_date - timedelta(days=1)
+        # Distinct within-day timestamps so the continuation is driven by the
+        # ``created__lt`` keyset branch, not only the id tiebreak.
+        day_a = [
+            self._link("day-a-0", datetime.combine(a_date, time(13, 0))),
+            self._link("day-a-1", datetime.combine(a_date, time(12, 0))),
+            self._link("day-a-2", datetime.combine(a_date, time(11, 0))),
+            self._link("day-a-3", datetime.combine(a_date, time(10, 0))),
+        ]
+        day_b = [
+            self._link(f"day-b-{index}", datetime.combine(b_date, time(9, 0)))
+            for index in range(2)
+        ]
+
+        page_one = self._feed(first=2, alignPageToDay=True)
+
+        # All four of day A land together, exceeding ``first``.
+        self.assertEqual(len(page_one["edges"]), 4)
+        self.assertEqual(set(self._ids(page_one)), {str(link.id) for link in day_a})
+        self.assertTrue(page_one["pageInfo"]["hasNextPage"])
+        self.assertEqual(
+            page_one["pageInfo"]["endCursor"], page_one["edges"][-1]["cursor"]
+        )
+
+        page_two = self._feed(
+            first=2, after=page_one["pageInfo"]["endCursor"], alignPageToDay=True
+        )
+
+        self.assertEqual(set(self._ids(page_two)), {str(link.id) for link in day_b})
+        self.assertFalse(page_two["pageInfo"]["hasNextPage"])
+
+    def test_align_returns_the_whole_final_day_with_no_cap(self):
+        day = timezone.now().date()
+        # Insertion order fixes ids. only-day-2/only-day-3 share 10:00 so the
+        # extension exercises both the ``created__lt`` continuation and the
+        # ``id__lt`` tiebreak (only-day-2 has the higher id and is the lookahead).
+        links = [
+            self._link("only-day-0", datetime.combine(day, time(12, 0))),
+            self._link("only-day-1", datetime.combine(day, time(11, 0))),
+            self._link("only-day-2", datetime.combine(day, time(10, 0))),
+            self._link("only-day-3", datetime.combine(day, time(10, 0))),
+            self._link("only-day-4", datetime.combine(day, time(9, 0))),
+        ]
+
+        feed = self._feed(first=2, alignPageToDay=True)
+
+        self.assertEqual(len(feed["edges"]), 5)
+        self.assertEqual(set(self._ids(feed)), {str(link.id) for link in links})
+        self.assertFalse(feed["pageInfo"]["hasNextPage"])
+
+    def test_align_leaves_a_page_ending_on_a_day_boundary_untouched(self):
+        a_date = timezone.now().date()
+        b_date = a_date - timedelta(days=1)
+        day_a = [
+            self._link("boundary-a-0", datetime.combine(a_date, time(12, 0))),
+            self._link("boundary-a-1", datetime.combine(a_date, time(11, 0))),
+        ]
+        self._link("boundary-b", datetime.combine(b_date, time(12, 0)))
+
+        feed = self._feed(first=2, alignPageToDay=True)
+
+        # The lookahead is on the next day, so there is nothing to extend.
+        self.assertEqual(len(feed["edges"]), 2)
+        self.assertEqual(set(self._ids(feed)), {str(link.id) for link in day_a})
+        self.assertTrue(feed["pageInfo"]["hasNextPage"])
+
+    def test_align_last_page_smaller_than_first_is_returned_whole(self):
+        a_date = timezone.now().date()
+        b_date = a_date - timedelta(days=1)
+        for index in range(3):
+            self._link(f"tail-a-{index}", datetime.combine(a_date, time(12 - index, 0)))
+        for index in range(2):
+            self._link(f"tail-b-{index}", datetime.combine(b_date, time(12 - index, 0)))
+
+        feed = self._feed(first=5, alignPageToDay=True)
+
+        self.assertEqual(len(feed["edges"]), 5)
+        self.assertFalse(feed["pageInfo"]["hasNextPage"])
+
+    def test_last_week_only_and_align_page_to_day_combine(self):
+        now = timezone.now()
+        start = datetime.combine((now - timedelta(days=6)).date(), time.min)
+        today = now.date()
+        in_week = [
+            self._link(f"in-week-{index}", datetime.combine(today, time(12 - index, 0)))
+            for index in range(3)
+        ]
+        self._link("out-of-week", start - timedelta(days=1))
+
+        feed = self._feed(first=2, lastWeekOnly=True, alignPageToDay=True)
+
+        # The day is completed inside the window; the older row is filtered out
+        # before either feature so it can neither page nor inflate the count.
+        self.assertEqual(set(self._ids(feed)), {str(link.id) for link in in_week})
+        self.assertEqual(feed["totalCount"], 3)
+        self.assertFalse(feed["pageInfo"]["hasNextPage"])
+
+    def test_negative_first_returns_an_empty_page_without_error(self):
+        self._link("negative-first", timezone.now())
+
+        feed = self._feed(first=-1)
+
+        # Legacy behaviour: an invalid negative ``first`` yields an empty page,
+        # not an IndexError/500.
+        self.assertEqual(feed["edges"], [])
+        self.assertFalse(feed["pageInfo"]["hasNextPage"])
+        self.assertIsNone(feed["pageInfo"]["endCursor"])
+        self.assertEqual(feed["totalCount"], 1)
+
+    def test_total_count_respects_the_window_and_ignores_alignment(self):
+        now = timezone.now()
+        start = datetime.combine((now - timedelta(days=6)).date(), time.min)
+        for index in range(4):
+            self._link(f"count-week-{index}", now)
+        self._link("count-ancient", start - timedelta(days=10))
+
+        aligned = self._feed(first=2, lastWeekOnly=True, alignPageToDay=True)
+        plain = self._feed(first=2, lastWeekOnly=True, alignPageToDay=False)
+
+        self.assertEqual(aligned["totalCount"], 4)
+        self.assertEqual(plain["totalCount"], 4)
+        self.assertEqual(len(aligned["edges"]), 4)  # day completed
+        self.assertEqual(len(plain["edges"]), 2)  # alignment off keeps first
 
 
 class LineStatusReportStationsTests(TestCase):

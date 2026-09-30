@@ -1,18 +1,19 @@
 # Monthly Summary - September 2026
 
-Total commits: 41
+Total commits: 42
 
 ## Commit Type Distribution
 
-- feat: 29
+- feat: 30
 - fix: 8
 - test: 2
 - chore: 2
 
 ## By Module/Feature
 
-### Incident (26 commits)
+### Incident (27 commits)
 
+- (this commit) [feat](incident): `publicSocialMediaLinks` gains `lastWeekOnly` (today + previous six calendar days, `last_week_start`) and `alignPageToDay` (complete-day pages, no cap — a whole day lands on one page, `endCursor` at its last row, `hasNextPage` an existence probe; `totalCount` unchanged), args inferred from the resolver signature + regenerated schema snapshot; 8 tests
 - (this commit) [fix](incident): decode HTML entities once at the ingest boundary — `html.unescape` in `tweet_to_raw_post`, the single mapping behind the poll, the fixture loader and the webhook parser, so both ingest paths store `&` instead of `&amp;`; `raw_payload` keeps the encoded original for export fidelity and a second decode would corrupt `&amp;amp;`; 8 new tests + a MISTAKES entry
 - (this commit) [feat](incident): hide links from the public feed and expose `isAutomated` — `SocialMediaLinkStatus.HIDDEN` (migration `0028`, choices-only) as a moderation decision excluded unconditionally by `get_public_social_media_links` after the `status` narrowing, so an explicit `status: HIDDEN` returns an empty page; `mine` and the console queue are deliberately exempt; `isAutomated: Boolean!` on the link scalar for the "Official" badge; +11 tests and a regenerated schema snapshot
 - (this commit) [fix](incident): read the X `includes` expansion from `data` — the receiver read the expansion at the top level, so every real `post.create` delivery resolved no handle and was counted `unresolved` (ingested path dead in production, tests green because the fixture shared the bug); new `_expansion_containers` searches the nested location first and falls back to the top level, the test helper now defaults to the real XAA envelope, +5 regression tests (nested resolves with no network, top-level fallback, nested-wins precedence, malformed shapes) and a MISTAKES entry
