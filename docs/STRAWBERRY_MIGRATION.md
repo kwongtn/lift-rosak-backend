@@ -155,6 +155,21 @@ medias: DjangoListConnection[MediaType]
 2. **Some(value)**: Explicit value provided → `.value` returns value
 3. **Some(None)**: Explicit null → `.value` returns None
 
+### Worked example: `SocialMediaLinkInput.occurredAt` (2026-09-30)
+
+The tri-state above is easy to read and easy to get wrong at the service boundary, because Strawberry's `Maybe` **does not survive** the crossing and, worse, its truthiness lies. Two things bite, both pinned by `tests/incident/test_social_link_occurred_at_write.py`:
+
+1. **`Some.__bool__` is always `True`.** So `if input.occurred_at:` cannot distinguish *omitted* from *explicit null* — it only distinguishes omitted from "something was sent". The mutation layer therefore translates by hand, and only because the service's three states mean three different things:
+
+   ```python
+   occurred_at = OCCURRED_AT_UNSET if not input.occurred_at else input.occurred_at.value
+   ```
+
+   with `UNSET` a private falsy sentinel on the write dataclass (`incident/services/social_links.py`). Collapsing the two into `maybe_value(input.occurred_at)` would silently reset the event time to the submission instant on **every** partial re-send — and `SocialMediaLinkInput` is replace-not-patch, so partial re-sends are the norm (see `MISTAKES.md` 2026-09-30).
+2. **`null` is a value with meaning, not an absence.** `occurredAt: null` is the documented "this happened when it was reported" reset, because the column is `NOT NULL` and cannot itself be null. On the *insert* path there is no such third state, so `FeedLinkInput.occurredAt` is a flat two-state `Maybe` and both omitted and explicit null mean "let the column default fire".
+
+   The general lesson the pair makes concrete: before adding a tri-state field to an input, decide what *all three* states do, and check that the field's `null` is not already load-bearing somewhere else in the payload.
+
 ### Testing Pattern
 
 ```python
