@@ -181,6 +181,8 @@ the model used, e.g. `Co-authored-by: opencode (opencode-go/deepseek-v4-flash)
 <noreply@opencode.ai>` or `Co-authored-by: Claude Code (claude-sonnet-4-5)
 <noreply@anthropic.com>`. Never attribute AI work to a human co-author.
 
+**Code Definitions** - Never attempt to open, grep, or search files inside `.venv` or `node_modules`. If you need library or framework documentation, use the LSP tools or ask/run python introspection directly.
+
 ---
 
 ## 📝 Documentation Maintenance Rules
@@ -221,6 +223,7 @@ Progress entry — `docs/progress/<yyyy>/<mm>/<dd>.md`:
 
 ```markdown
 ## [YYYY-MM-DD] <module/feature>
+
 - <what changed> (`<commit>`)
 - <verification / test note>
 ```
