@@ -333,7 +333,15 @@ class CommonGraphQLTests(TestCase):
 
     async def test_get_user_data_query_profile_aggregates(self):
         today = date.today()
-        yesterday_dt = now() - timedelta(days=1)
+        # The MONTH bucket below counts every event in the CURRENT month, so the
+        # second fixture day has to stay inside it. On the 1st there is no
+        # earlier day in the month, so e3/e5 share today instead — and then
+        # `withMostEntries(DAY)` sees six events on one day rather than four/two.
+        # Anchoring them to `now() - 1 day` made this test fail on every first
+        # of the month: yesterday was last month, so only 4 of the 6 landed in
+        # the current bucket (4 != 6).
+        second_day = today - timedelta(days=1) if today.day > 1 else today
+        second_dt = now() - timedelta(days=1) if today.day > 1 else now()
         await Event.objects.acreate(
             reporter=self.user,
             vehicle=self.v1,
@@ -353,7 +361,7 @@ class CommonGraphQLTests(TestCase):
             vehicle=self.v1,
             type=SpottingEventType.JUST_SPOTTING,
             status=SpottingVehicleStatus.IN_SERVICE,
-            spotting_date=today - timedelta(days=1),
+            spotting_date=second_day,
         )
         await Event.objects.acreate(
             reporter=self.user,
@@ -367,7 +375,7 @@ class CommonGraphQLTests(TestCase):
             vehicle=self.v2,
             type=SpottingEventType.JUST_SPOTTING,
             status=SpottingVehicleStatus.IN_SERVICE,
-            spotting_date=today - timedelta(days=1),
+            spotting_date=second_day,
         )
         await Event.objects.acreate(
             reporter=self.user,
@@ -377,7 +385,7 @@ class CommonGraphQLTests(TestCase):
             spotting_date=today,
         )
 
-        await Event.objects.filter(id__in=[e3.id, e5.id]).aupdate(created=yesterday_dt)
+        await Event.objects.filter(id__in=[e3.id, e5.id]).aupdate(created=second_dt)
 
         query = """
             query {
@@ -425,7 +433,8 @@ class CommonGraphQLTests(TestCase):
         self.assertEqual(with_most["year"], today.year)
         self.assertEqual(with_most["month"], today.month)
         self.assertEqual(with_most["day"], today.day)
-        self.assertEqual(with_most["count"], 4)
+        # Six on the 1st (e3/e5 share today there), four on every other day.
+        self.assertEqual(with_most["count"], 6 if second_day == today else 4)
 
         trends = user_data["spottingTrends"]
         self.assertIsInstance(trends, list)
