@@ -1398,6 +1398,7 @@ class PublicFeedLastWeekAndDayAlignTests(TestCase):
             $first: Int
             $after: String
             $lastWeekOnly: Boolean
+            $currentServiceDayOnly: Boolean
             $alignPageToDay: Boolean
             $displayTodayInLastWeek: Boolean
         ) {
@@ -1405,6 +1406,7 @@ class PublicFeedLastWeekAndDayAlignTests(TestCase):
                 first: $first
                 after: $after
                 lastWeekOnly: $lastWeekOnly
+                currentServiceDayOnly: $currentServiceDayOnly
                 alignPageToDay: $alignPageToDay
                 displayTodayInLastWeek: $displayTodayInLastWeek
             ) {
@@ -1555,6 +1557,53 @@ class PublicFeedLastWeekAndDayAlignTests(TestCase):
         self.assertEqual(self._ids(with_flag), expected)
         self.assertEqual(without["totalCount"], 2)
         self.assertEqual(with_flag["totalCount"], unfiltered["totalCount"])
+
+    def test_both_windows_together_intersect_and_need_the_today_flag(self):
+        """``currentServiceDayOnly`` + ``lastWeekOnly`` INTERSECT, today excluded.
+
+        The two windows open at different instants on the same column — the
+        service day at 03:00, ``lastWeekOnly`` at calendar midnight six days ago —
+        and ``lastWeekOnly`` additionally CLOSES at today's midnight unless
+        ``displayTodayInLastWeek`` says otherwise. Composed, the range is
+        therefore ``[service_day_start, today 00:00)``, which is empty for every
+        minute between 03:00 and midnight and holds only the 03:00-03:59 sliver of
+        the current service day before that. That intersection is the DECIDED
+        behaviour, not an accident: the two flags are independent filters on one
+        queryset, so a caller wanting the old "current service day" reading
+        through the pair must set ``displayTodayInLastWeek: true``.
+
+        The fixture is 05:00 today, chosen so the claim is clock-independent: it is
+        at/after the service-day lower bound at every hour of the day (a service
+        day never starts before the calendar day it starts in — before 03:00 the
+        lower bound is *yesterday's* 03:00) and at/after ``last_week_start`` always,
+        while today's midnight upper bound rejects it at every hour.
+        """
+        now = timezone.now()
+        this_morning = self._link(
+            "service-day-today",
+            datetime.combine(now.date(), time.min) + timedelta(hours=5),
+        )
+
+        # The service-day window alone admits it...
+        self.assertIn(
+            str(this_morning.id),
+            self._ids(self._feed(first=10, currentServiceDayOnly=True)),
+        )
+        # ...the default intersection does not, because it closes at midnight...
+        intersected = self._feed(
+            first=10, currentServiceDayOnly=True, lastWeekOnly=True
+        )
+        self.assertEqual(self._ids(intersected), [])
+        self.assertEqual(intersected["totalCount"], 0)
+        # ...and the flag restores the service-day meaning inside the pair.
+        inclusive = self._feed(
+            first=10,
+            currentServiceDayOnly=True,
+            lastWeekOnly=True,
+            displayTodayInLastWeek=True,
+        )
+        self.assertEqual(self._ids(inclusive), [str(this_morning.id)])
+        self.assertEqual(inclusive["totalCount"], 1)
 
     def test_align_page_to_day_false_returns_exactly_first_rows(self):
         now = timezone.now()

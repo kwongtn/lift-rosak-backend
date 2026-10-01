@@ -523,14 +523,21 @@ class FeedWindowTests(SocialLinkFeedOrderingBase):
         # window excludes, so this runs the inclusive window the flag restores:
         # the property under test is "widening never removes", and it would be
         # confounded with the today exclusion otherwise.
-        boundary = service_day_start(timezone.now())
-        root = self._link("fresh-root", occurred_at=boundary + timedelta(hours=2))
+        #
+        # Anchored to ABSOLUTE wall time, not to ``service_day_start``:
+        # ``service_day_start`` rolls back to 03:00 of the previous day between
+        # midnight and 03:00, so ``boundary + 2h`` would land on YESTERDAY and
+        # the default-window assertion at the bottom would start passing for the
+        # wrong reason. Calendar midnight plus a fixed hour offset means "today
+        # 02:00" wherever in the day the suite happens to run.
+        today_midnight = datetime.combine(timezone.now().date(), time.min)
+        root = self._link("fresh-root", occurred_at=today_midnight + timedelta(hours=2))
         child = self._link(
-            "older-child", occurred_at=boundary - timedelta(days=10), parent=root
+            "older-child", occurred_at=today_midnight - timedelta(days=10), parent=root
         )
         grandchild = self._link(
             "older-grandchild",
-            occurred_at=boundary - timedelta(days=11),
+            occurred_at=today_midnight - timedelta(days=11),
             parent=child,
         )
 
@@ -584,12 +591,24 @@ class FeedWindowTests(SocialLinkFeedOrderingBase):
         of thing that turns into "WITH RECURSIVE ... duplicate" or a silent
         cross-talk between the two walks, so the combination is pinned.
         """
-        boundary = service_day_start(timezone.now())
-        root, child = self._conversation("both", boundary - timedelta(days=1), boundary)
+        # Anchored to ABSOLUTE wall time for the same reason as the other
+        # clock-sensitive fixtures: ``service_day_start`` is 03:00 of TODAY
+        # except between midnight and 03:00, when it is yesterday's — a fixture
+        # expressed as an offset from it silently changes sides of the window in
+        # the early hours. Calendar midnight plus fixed offsets says the same
+        # thing at every hour: the root is a week back, out of BOTH windows, and
+        # the child is at 03:00 today, inside BOTH (the service-day lower bound
+        # is satisfied whether it resolved to today 00:00 or yesterday 03:00).
+        today_midnight = datetime.combine(timezone.now().date(), time.min)
+        root, child = self._conversation(
+            "both",
+            today_midnight - timedelta(days=7),
+            today_midnight + timedelta(hours=3),
+        )
 
         # The fixture's root is out of both windows, its child is in both, so
         # the collapse admits exactly that one root. ``displayTodayInLastWeek``
-        # is required: the child lands in the early hours of today, which the
+        # is required: the child lands in the current service day, which the
         # default ``lastWeekOnly`` window excludes, so without it this test would
         # be counting the today exclusion's subqueries instead of the two windows'.
         # One execution, both halves: the rows and the statement that produced

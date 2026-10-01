@@ -588,7 +588,12 @@ async def get_public_social_media_links(
     day: the cut is plain midnight, deliberately NOT ``service_day_start``'s
     03:00 rollover, because a calendar-day view that opened at 03:00 would hide
     the first three hours of this morning from the reader. It composes with
-    ``current_service_day_only`` (both narrow the same queryset).
+    ``current_service_day_only`` (both narrow the same queryset) — and because both
+    narrow the SAME queryset, composing them INTERSECTS them: the combination is
+    ``[service_day_start, today 00:00)``, which is empty for every minute from the
+    03:00 rollover until midnight. ``display_today_in_last_week: true`` is what
+    lifts the upper bound and restores the "current service day" meaning of the
+    pair.
     ``display_today_in_last_week`` (default ``False``) is the single opt-out: it
     drops the upper bound and restores the inclusive seven-day window
     ``occurred_at >=`` six-days-ago midnight, today included. It is inert when
@@ -781,7 +786,9 @@ async def get_public_social_media_links(
     # ``now`` is captured ONCE and shared by both bounds, so the two ends of the
     # ``lastWeekOnly`` window cannot straddle a midnight: a request that landed
     # at 23:59:59.9 must not open on yesterday's arithmetic and close on
-    # today's.
+    # today's. It is read unconditionally — one clock read shared by all the
+    # bounds is cheaper than one per flag, and with no window flag set the value
+    # is simply unused.
     now = timezone.now()
     if current_service_day_only:
         queryset = queryset.filter(
