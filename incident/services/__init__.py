@@ -65,6 +65,7 @@ from .social_links import (
     update_social_media_link,
 )
 from .votes import (
+    VoteOutcome,
     remove_chronology_vote,
     remove_incident_vote,
     remove_social_media_link_vote,
@@ -97,6 +98,7 @@ __all__ = [
     "SocialMediaLinkWrite",
     "UNASSIGNED_AGENCY_NAME",
     "UpdateResult",
+    "VoteOutcome",
     "WebhookIngestResult",
     "approve_chronology",
     "approve_chronology_deletion",

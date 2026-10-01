@@ -43,6 +43,19 @@ is never the cheap way to keep a client working:
   keep getting links nested under the thread ROOT — the old one-level behaviour,
   working — and would never discover that the sublink level it now wants is
   spelled ``parentId``.
+* **2026-10-01 (vote acknowledgement).** The nine vote mutations — incident,
+  chronology and social-media-link, up/down/remove — now return
+  ``VoteMutationPayload`` instead of ``GenericMutationReturn``. This is the one
+  entry that is a *widening* rather than a rename: ``ok`` is still there and
+   still first, so a client whose selection set is ``{ ok }`` keeps working
+  unchanged, and only clients that ask for the new ``userVote`` / ``voteScore``
+  / ``upvotes`` / ``downvotes`` see the difference. It is nonetheless a breaking
+  change by graphql-core's definition (a field's type changed) and is allowlisted
+  as one, because a client that *fragments* the old shape off the response — the
+  "the server only told me ``ok``, so I will work out the score myself"
+  projection that made the vote indicator snap back — has to fail loudly and
+  re-read the contract rather than keep computing a number the server already
+  sent.
 
 They are accepted as a SUBSET check, not an equality check, because the
 allowlist has a shelf life: once this wave is committed, ``HEAD`` carries the
@@ -85,9 +98,10 @@ from rosak.schema import schema
 
 SNAPSHOT_PATH = Path(__file__).resolve().parent / "snapshots" / "schema.graphql"
 
-# The deliberate, documented breaking delta: SIX entries, all of them un-aliased
-# renames/removals from the two waves, and nothing else — see the module
-# docstring for why each rename is right and why none may be re-aliased.
+# The deliberate, documented breaking delta: FIFTEEN entries — six un-aliased
+# renames/removals from the two earlier waves, plus the nine vote mutations that
+# now acknowledge with the new vote state instead of a bare ``ok``. See the
+# module docstring for why each is right and why none may be re-aliased.
 EXPECTED_ACCEPTED_BREAKING_CHANGES = {
     # 2026-09-30, occurred_at: the queue's window filters.
     "Query.socialMediaLinks arg createdAfter was removed.",
@@ -97,24 +111,55 @@ EXPECTED_ACCEPTED_BREAKING_CHANGES = {
     "SocialMediaLinkScalar.threadSize was removed.",
     "SocialMediaLinkScalar.threadLinks was removed.",
     "Mutation.groupSocialMediaLinks arg threadId was removed.",
+    # 2026-10-01, vote acknowledgement: the write reports the new vote state.
+    "Mutation.upvote changed type from GenericMutationReturn! to VoteMutationPayload!.",
+    "Mutation.downvote changed type from GenericMutationReturn! to VoteMutationPayload!.",
+    "Mutation.removeVote changed type from GenericMutationReturn! to VoteMutationPayload!.",
+    "Mutation.upvoteChronology changed type from GenericMutationReturn! to VoteMutationPayload!.",
+    "Mutation.downvoteChronology changed type from GenericMutationReturn! to VoteMutationPayload!.",
+    "Mutation.removeChronologyVote changed type from GenericMutationReturn! to VoteMutationPayload!.",
+    "Mutation.upvoteSocialMediaLink changed type from GenericMutationReturn! to VoteMutationPayload!.",
+    "Mutation.downvoteSocialMediaLink changed type from GenericMutationReturn! to VoteMutationPayload!.",
+    "Mutation.removeSocialMediaLinkVote changed type from GenericMutationReturn! to VoteMutationPayload!.",
 }
 
 #: ``EXPECTED_ACCEPTED_BREAKING_CHANGES``'s exact size. Pinned so the allowlist
-#: cannot be widened to swallow a delta nobody has read: a seventh entry fails
-#: here first, with a legible reason, rather than quietly authorising whatever
-#: the next wave breaks.
-EXPECTED_ACCEPTED_BREAKING_CHANGE_COUNT = 6
+#: cannot be widened to swallow a delta nobody has read: an unlisted seventh
+#: entry fails here first, with a legible reason, rather than quietly
+#: authorising whatever the next wave breaks.
+EXPECTED_ACCEPTED_BREAKING_CHANGE_COUNT = 15
 
-#: ``find_breaking_changes`` renders its two descriptions we allow here in
-#: exactly these shapes — note the ARG shape carries the *owning* type AND the
+#: The nine vote mutations the vote-acknowledgement wave retyped, in the order
+#: the docstring lists them (incident, chronology, social-media link × up/down/
+#: remove). Named once so the allowlist, the "still real" test and the
+#: anti-rot test cannot disagree about which fields the wave covers.
+VOTE_ACK_MUTATION_FIELDS = (
+    "upvote",
+    "downvote",
+    "removeVote",
+    "upvoteChronology",
+    "downvoteChronology",
+    "removeChronologyVote",
+    "upvoteSocialMediaLink",
+    "downvoteSocialMediaLink",
+    "removeSocialMediaLinkVote",
+)
+
+#: ``find_breaking_changes`` renders the three description shapes we allow here
+#: in exactly these forms — note the ARG shape carries the *owning* type AND the
 #: field it is an argument of (``Mutation.groupSocialMediaLinks``), which is why
-#: it needs its own pattern. Parsed rather than matched against a hand-written
-#: table so the anti-rot test below cannot disagree with the oracle that
-#: produced the allowlist: an unparseable entry fails loudly instead of being
-#: skipped.
+#: it needs its own pattern, and the CHANGED-TYPE shape is the only one that
+#: names a type that still exists. Parsed rather than matched against a
+#: hand-written table so the anti-rot test below cannot disagree with the oracle
+#: that produced the allowlist: an unparseable entry fails loudly instead of
+#: being skipped.
 _REMOVED_FIELD = re.compile(r"^(?P<type>[A-Za-z_]\w*)\.(?P<field>\w+) was removed\.$")
 _REMOVED_ARG = re.compile(
     r"^(?P<owner>[A-Za-z_]\w*)\.(?P<field>\w+) arg (?P<arg>\w+) was removed\.$"
+)
+_CHANGED_TYPE = re.compile(
+    r"^(?P<owner>[A-Za-z_]\w*)\.(?P<field>\w+) changed type from "
+    r"(?P<old_type>[A-Za-z_]\w*)! to (?P<new_type>[A-Za-z_]\w*)!\.$"
 )
 
 
@@ -246,8 +291,37 @@ class TestSchemaSnapshot(TestCase):
             ),
         )
 
-        # Six entries in, six removed names out — so the allowlist cannot quietly
-        # grow to cover a delta nobody has looked at.
+        # --- 2026-10-01: vote mutations acknowledge with the new vote state ---
+        # Retyped, so both halves matter: the field must still be there (the
+        # wave widened the payload, it did not move or rename the mutation) and
+        # it must be the payload type rather than the old bare-`ok` one.
+        for name in VOTE_ACK_MUTATION_FIELDS:
+            field = mutation.get(name)
+            self.assertIsNotNone(field, msg=f"Mutation.{name} is gone entirely.")
+            self.assertEqual(
+                str(field.type),
+                "VoteMutationPayload!",
+                msg=(
+                    f"Mutation.{name} is {field.type}. It must acknowledge with "
+                    "VoteMutationPayload — a bare `ok` is what forces the client "
+                    "to project the new score itself, which is what made the "
+                    "vote indicator snap back."
+                ),
+            )
+        payload_fields = set(schema._schema.type_map["VoteMutationPayload"].fields)
+        # `ok` is deliberately RETAINED, so a client whose selection set is
+        # `{ ok }` — every client, until it asks for more — keeps working.
+        self.assertEqual(
+            payload_fields,
+            {"ok", "userVote", "voteScore", "upvotes", "downvotes"},
+        )
+        self.assertNotIn(
+            "GenericMutationReturn",
+            {str(mutation[name].type) for name in VOTE_ACK_MUTATION_FIELDS},
+        )
+
+        # Every entry in, every entry accounted for — so the allowlist cannot
+        # quietly grow to cover a delta nobody has looked at.
         self.assertEqual(
             len(EXPECTED_ACCEPTED_BREAKING_CHANGES),
             EXPECTED_ACCEPTED_BREAKING_CHANGE_COUNT,
@@ -264,8 +338,10 @@ class TestSchemaSnapshot(TestCase):
         Left alone it would sit there as permission for the next wave's
         same-named break.
 
-        This test closes that direction: every entry must name something the
-        LIVE schema genuinely no longer has. A leftover entry, a typo, or a
+        This test closes that direction: every entry must still describe the live
+        schema. A removal entry must name something the live schema genuinely no
+        longer has; a retyping entry must name a field that is STILL THERE and
+        now carries the new type. A leftover entry, a typo, or a
         blanket-suppression entry added on a hunch all fail here, and an
         unparseable description fails rather than being skipped.
         """
@@ -273,25 +349,52 @@ class TestSchemaSnapshot(TestCase):
         for description in sorted(EXPECTED_ACCEPTED_BREAKING_CHANGES):
             arg_match = _REMOVED_ARG.match(description)
             field_match = _REMOVED_FIELD.match(description)
+            type_match = _CHANGED_TYPE.match(description)
             self.assertTrue(
-                arg_match or field_match,
+                arg_match or field_match or type_match,
                 msg=(
                     f"{description!r} is not a shape find_breaking_changes "
                     "produces, so this test cannot verify it. Add a pattern "
                     "rather than skipping it."
                 ),
             )
-            match = arg_match or field_match
-            # ``_REMOVED_FIELD`` names the type directly; ``_REMOVED_ARG`` names
-            # the owning type as ``owner`` because the description is
-            # ``<Owner>.<field> arg <argName> was removed.``
-            type_name = match.group("owner") if arg_match else match.group("type")
+            match = arg_match or type_match or field_match
+            # ``_REMOVED_FIELD`` names the type directly; the ARG and CHANGED-TYPE
+            # shapes name the owning type as ``owner``, because their descriptions
+            # are ``<Owner>.<field> arg <argName> was removed.`` and
+            # ``<Owner>.<field> changed type from X to Y.``
+            type_name = match.group("type") if field_match else match.group("owner")
             graphql_type = graphql_schema.type_map.get(type_name)
             self.assertIsNotNone(
                 graphql_type,
                 msg=f"{description!r} names a type the live schema does not have.",
             )
-            if arg_match:
+            if type_match:
+                # A retyping entry is the opposite assertion to a removal one: the
+                # field must SURVIVE, and with the NEW type. If the payload were
+                # reverted to `GenericMutationReturn` the allowlist would be
+                # describing a delta that no longer exists.
+                self.assertIn(
+                    match.group("field"),
+                    graphql_type.fields,
+                    msg=(
+                        f"{description!r} is allowlisted but "
+                        f"{type_name}.{match.group('field')} no longer exists. "
+                        "The mutation was renamed or removed, so the entry is stale."
+                    ),
+                )
+                self.assertEqual(
+                    str(graphql_type.fields[match.group("field")].type),
+                    f"{match.group('new_type')}!",
+                    msg=(
+                        f"{description!r} is allowlisted but "
+                        f"{type_name}.{match.group('field')} is "
+                        f"{graphql_type.fields[match.group('field')].type}. "
+                        "Either the retype was reverted or the entry is stale; "
+                        "both need a deliberate decision."
+                    ),
+                )
+            elif arg_match:
                 # The FIELD is supposed to still exist — only its ARG is gone —
                 # so looking it up is the assertion's setup, not a lookup that
                 # can fail for the reason being tested.
@@ -361,9 +464,10 @@ class TestSchemaSnapshot(TestCase):
                 f"Unexpected breaking changes vs. the committed baseline: "
                 f"{sorted(unexpected)}. The only accepted delta is "
                 f"{sorted(EXPECTED_ACCEPTED_BREAKING_CHANGES)} "
-                "(the occurred_at window filters and the link-tree thread "
-                "fields/argument renames, all shipped un-aliased). Either "
-                "restore the removed surface, or accept the new delta "
+                "(the occurred_at window filters, the link-tree thread "
+                "fields/argument renames — all shipped un-aliased — and the nine "
+                "vote mutations retyped to acknowledge with the new vote state). "
+                "Either restore the removed surface, or accept the new delta "
                 "deliberately by naming it in "
                 "EXPECTED_ACCEPTED_BREAKING_CHANGES, bumping "
                 "EXPECTED_ACCEPTED_BREAKING_CHANGE_COUNT, and saying why here."

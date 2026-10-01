@@ -82,13 +82,25 @@ mutation SubmitLineStatusReport($input: LineStatusReportInput!) {
 
 UPVOTE_LINK = """
 mutation UpvoteLink($id: ID!) {
-  upvoteSocialMediaLink(socialMediaLinkId: $id) { ok }
+  upvoteSocialMediaLink(socialMediaLinkId: $id) {
+    ok
+    userVote
+    voteScore
+    upvotes
+    downvotes
+  }
 }
 """
 
 REMOVE_LINK_VOTE = """
 mutation RemoveLinkVote($id: ID!) {
-  removeSocialMediaLinkVote(socialMediaLinkId: $id) { ok }
+  removeSocialMediaLinkVote(socialMediaLinkId: $id) {
+    ok
+    userVote
+    voteScore
+    upvotes
+    downvotes
+  }
 }
 """
 
@@ -238,7 +250,13 @@ async def test_upvote_then_remove_changes_score_and_user_vote():
 
     upvoted = await _execute(UPVOTE_LINK, {"id": link_id}, user=user)
     assert upvoted.errors is None, upvoted.errors
-    assert upvoted.data["upvoteSocialMediaLink"]["ok"] is True
+    payload = upvoted.data["upvoteSocialMediaLink"]
+    assert payload["ok"] is True
+    # The mutation response IS the new truth, so the client never has to project it.
+    assert payload["userVote"] == 1
+    assert payload["voteScore"] == 1
+    assert payload["upvotes"] == 1
+    assert payload["downvotes"] == 0
 
     node = await _link_node(user, link_id)
     assert node["voteScore"] == 1
@@ -246,7 +264,12 @@ async def test_upvote_then_remove_changes_score_and_user_vote():
 
     removed = await _execute(REMOVE_LINK_VOTE, {"id": link_id}, user=user)
     assert removed.errors is None, removed.errors
-    assert removed.data["removeSocialMediaLinkVote"]["ok"] is True
+    payload = removed.data["removeSocialMediaLinkVote"]
+    assert payload["ok"] is True
+    assert payload["userVote"] == 0
+    assert payload["voteScore"] == 0
+    assert payload["upvotes"] == 0
+    assert payload["downvotes"] == 0
 
     node = await _link_node(user, link_id)
     assert node["voteScore"] == 0

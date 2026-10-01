@@ -663,12 +663,12 @@ type Mutation {
   requestChronologyDeletion(chronologyId: ID!): GenericMutationReturn!
   approveChronologyDeletion(chronologyId: ID!): GenericMutationReturn!
   rejectChronologyDeletion(chronologyId: ID!): GenericMutationReturn!
-  upvote(calendarIncidentId: ID!): GenericMutationReturn!
-  downvote(calendarIncidentId: ID!): GenericMutationReturn!
-  removeVote(calendarIncidentId: ID!): GenericMutationReturn!
-  upvoteChronology(chronologyId: ID!): GenericMutationReturn!
-  downvoteChronology(chronologyId: ID!): GenericMutationReturn!
-  removeChronologyVote(chronologyId: ID!): GenericMutationReturn!
+  upvote(calendarIncidentId: ID!): VoteMutationPayload!
+  downvote(calendarIncidentId: ID!): VoteMutationPayload!
+  removeVote(calendarIncidentId: ID!): VoteMutationPayload!
+  upvoteChronology(chronologyId: ID!): VoteMutationPayload!
+  downvoteChronology(chronologyId: ID!): VoteMutationPayload!
+  removeChronologyVote(chronologyId: ID!): VoteMutationPayload!
   submitSocialMediaLink(input: SocialMediaLinkInput!): GenericMutationReturn!
   markSocialMediaLinkCompleted(socialMediaLinkId: ID!): GenericMutationReturn!
   updateSocialMediaLink(socialMediaLinkId: ID!, input: SocialMediaLinkInput!): GenericMutationReturn!
@@ -678,9 +678,9 @@ type Mutation {
   reorderSocialMediaLinks(linkIds: [ID!]!, parentId: ID): GenericMutationReturn!
   submitFeedLink(input: FeedLinkInput!): FeedLinkPayload!
   submitLineStatusReport(input: LineStatusReportInput!): GenericMutationReturn!
-  upvoteSocialMediaLink(socialMediaLinkId: ID!): GenericMutationReturn!
-  downvoteSocialMediaLink(socialMediaLinkId: ID!): GenericMutationReturn!
-  removeSocialMediaLinkVote(socialMediaLinkId: ID!): GenericMutationReturn!
+  upvoteSocialMediaLink(socialMediaLinkId: ID!): VoteMutationPayload!
+  downvoteSocialMediaLink(socialMediaLinkId: ID!): VoteMutationPayload!
+  removeSocialMediaLinkVote(socialMediaLinkId: ID!): VoteMutationPayload!
   extractDataFromUrl(input: ExtractDataInput!): ExtractedIncidentDataScalar!
   triggerLineVehicleStatusSnapshot(input: TriggerInput!): GenericMutationReturn!
 }
@@ -1154,6 +1154,14 @@ input VehicleTypeFilter {
 }
 
 type VoteBreakdown {
+  upvotes: Int!
+  downvotes: Int!
+}
+
+type VoteMutationPayload {
+  ok: Boolean!
+  userVote: Int!
+  voteScore: Int!
   upvotes: Int!
   downvotes: Int!
 }

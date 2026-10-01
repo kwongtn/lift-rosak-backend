@@ -14,7 +14,11 @@ from incident.schema.inputs import (
     LineStatusReportInput,
     SocialMediaLinkInput,
 )
-from incident.schema.scalars import ExtractedIncidentDataScalar, FeedLinkPayload
+from incident.schema.scalars import (
+    ExtractedIncidentDataScalar,
+    FeedLinkPayload,
+    VoteMutationPayload,
+)
 
 # Imported from the submodule, NOT as ``services.UNSET``: the service package
 # re-exports the write helpers, and this sentinel is a detail of the write
@@ -31,70 +35,85 @@ from rosak.permissions import IsAdmin, IsLoggedIn, has_admin_claim
 from .shared import maybe_value, raise_service_error
 
 
+def _vote_payload(outcome: services.VoteOutcome) -> VoteMutationPayload:
+    """The one place a `VoteOutcome` becomes a GraphQL payload.
+
+    Every vote mutation returns this, so "what the client sees after a click" is
+    the same shape for incidents, chronology rows and social-media links.
+    """
+    return VoteMutationPayload(
+        ok=True,
+        user_vote=outcome.user_vote,
+        vote_score=outcome.vote_score,
+        upvotes=outcome.upvotes,
+        downvotes=outcome.downvotes,
+    )
+
+
 @strawberry.type
 class VoteMutations:
     @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def upvote(
         self, info: Info, calendar_incident_id: strawberry.ID
-    ) -> GenericMutationReturn:
-        await services.set_incident_vote(
+    ) -> VoteMutationPayload:
+        outcome = await services.set_incident_vote(
             info.context.user, incident_id=int(calendar_incident_id), value=1
         )
-        return GenericMutationReturn(ok=True)
+        return _vote_payload(outcome)
 
     @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def downvote(
         self, info: Info, calendar_incident_id: strawberry.ID
-    ) -> GenericMutationReturn:
-        await services.set_incident_vote(
+    ) -> VoteMutationPayload:
+        outcome = await services.set_incident_vote(
             info.context.user, incident_id=int(calendar_incident_id), value=-1
         )
-        return GenericMutationReturn(ok=True)
+        return _vote_payload(outcome)
 
     @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def remove_vote(
         self, info: Info, calendar_incident_id: strawberry.ID
-    ) -> GenericMutationReturn:
-        await services.remove_incident_vote(
+    ) -> VoteMutationPayload:
+        outcome = await services.remove_incident_vote(
             info.context.user, incident_id=int(calendar_incident_id)
         )
-        return GenericMutationReturn(ok=True)
+        return _vote_payload(outcome)
 
     @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def upvote_chronology(
         self, info: Info, chronology_id: strawberry.ID
-    ) -> GenericMutationReturn:
+    ) -> VoteMutationPayload:
         try:
-            await services.set_chronology_vote(
+            outcome = await services.set_chronology_vote(
                 info.context.user, chronology_id=int(chronology_id), value=1
             )
         except services.IncidentServiceError as exc:
             raise_service_error(exc)
-        return GenericMutationReturn(ok=True)
+        return _vote_payload(outcome)
 
     @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def downvote_chronology(
         self, info: Info, chronology_id: strawberry.ID
-    ) -> GenericMutationReturn:
+    ) -> VoteMutationPayload:
         try:
-            await services.set_chronology_vote(
+            outcome = await services.set_chronology_vote(
                 info.context.user, chronology_id=int(chronology_id), value=-1
             )
         except services.IncidentServiceError as exc:
             raise_service_error(exc)
-        return GenericMutationReturn(ok=True)
+        return _vote_payload(outcome)
 
     @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def remove_chronology_vote(
         self, info: Info, chronology_id: strawberry.ID
-    ) -> GenericMutationReturn:
+    ) -> VoteMutationPayload:
         try:
-            await services.remove_chronology_vote(
+            outcome = await services.remove_chronology_vote(
                 info.context.user, chronology_id=int(chronology_id)
             )
         except services.IncidentServiceError as exc:
             raise_service_error(exc)
-        return GenericMutationReturn(ok=True)
+        return _vote_payload(outcome)
 
 
 @strawberry.type
@@ -360,38 +379,38 @@ class SocialMediaLinkMutations:
     @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def upvote_social_media_link(
         self, info: Info, social_media_link_id: strawberry.ID
-    ) -> GenericMutationReturn:
+    ) -> VoteMutationPayload:
         try:
-            await services.set_social_media_link_vote(
+            outcome = await services.set_social_media_link_vote(
                 info.context.user, link_id=int(social_media_link_id), value=1
             )
         except services.IncidentServiceError as exc:
             raise_service_error(exc)
-        return GenericMutationReturn(ok=True)
+        return _vote_payload(outcome)
 
     @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def downvote_social_media_link(
         self, info: Info, social_media_link_id: strawberry.ID
-    ) -> GenericMutationReturn:
+    ) -> VoteMutationPayload:
         try:
-            await services.set_social_media_link_vote(
+            outcome = await services.set_social_media_link_vote(
                 info.context.user, link_id=int(social_media_link_id), value=-1
             )
         except services.IncidentServiceError as exc:
             raise_service_error(exc)
-        return GenericMutationReturn(ok=True)
+        return _vote_payload(outcome)
 
     @strawberry.mutation(permission_classes=[IsLoggedIn])
     async def remove_social_media_link_vote(
         self, info: Info, social_media_link_id: strawberry.ID
-    ) -> GenericMutationReturn:
+    ) -> VoteMutationPayload:
         try:
-            await services.remove_social_media_link_vote(
+            outcome = await services.remove_social_media_link_vote(
                 info.context.user, link_id=int(social_media_link_id)
             )
         except services.IncidentServiceError as exc:
             raise_service_error(exc)
-        return GenericMutationReturn(ok=True)
+        return _vote_payload(outcome)
 
 
 @strawberry.type

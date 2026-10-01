@@ -227,15 +227,25 @@ async def test_vote_resolvers_set_switch_remove():
     )
     votes = VoteMutations()
 
-    assert (
-        await votes.upvote(info, calendar_incident_id=strawberry_id(incident.id))
-    ).ok
-    assert (
-        await votes.downvote(info, calendar_incident_id=strawberry_id(incident.id))
-    ).ok
-    assert (
-        await votes.remove_vote(info, calendar_incident_id=strawberry_id(incident.id))
-    ).ok
+    upvoted = await votes.upvote(info, calendar_incident_id=strawberry_id(incident.id))
+    assert upvoted.ok
+    assert (upvoted.user_vote, upvoted.vote_score, upvoted.upvotes) == (1, 1, 1)
+    assert upvoted.downvotes == 0
+
+    # A switch moves the one vote between buckets, and the payload reports the -2 swing
+    # the old `{ ok }`-only contract left the client to guess.
+    downvoted = await votes.downvote(
+        info, calendar_incident_id=strawberry_id(incident.id)
+    )
+    assert downvoted.ok
+    assert (downvoted.user_vote, downvoted.vote_score) == (-1, -1)
+    assert (downvoted.upvotes, downvoted.downvotes) == (0, 1)
+
+    cleared = await votes.remove_vote(
+        info, calendar_incident_id=strawberry_id(incident.id)
+    )
+    assert cleared.ok
+    assert (cleared.user_vote, cleared.vote_score) == (0, 0)
 
 
 @pytest.mark.django_db

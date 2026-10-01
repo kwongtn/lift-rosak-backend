@@ -27,6 +27,29 @@ class VoteBreakdown:
 
 
 @strawberry.type
+class VoteMutationPayload:
+    """The server-authoritative vote state a vote mutation hands back.
+
+    🔴 WHY NOT `GenericMutationReturn(ok=True)`: `ok` alone leaves the client
+    to work out the new score, and the only way it can is to project the change
+    itself — which then races its own echo of that value and any other voter who
+    acted in between, so the indicator visibly "snaps back". Returning the
+    snapshot the write produced makes the mutation response the single source of
+    truth for the post-click display, with no refetch and no client-side guess.
+
+    Flat (`upvotes`/`downvotes`) rather than reusing `VoteBreakdown` on purpose:
+    this is a payload, not a field on a node, and a client repainting a vote
+    control wants one object to read.
+    """
+
+    ok: bool
+    user_vote: int
+    vote_score: int
+    upvotes: int
+    downvotes: int
+
+
+@strawberry.type
 class LineStatusHourBucket:
     hour_start: datetime
     hour_end: datetime

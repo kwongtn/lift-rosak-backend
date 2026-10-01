@@ -101,13 +101,18 @@ async def test_remove_vote():
     incident = await _make_incident()
     await services.set_incident_vote(user, incident_id=incident.id, value=1)
 
-    removed = await services.remove_incident_vote(user, incident_id=incident.id)
+    outcome = await services.remove_incident_vote(user, incident_id=incident.id)
 
-    assert removed
     assert await _vote_for(user, incident) is None
+    assert outcome.user_vote == 0
+    assert outcome.vote_score == 0
+    assert outcome.upvotes == 0
+    assert outcome.downvotes == 0
 
+    # Removing again is a no-op, and the snapshot says so identically — which is why
+    # the delete count is no longer part of the return contract.
     removed_again = await services.remove_incident_vote(user, incident_id=incident.id)
-    assert not removed_again
+    assert removed_again == outcome
 
 
 # --- Chronology vote tests ---
@@ -162,13 +167,14 @@ async def test_chronology_remove_vote():
 
     removed = await services.remove_chronology_vote(user, chronology_id=chronology.id)
 
-    assert removed
     assert await _vote_for_chronology(user, chronology) is None
+    assert removed.user_vote == 0
+    assert removed.vote_score == 0
 
     removed_again = await services.remove_chronology_vote(
         user, chronology_id=chronology.id
     )
-    assert not removed_again
+    assert removed_again == removed
 
 
 @pytest.mark.django_db
@@ -197,5 +203,5 @@ async def test_incident_votes_still_work_regression():
     assert vote.value == -1
 
     removed = await services.remove_incident_vote(user, incident_id=incident.id)
-    assert removed
+    assert removed.user_vote == 0
     assert await _vote_for(user, incident) is None
