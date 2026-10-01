@@ -302,6 +302,14 @@ def last_week_start(now: datetime) -> datetime:
     happened. Filtering on ``created`` instead would open the window on
     submission time and admit (or hide) rows whose *event* day is outside it,
     which contradicts the ``occurred_at`` ordering the same page is rendered in.
+
+    This helper supplies the LOWER bound only. The resolver closes the window at
+    today's local midnight by default — ``_event_window_before`` — so the
+    effective default range is ``[six days ago 00:00, today 00:00)``, i.e. the
+    six COMPLETED calendar days rather than seven. Callers that want the
+    inclusive form (``displayTodayInLastWeek: true``) simply do not add the
+    upper bound; that asymmetry is the flag's entire reason to exist, so it
+    belongs at the call site and not hidden inside this helper.
     """
     return datetime.combine((now - timedelta(days=6)).date(), time.min)
 
@@ -480,6 +488,52 @@ def _event_window(bound: datetime, *, collapse: bool) -> Q:
     return Q(occurred_at__gte=bound) | Q(pk__in=_in_window_subtree_roots(bound))
 
 
+def _event_window_before(bound: datetime, *, collapse: bool) -> Q:
+    """``occurred_at < bound``, widened to the whole subtree when collapsed.
+
+    The upper-bound counterpart of ``_event_window``, and it exists because a
+    window needs BOTH ends: ``_event_window`` answers "did this happen at/after
+    the lower bound", this one answers "did this happen strictly before the
+    upper bound", and ``lastWeekOnly`` is the only flag that has an upper end
+    (it is the flag that must not leak *today* into a "previous days" view).
+
+    The collapse widening is the same question asked in the other direction,
+    with the same reasoning and the same deliberate asymmetry against the
+    moderation gates: a collapsed card is excluded when the ROOT **or any of its
+    descendants, at any depth** occurred at/after ``bound``, because grouping
+    elects the EARLIEST link as root, so a conversation that opened before the
+    bound and was followed up inside today has a root outside the exclusion and
+    a descendant inside it. Resolving that on the root would keep the whole
+    conversation — and, since the collapsed surface renders the ROOT, the
+    follow-up that belongs in the excluded window with it. The editable
+    ``occurredAt`` adds the mirror case on top: an admin who moves a descendant
+    LATER than its root breaks the "root is earliest" premise outright, and a
+    root-only upper bound would then let a stale root into an exclusion built
+    for the wrong reason.
+
+    WHY BOTH CONJUNCTS ARE WRITTEN OUT, since ``~Q(pk__in=…)`` alone already
+    covers the root: a root's own ``tree_path`` is ``[root]``, so
+    ``tree_path[1]`` is the root and the row admits itself — the negation is
+    sufficient. The explicit ``occurred_at__lt`` conjunct is deliberate
+    SYMMETRY with ``_event_window`` rather than redundancy being tolerated: the
+    lower bound states its own column comparison and widens it with ``|``, so
+    the upper bound stating its own and narrowing it with ``&`` makes the two
+    read as the same operation pointed the other way. It also keeps the
+    predicate honest on the flat path, where the conjunct *is* the whole
+    filter, so the collapsed and uncollapsed forms cannot drift apart in the
+    one place a reader compares them.
+
+    WHY NO MODERATION FILTERS IN THE SUBQUERY — the same reasoning as
+    ``_in_window_subtree_roots``, and for the same reason: what happened does
+    not stop being a fact because a member is hidden, and a hidden member must
+    not decide whether its conversation survives the exclusion. Everything that
+    decides *visibility* stays on the outer query.
+    """
+    if not collapse:
+        return Q(occurred_at__lt=bound)
+    return Q(occurred_at__lt=bound) & ~Q(pk__in=_in_window_subtree_roots(bound))
+
+
 async def get_public_social_media_links(
     root,
     info: Info,
@@ -492,6 +546,7 @@ async def get_public_social_media_links(
     current_service_day_only: bool = False,
     last_week_only: bool = False,
     align_page_to_day: bool = False,
+    display_today_in_last_week: bool = False,
     collapse_threads: bool = False,
 ) -> SocialMediaLinkConnection:
     """Public social-media-link feed, cursor-paginated.
@@ -525,10 +580,22 @@ async def get_public_social_media_links(
     returned on this public feed, not even when asked for by name.
     ``current_service_day_only`` keeps only links that *occurred* within the
     current service day (03:00 rollover, see ``service_day_start``).
-    ``last_week_only`` keeps only links occurring at/after local midnight six
-    days ago — today plus the previous six calendar days, a seven-day window
-    (see ``last_week_start``); it composes with ``current_service_day_only``
-    (both narrow the same queryset).
+    ``last_week_only`` keeps only links occurring in the last six COMPLETED
+    calendar days — at/after local midnight six days ago (``last_week_start``) and
+    strictly before local midnight THIS morning, so the default range is
+    ``[six days ago 00:00, today 00:00)`` and a "previous days" view never shows a
+    link that happened today. "Today" here is the CALENDAR day, not the service
+    day: the cut is plain midnight, deliberately NOT ``service_day_start``'s
+    03:00 rollover, because a calendar-day view that opened at 03:00 would hide
+    the first three hours of this morning from the reader. It composes with
+    ``current_service_day_only`` (both narrow the same queryset).
+    ``display_today_in_last_week`` (default ``False``) is the single opt-out: it
+    drops the upper bound and restores the inclusive seven-day window
+    ``occurred_at >=`` six-days-ago midnight, today included. It is inert when
+    ``last_week_only`` is ``False`` — there is no other upper bound to lift, and
+    inventing one would make the flag mean two different things.
+    The exclusion is applied before ``totalCount``, so the count reports the rows
+    the page can actually show.
 
     ``collapse_threads`` (default ``False``) swaps the flat link list for
     conversation roots — see below. ``totalCount`` is the size of the whole
@@ -582,7 +649,14 @@ async def get_public_social_media_links(
     row is admitted into ``currentServiceDayOnly`` / ``lastWeekOnly`` if the
     ROOT *or any of its descendants, at any depth* occurred at/after the bound
     (``_event_window``), while visibility and status are still decided on the
-    root alone. Both are the fail-safe direction for their own question: a
+    root alone. The ``lastWeekOnly`` UPPER bound is subtree-aware in the same
+    way and for the same reason (``_event_window_before``): a conversation is
+    excluded when the root **or any descendant at any depth** occurred at/after
+    today's midnight, so "this view does not show today" holds for the card as
+    the reader sees it and not merely for the row the group happens to render.
+    Resolving that end on the root alone would let a stale root — the ordinary
+    shape, since grouping elects the earliest link — carry a today follow-up
+    into a view that is supposed to be the previous days. Both are the fail-safe direction for their own question: a
     window asks "what happened in this window", and a conversation is in it if
     any part of it was, whereas a moderation gate asks "may this be shown", and
     the cautious answer for a shared object is that hiding any representative
@@ -703,17 +777,37 @@ async def get_public_social_media_links(
     # plain single-column comparison, unchanged, which is the point of the
     # ``collapse`` flag: the recursive subquery that widens the window is built
     # only on the collapsed path, so no other surface pays for it.
+    #
+    # ``now`` is captured ONCE and shared by both bounds, so the two ends of the
+    # ``lastWeekOnly`` window cannot straddle a midnight: a request that landed
+    # at 23:59:59.9 must not open on yesterday's arithmetic and close on
+    # today's.
+    now = timezone.now()
     if current_service_day_only:
         queryset = queryset.filter(
-            _event_window(
-                service_day_start(timezone.now()), collapse=collapse_requested
-            )
+            _event_window(service_day_start(now), collapse=collapse_requested)
         )
 
     if last_week_only:
         queryset = queryset.filter(
-            _event_window(last_week_start(timezone.now()), collapse=collapse_requested)
+            _event_window(last_week_start(now), collapse=collapse_requested)
         )
+        # Today is excluded by default: the flag reads as "the last few days",
+        # and a view that silently includes the day in progress is neither
+        # complete (it changes under the reader) nor comparable with the day
+        # groups it is rendered next to. The cut is CALENDAR midnight, not the
+        # 03:00 service-day rollover, so it matches the day headers the same page
+        # draws. Placed before the count below, so ``totalCount`` and the page
+        # agree; and subtree-aware under collapse, so "no today on this card"
+        # holds for the whole conversation rather than only for its root. The
+        # opt-out is a single absent filter, not a second window definition.
+        if not display_today_in_last_week:
+            queryset = queryset.filter(
+                _event_window_before(
+                    datetime.combine(now.date(), time.min),
+                    collapse=collapse_requested,
+                )
+            )
 
     # Count before the cursor filter: a cursor narrows the page, not the feed.
     total_count = await queryset.acount()

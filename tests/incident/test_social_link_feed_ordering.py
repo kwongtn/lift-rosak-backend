@@ -18,6 +18,10 @@ What is pinned here:
 * ``currentServiceDayOnly`` / ``lastWeekOnly`` / ``alignPageToDay`` keyed on
   ``occurred_at``, since a window on a different column than the ordering puts a
   backdated row at the top of a day it does not belong to;
+* ``lastWeekOnly``'s **upper** bound — today is excluded unless
+  ``displayTodayInLastWeek`` restores the inclusive window, on the flat feed and
+  on a collapsed one (a reply today removes the whole conversation, at any
+  depth), with the recursive subquery built only on the collapsed path;
 * ``collapseThreads`` — roots only (``parent_id IS NULL``), ``totalCount`` over
   roots, the flat default unchanged, and no collapse under ``mine``;
 * the query SHAPE the collapse and the windows produce: a collapsed page narrows
@@ -66,6 +70,7 @@ FEED_QUERY = """
         $currentServiceDayOnly: Boolean
         $lastWeekOnly: Boolean
         $alignPageToDay: Boolean
+        $displayTodayInLastWeek: Boolean
         $collapseThreads: Boolean
     ) {
         publicSocialMediaLinks(
@@ -75,6 +80,7 @@ FEED_QUERY = """
             currentServiceDayOnly: $currentServiceDayOnly
             lastWeekOnly: $lastWeekOnly
             alignPageToDay: $alignPageToDay
+            displayTodayInLastWeek: $displayTodayInLastWeek
             collapseThreads: $collapseThreads
         ) {
             totalCount
@@ -513,6 +519,10 @@ class FeedWindowTests(SocialLinkFeedOrderingBase):
     def test_a_root_in_window_keeps_its_conversation_even_if_no_sublink_is(self):
         # Widening is additive, never restrictive: a root inside the window is
         # admitted on its own ``occurred_at`` exactly as the flat feed would.
+        # The root lands in the early hours of TODAY, which the *default*
+        # window excludes, so this runs the inclusive window the flag restores:
+        # the property under test is "widening never removes", and it would be
+        # confounded with the today exclusion otherwise.
         boundary = service_day_start(timezone.now())
         root = self._link("fresh-root", occurred_at=boundary + timedelta(hours=2))
         child = self._link(
@@ -524,10 +534,21 @@ class FeedWindowTests(SocialLinkFeedOrderingBase):
             parent=child,
         )
 
-        collapsed = self._feed(first=10, lastWeekOnly=True, collapseThreads=True)
+        collapsed = self._feed(
+            first=10,
+            lastWeekOnly=True,
+            displayTodayInLastWeek=True,
+            collapseThreads=True,
+        )
 
         self.assertLess(grandchild.occurred_at, last_week_start(timezone.now()))
         self.assertEqual(self._ids(collapsed), [str(root.id)])
+        # ...and the default really does exclude it, so this is not a fixture on
+        # which the two windows happen to agree.
+        self.assertEqual(
+            self._ids(self._feed(first=10, lastWeekOnly=True, collapseThreads=True)),
+            [],
+        )
 
     def test_the_uncollapsed_feed_has_no_recursive_subquery(self):
         """The widening is built ONLY on the collapsed path.
@@ -566,15 +587,19 @@ class FeedWindowTests(SocialLinkFeedOrderingBase):
         boundary = service_day_start(timezone.now())
         root, child = self._conversation("both", boundary - timedelta(days=1), boundary)
 
+        # The fixture's root is out of both windows, its child is in both, so
+        # the collapse admits exactly that one root. ``displayTodayInLastWeek``
+        # is required: the child lands in the early hours of today, which the
+        # default ``lastWeekOnly`` window excludes, so without it this test would
+        # be counting the today exclusion's subqueries instead of the two windows'.
         # One execution, both halves: the rows and the statement that produced
         # them, so the SQL assertion cannot be handed an empty capture.
         collapsed, sql = self._feed_capture(
             currentServiceDayOnly=True,
             lastWeekOnly=True,
+            displayTodayInLastWeek=True,
             collapseThreads=True,
         )
-        # The fixture's root is out of both windows, its child is in both, so
-        # the collapse admits exactly that one root.
         self.assertEqual(self._ids(collapsed), [str(root.id)])
         self.assertEqual(collapsed["totalCount"], 1)
         self.assertEqual(child.parent_id, root.id)
@@ -588,6 +613,7 @@ class FeedWindowTests(SocialLinkFeedOrderingBase):
                 page_only=True,
                 currentServiceDayOnly=True,
                 lastWeekOnly=True,
+                displayTodayInLastWeek=True,
                 collapseThreads=True,
             )[1].count("WITH RECURSIVE"),
             2,
@@ -621,6 +647,187 @@ class FeedWindowTests(SocialLinkFeedOrderingBase):
         self.assertLess(boundary.created, now)
         # Nothing was deleted — the window narrows the feed.
         self.assertEqual(SocialMediaLink.objects.count(), 2)
+
+
+class LastWeekTodayExclusionTests(SocialLinkFeedOrderingBase):
+    """``lastWeekOnly`` has an UPPER bound too: today is out by default.
+
+    ``lastWeekStart`` only ever supplied the lower bound, so "the last week"
+    silently included the day in progress — a view that changes under the reader
+    and whose newest day is half-formed next to six completed ones.
+    ``displayTodayInLastWeek`` restores the inclusive window; the default is the
+    closed range ``[six days ago 00:00, today 00:00)``.
+
+    The interesting half is the collapsed one. The bound has to be resolved over
+    the SUBTREE for exactly the reason the lower bound is: grouping elects the
+    EARLIEST link as root, so "the root is yesterday and a descendant is today"
+    is the ordinary shape of any conversation with a follow-up. A root-only upper
+    bound would keep the card — and, since the collapsed surface renders the
+    ROOT, it would keep a today follow-up inside a view that claims to be the
+    previous days.
+    """
+
+    def _today_midnight(self):
+        return datetime.combine(timezone.now().date(), time.min)
+
+    def _conversation(self, slug, *occurred_at):
+        """A root-first chain; see ``FeedWindowTests._conversation``."""
+        chain = []
+        parent = None
+        for index, instant in enumerate(occurred_at):
+            link = self._link(f"{slug}-{index}", occurred_at=instant, parent=parent)
+            chain.append(link)
+            parent = link
+        return chain
+
+    def test_a_reply_today_takes_the_whole_conversation_out_of_the_window(self):
+        today = self._today_midnight()
+        root, reply = self._conversation(
+            "excluded-by-reply",
+            today - timedelta(days=1, hours=1),  # yesterday evening
+            today + timedelta(hours=9),  # this morning
+        )
+
+        collapsed = self._feed(first=10, lastWeekOnly=True, collapseThreads=True)
+
+        self.assertEqual(self._ids(collapsed), [])
+        self.assertEqual(collapsed["totalCount"], 0)
+        # Assert the fixture so this cannot pass on a shape where the two
+        # readings agree: the root is genuinely inside the lower bound and only
+        # the DESCENDANT is today.
+        self.assertLess(root.occurred_at, today)
+        self.assertGreaterEqual(reply.occurred_at, today)
+        # The flag puts the conversation back, root card and all.
+        self.assertEqual(
+            self._ids(
+                self._feed(
+                    first=10,
+                    lastWeekOnly=True,
+                    displayTodayInLastWeek=True,
+                    collapseThreads=True,
+                )
+            ),
+            [str(root.id)],
+        )
+        # The FLAT feed judges each row on its own ``occurred_at``, so the reply
+        # is gone but yesterday's root is still listed — the widening belongs to
+        # the collapsed card, it does not rewrite anyone's date.
+        self.assertEqual(
+            self._ids(self._feed(first=10, lastWeekOnly=True)), [str(root.id)]
+        )
+
+    def test_a_root_that_happened_today_is_excluded(self):
+        """The root itself being today is the trivially-covered case, pinned so a
+        future refactor that drops the plain ``occurred_at__lt`` conjunct cannot
+        hide behind the subtree subquery.
+
+        The child is deliberately YESTERDAY: ``occurredAt`` is editable, so
+        "descendants are later than the root" is a convention, not an invariant,
+        and the fixture shows the root-only reading and the subtree reading
+        agreeing here for the wrong reason if the times were swapped.
+        """
+        today = self._today_midnight()
+        root, child = self._conversation(
+            "excluded-by-root",
+            today + timedelta(hours=10),  # this morning
+            today - timedelta(days=2),  # two days ago, moved up under the root
+        )
+
+        collapsed = self._feed(first=10, lastWeekOnly=True, collapseThreads=True)
+
+        self.assertGreaterEqual(root.occurred_at, today)
+        self.assertEqual(self._ids(collapsed), [])
+        self.assertEqual(
+            self._ids(
+                self._feed(
+                    first=10,
+                    lastWeekOnly=True,
+                    displayTodayInLastWeek=True,
+                    collapseThreads=True,
+                )
+            ),
+            [str(root.id)],
+        )
+
+    def test_a_descendant_two_levels_down_today_takes_the_conversation_out(self):
+        """Nothing about the upper bound is depth-limited either.
+
+        Same argument, one level deeper: a great-grandchild is still "in the
+        conversation". A fixed number of hops would start returning the card here
+        while every shallower test still passed.
+        """
+        today = self._today_midnight()
+        root, level_1, level_2 = self._conversation(
+            "excluded-deep",
+            today - timedelta(days=4),
+            today - timedelta(days=3),
+            today + timedelta(hours=7),
+        )
+
+        collapsed = self._feed(first=10, lastWeekOnly=True, collapseThreads=True)
+
+        self.assertLess(level_1.occurred_at, today)
+        self.assertGreaterEqual(level_2.occurred_at, today)
+        self.assertEqual(self._ids(collapsed), [])
+        self.assertEqual(collapsed["totalCount"], 0)
+
+    def test_a_conversation_entirely_before_today_survives(self):
+        """The converse guard, at every depth: the exclusion must not become a
+        filter that swallows the six completed days it is supposed to show.
+
+        Deliberately spans the whole window, from the exact 00:00 six-days-ago
+        opening minute to the last minute of yesterday, so a bound that was
+        accidentally ``<=`` today would still pass the "excludes today" tests and
+        fail here.
+        """
+        now = timezone.now()
+        start = last_week_start(now)
+        root, middle, leaf = self._conversation(
+            "survivor",
+            start,  # the exact opening minute
+            start + timedelta(days=3, hours=7),
+            now - timedelta(days=1, hours=0, minutes=1),  # yesterday 23:59
+        )
+
+        collapsed = self._feed(first=10, lastWeekOnly=True, collapseThreads=True)
+
+        self.assertEqual(self._ids(collapsed), [str(root.id)])
+        self.assertEqual(collapsed["totalCount"], 1)
+        self.assertEqual(middle.parent_id, root.id)
+        self.assertEqual(leaf.parent_id, middle.id)
+
+    def test_the_exclusion_walks_the_tree_only_on_the_collapsed_path(self):
+        """The upper bound costs the same as the lower one: nothing off the
+        collapsed path.
+
+        Two recursive walks per statement when collapsed and windowed (one per
+        bound), none on the flat feed — the rows are identical either way, so this
+        is asserted on the emitted SQL.
+        """
+        today = self._today_midnight()
+        self._conversation(
+            "shape-upper",
+            today - timedelta(days=2),
+            today + timedelta(hours=1),
+        )
+
+        # The flat default window is one comparison on one column.
+        self.assertNotIn("WITH RECURSIVE", self._link_sql(lastWeekOnly=True))
+        # Collapsing alone, and the flag on its own, stay flat: neither is a
+        # window, so neither builds a subquery.
+        self.assertNotIn("WITH RECURSIVE", self._link_sql(collapseThreads=True))
+        self.assertNotIn(
+            "WITH RECURSIVE",
+            self._link_sql(lastWeekOnly=True, displayTodayInLastWeek=True),
+        )
+        # Both bounds on the collapsed path: two walks per statement, and the
+        # count query runs the same predicate, so four.
+        self.assertEqual(
+            self._link_sql(lastWeekOnly=True, collapseThreads=True).count(
+                "WITH RECURSIVE"
+            ),
+            4,
+        )
 
 
 class AlignPageToDayTests(SocialLinkFeedOrderingBase):

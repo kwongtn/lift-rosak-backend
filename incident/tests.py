@@ -1388,9 +1388,10 @@ class PublicFeedContractTests(TestCase):
 
 
 class PublicFeedLastWeekAndDayAlignTests(TestCase):
-    """``lastWeekOnly`` (today + the previous six calendar days) and
-    ``alignPageToDay`` (a page never ends mid-day; a whole day lands together,
-    so a page may exceed ``first`` — no cap)."""
+    """``lastWeekOnly`` (the last six COMPLETED calendar days — today excluded
+    unless ``displayTodayInLastWeek``) and ``alignPageToDay`` (a page never ends
+    mid-day; a whole day lands together, so a page may exceed ``first`` — no
+    cap)."""
 
     query = """
         query Feed(
@@ -1398,12 +1399,14 @@ class PublicFeedLastWeekAndDayAlignTests(TestCase):
             $after: String
             $lastWeekOnly: Boolean
             $alignPageToDay: Boolean
+            $displayTodayInLastWeek: Boolean
         ) {
             publicSocialMediaLinks(
                 first: $first
                 after: $after
                 lastWeekOnly: $lastWeekOnly
                 alignPageToDay: $alignPageToDay
+                displayTodayInLastWeek: $displayTodayInLastWeek
             ) {
                 totalCount
                 edges { node { id } cursor }
@@ -1440,21 +1443,118 @@ class PublicFeedLastWeekAndDayAlignTests(TestCase):
     def _ids(self, feed):
         return [edge["node"]["id"] for edge in feed["edges"]]
 
-    def test_last_week_only_window_is_today_plus_six_calendar_days(self):
+    def test_last_week_only_window_opens_at_midnight_six_days_ago(self):
+        """The LOWER bound, on the inclusive window the flag restores.
+
+        The fixture carries a today row on purpose: with the flag on, the
+        inclusive seven-day window is the whole claim (six days ago through
+        today), so the boundary row proves the lower end and the today row the
+        upper one. The default's exclusion of today is a separate test — mixing
+        the two here would let a broken exclusion still pass this assertion.
+        """
         now = timezone.now()
         start = datetime.combine((now - timedelta(days=6)).date(), time.min)
         boundary = self._link("week-boundary", start)
+        today = self._link("week-today", now)
         self._link("week-before", start - timedelta(minutes=1))
         self._link("much-older", now - timedelta(days=30))
 
+        feed = self._feed(first=10, lastWeekOnly=True, displayTodayInLastWeek=True)
+
+        # The exact 00:00 six-days-ago row and today's row are in; 23:59 seven
+        # days ago and the older row are not.
+        self.assertEqual(self._ids(feed), [str(today.id), str(boundary.id)])
+        self.assertEqual(feed["totalCount"], 2)
+        # The window narrows the feed, it does not delete the other rows.
+        self.assertEqual(SocialMediaLink.objects.count(), 4)
+
+    def test_last_week_only_excludes_today_by_default(self):
+        """The new default: a "last week" view does not show the day in progress."""
+        now = timezone.now()
+        start = datetime.combine((now - timedelta(days=6)).date(), time.min)
+        yesterday_last_minute = self._link(
+            "yesterday-2359",
+            datetime.combine(now.date() - timedelta(days=1), time(23, 59)),
+        )
+        boundary = self._link("six-days-ago", start)
+        today = self._link("today-noon", now)
+
         feed = self._feed(first=10, lastWeekOnly=True)
 
-        # The exact 00:00 six-days-ago row is in; 23:59 seven days ago and the
-        # older row are not.
-        self.assertEqual(self._ids(feed), [str(boundary.id)])
-        self.assertEqual(feed["totalCount"], 1)
-        # The window narrows the feed, it does not delete the other rows.
-        self.assertEqual(SocialMediaLink.objects.count(), 3)
+        # Yesterday 23:59 is the last minute of the last completed day and stays;
+        # the six-days-ago boundary is the exact opening minute.
+        self.assertEqual(
+            self._ids(feed), [str(yesterday_last_minute.id), str(boundary.id)]
+        )
+        self.assertGreaterEqual(
+            today.occurred_at, datetime.combine(now.date(), time.min)
+        )
+
+    def test_a_link_at_exactly_today_midnight_is_excluded(self):
+        """The bound is INCLUSIVE of midnight, so a row stamped exactly 00:00 is out."""
+        now = timezone.now()
+        today_midnight = datetime.combine(now.date(), time.min)
+        at_midnight = self._link("today-midnight", today_midnight)
+        a_moment_earlier = self._link(
+            "just-before-midnight", today_midnight - timedelta(minutes=1)
+        )
+
+        excluded = self._feed(first=10, lastWeekOnly=True)
+
+        self.assertEqual(self._ids(excluded), [str(a_moment_earlier.id)])
+        self.assertNotIn(str(at_midnight.id), self._ids(excluded))
+
+    def test_display_today_in_last_week_restores_the_inclusive_window(self):
+        """The single opt-out puts today back and nothing else changes."""
+        now = timezone.now()
+        today = self._link("today-with-flag", now)
+        older = self._link(
+            "yesterday-with-flag",
+            datetime.combine(now.date() - timedelta(days=1), time(9, 0)),
+        )
+
+        with_flag = self._feed(first=10, lastWeekOnly=True, displayTodayInLastWeek=True)
+
+        self.assertEqual(self._ids(with_flag), [str(today.id), str(older.id)])
+        # And the default really would have dropped it, so the assertion is not
+        # vacuously satisfied by a flag that is silently ignored.
+        self.assertNotIn(
+            str(today.id), self._ids(self._feed(first=10, lastWeekOnly=True))
+        )
+
+    def test_total_count_reflects_the_today_exclusion(self):
+        """The count is taken AFTER the windows, so it reports the closed range."""
+        now = timezone.now()
+        for index in range(2):
+            self._link(f"count-week-{index}", now - timedelta(days=index + 1))
+        for index in range(3):
+            self._link(f"count-today-{index}", now)
+
+        default_feed = self._feed(first=1, lastWeekOnly=True)
+        inclusive_feed = self._feed(
+            first=1, lastWeekOnly=True, displayTodayInLastWeek=True
+        )
+
+        self.assertEqual(default_feed["totalCount"], 2)
+        self.assertEqual(inclusive_feed["totalCount"], 5)
+        # ``first`` still bounds the page; only the count moves.
+        self.assertEqual(len(default_feed["edges"]), 1)
+
+    def test_the_today_flag_does_nothing_when_last_week_only_is_off(self):
+        """The flag only ever lifts an upper bound, and there is no other one."""
+        now = timezone.now()
+        today = self._link("flag-off-today", now)
+        older = self._link("flag-off-older", now - timedelta(days=40))
+
+        without = self._feed(first=10, displayTodayInLastWeek=False)
+        with_flag = self._feed(first=10, displayTodayInLastWeek=True)
+        unfiltered = self._feed(first=10)
+
+        expected = [str(today.id), str(older.id)]
+        self.assertEqual(self._ids(without), expected)
+        self.assertEqual(self._ids(with_flag), expected)
+        self.assertEqual(without["totalCount"], 2)
+        self.assertEqual(with_flag["totalCount"], unfiltered["totalCount"])
 
     def test_align_page_to_day_false_returns_exactly_first_rows(self):
         now = timezone.now()
@@ -1557,11 +1657,40 @@ class PublicFeedLastWeekAndDayAlignTests(TestCase):
         ]
         self._link("out-of-week", start - timedelta(days=1))
 
-        feed = self._feed(first=2, lastWeekOnly=True, alignPageToDay=True)
+        # ``displayTodayInLastWeek`` is what puts today's three rows inside the
+        # window: the default excludes today, and this test is about the two
+        # features composing, not about the exclusion (covered above). Without it
+        # the page would be empty and the alignment would have nothing to align.
+        feed = self._feed(
+            first=2,
+            lastWeekOnly=True,
+            alignPageToDay=True,
+            displayTodayInLastWeek=True,
+        )
 
         # The day is completed inside the window; the older row is filtered out
         # before either feature so it can neither page nor inflate the count.
         self.assertEqual(set(self._ids(feed)), {str(link.id) for link in in_week})
+        self.assertEqual(feed["totalCount"], 3)
+        self.assertFalse(feed["pageInfo"]["hasNextPage"])
+
+    def test_the_align_day_completion_still_runs_after_the_today_exclusion(self):
+        """Yesterday is the newest day the default window still shows, and it must
+        still be completed as a whole day — the exclusion moves the newest day,
+        it does not break the alignment that keys on it."""
+        yesterday = timezone.now().date() - timedelta(days=1)
+        day = [
+            self._link(
+                f"yesterday-align-{index}",
+                datetime.combine(yesterday, time(13 - index, 0)),
+            )
+            for index in range(3)
+        ]
+        self._link("today-align-excluded", timezone.now())
+
+        feed = self._feed(first=2, lastWeekOnly=True, alignPageToDay=True)
+
+        self.assertEqual(set(self._ids(feed)), {str(link.id) for link in day})
         self.assertEqual(feed["totalCount"], 3)
         self.assertFalse(feed["pageInfo"]["hasNextPage"])
 
@@ -1584,8 +1713,19 @@ class PublicFeedLastWeekAndDayAlignTests(TestCase):
             self._link(f"count-week-{index}", now)
         self._link("count-ancient", start - timedelta(days=10))
 
-        aligned = self._feed(first=2, lastWeekOnly=True, alignPageToDay=True)
-        plain = self._feed(first=2, lastWeekOnly=True, alignPageToDay=False)
+        # The four in-window rows are all today, so this is the *inclusive*
+        # window: the flag is what keeps them, and the count is what has to agree
+        # with the page under both alignment settings. (The default's exclusion
+        # of today is pinned in the tests above.)
+        aligned = self._feed(
+            first=2, lastWeekOnly=True, alignPageToDay=True, displayTodayInLastWeek=True
+        )
+        plain = self._feed(
+            first=2,
+            lastWeekOnly=True,
+            alignPageToDay=False,
+            displayTodayInLastWeek=True,
+        )
 
         self.assertEqual(aligned["totalCount"], 4)
         self.assertEqual(plain["totalCount"], 4)
