@@ -162,7 +162,11 @@ async def _links_by_id(link_ids: set[int]) -> dict[int, SocialMediaLink]:
     if not link_ids:
         return {}
     links: dict[int, SocialMediaLink] = {}
-    async for link in SocialMediaLink.objects.filter(pk__in=link_ids):
+    # ``.order_by()`` clears the model default added by migration 0031
+    # (``Meta.ordering = ["position"]``): this result is keyed by pk, so the sort
+    # is pure overhead and the implicit sibling rank is not even meaningful
+    # across a set of unrelated links.
+    async for link in SocialMediaLink.objects.filter(pk__in=link_ids).order_by():
         links[link.pk] = link
     return links
 

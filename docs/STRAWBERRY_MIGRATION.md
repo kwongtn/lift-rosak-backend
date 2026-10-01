@@ -170,6 +170,37 @@ The tri-state above is easy to read and easy to get wrong at the service boundar
 
    The general lesson the pair makes concrete: before adding a tri-state field to an input, decide what *all three* states do, and check that the field's `null` is not already load-bearing somewhere else in the payload.
 
+### Worked example: `reorderSocialMediaLinks(parentId)` — when a `Maybe` is the **wrong** choice (2026-10-01)
+
+The `occurredAt` case above is tri-state because three states mean three different things. The link-tree wave produced the mirror image across **two arguments of two sibling mutations**, and the pair is worth reading together because it is the decision, not an exception:
+
+- **`groupSocialMediaLinks(parentId: Optional[strawberry.ID] = None)` → SDL `parentId: ID = null`.** Omitted and explicit `null` mean exactly the same thing here ("no target, elect a root"), so there are only two states and a `Maybe` would advertise a third that does not exist.
+- **`reorderSocialMediaLinks(parentId: strawberry.Maybe[Optional[strawberry.ID]] = strawberry.UNSET)` → SDL `parentId: ID` — nullable, and with no SDL default therefore *optional*.** Here omitted and explicit `null` are **genuinely different requests**: an explicit `parentId: null` means "reorder the roots" (a real use — the console deciding which link leads a conversation), while an omitted one names no sibling set at all. A plain `ID = null` would answer the second with the first, so a client that forgot the argument would reorder every root in the system.
+
+Two things worth knowing about a `Maybe` on a **bare argument** rather than on an input field, both learned the hard way here:
+
+1. **The SDL renders the two nullable states as one, and the resolver has to separate them.** `strawberry.UNSET` is the *default value* and `Maybe[T]` renders as nullable `T`, so the printed argument is `reorderSocialMediaLinks(linkIds: [ID!]!, parentId: ID)` (`rosak/tests/snapshots/schema.graphql:678`) — **no `!`, no `= …`**. In GraphQL "required" *is* "non-null", so "required but nullable" is not a state the SDL can express at all: `is_required_argument` in graphql-core's `validation/rules/provided_required_arguments.py` is `is_non_null_type(arg.type) and arg.default_value is Undefined`, which evaluates `False` here, and `ProvidedRequiredArgumentsRule` never fires. A nullable, defaultless argument is plain **optional**, so the omission is **legal to send and refused on arrival** — on graphql-core 3.2.6 all three client spellings (key absent from the selection, key absent from a declared nullable variable, explicit `null`) come back **valid** from `validate()` and enter the resolver, where `Maybe` supplies `UNSET`. (The one spelling stopped earlier declares `$parentId: ID!` and omits it, and that is a **client-chosen** type caught by variable coercion, not a property of the field.) A `Maybe` on an `input` *field* is a different animal: it is omitted from the SDL entirely unless given a default, and the omission is how `UNSET` is normally reached. Read the printed SDL, not the annotation, to know which one you have.
+2. **The truthiness rule is the same and still load-bearing.** `UNSET` is falsy, `Some.__bool__` is always `True`, so `if not parent_id:` isolates the omitted case and only then is `.value` safe to read:
+
+   ```python
+   if not parent_id:  # UNSET only; Some(None) and Some(ID) are both truthy
+       raise GraphQLError("reorderSocialMediaLinks requires parentId. ...")
+
+   parent_id = int(parent_id.value) if parent_id.value is not None else None
+   ```
+
+   So this guard is the **only** line of defence for a validated request, not a
+   belt-and-braces second one: nothing upstream refuses the omission, and
+   `tests/incident/test_social_link_threads.py::test_omitting_parent_id_on_reorder_is_refused_not_treated_as_the_roots`
+   sends the key absent from the selection entirely and passes **only** because the guard sits in
+   the resolver (delete the guard and the mutation succeeds silently — verified by sabotage in this
+   wave). That is the design rather than a workaround: tightening `parentId` to `ID!` would turn
+   the meaningful `null` ("reorder the ROOTS") into a hard error, so the schema *cannot* express
+   the distinction and the resolver does it instead. What the guard still buys over the SDL is the
+   one caller validation never sees — a direct Python call to the resolver.
+
+The general lesson, and the counterpart of the one above: **a nullable argument is not automatically a tri-state argument.** Ask what an *omitted* argument means independently of an explicit `null`. If it means the same thing, declare `Optional[T] = None` and keep the signature honest. If it means nothing at all, declare `Maybe[Optional[T]] = UNSET` so the type can hold the third state and the resolver can refuse it — then check the printed SDL, because that is what tells your clients whether they may leave the key out, and **the SDL is not where the refusal happens**: a nullable defaultless argument is optional, so `UNSET` is rejected by the resolver you just wrote.
+
 ### Testing Pattern
 
 ```python

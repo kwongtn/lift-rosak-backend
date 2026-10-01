@@ -22,6 +22,33 @@ it would only surface later as links landing in the wrong calendar day against
 the service-day window. So the value is pinned by literal, and the two wrong
 answers (the un-shifted UTC instant, and a double-shifted +16:00) are pinned as
 explicit non-equalities.
+
+WHAT IS *NOT* HERE, AND WHERE IT WENT
+-------------------------------------
+``ThreadRootInvariantsTests`` used to live in this file, guarding the flat
+one-level ``thread`` column that migration 0030 introduced. Migration 0031
+replaced that column with the ``parent`` tree, so all three of its tests
+referenced a field that no longer exists and errored. The tree invariants they
+were reaching for belong to the model that now owns them, and asserting them
+here would be the exact thing that gets missed next wave: this file's subject is
+the 0030 ``occurred_at`` backfill, and nothing about a link hierarchy belongs
+under it. The live assertions are:
+
+* root reachable from a member, transitively →
+  ``test_social_link_tree_model.TreeCycleGuardTests
+  .test_a_rejected_cycle_leaves_the_whole_subtree_reachable`` (plus
+  ``test_a_plain_save_that_would_close_a_cycle_is_rejected``),
+* deleting a root promotes its sublinks instead of cascading, and the surviving
+  subtree stays reachable → ``test_social_link_tree_model.TreeDeletePromotionTests
+  .test_deleting_a_root_promotes_its_child_to_a_root`` and
+  ``.test_the_surviving_subtree_is_still_reachable_from_its_new_root``,
+* the ungrouped-link case → **relocated, not deleted**, and
+  REWRITTEN, because the meaning inverted:
+  ``test_social_link_tree_model.TreeModelShapeTests
+  .test_a_lone_ungrouped_link_is_indistinguishable_from_a_conversation_root``.
+  Under ``thread`` "no thread" meant "in no group"; under ``parent`` it means
+  "IS the root", so the renamed test asserts the new meaning rather than a
+  reworded version of the old one.
 """
 
 import importlib
@@ -161,32 +188,3 @@ class OccurredAtBackfillTests(TestCase):
             )
         )
         self.assertEqual(ordered, [tie_b.pk, tie_a.pk, newer.pk, older.pk])
-
-
-class ThreadRootInvariantsTests(TestCase):
-    """The DB-level half of the threading contract; B5 enforces the rest.
-
-    ``thread`` must be nullable-with-a-default so an ungrouped link needs no
-    value, and ``on_delete=SET_NULL`` is the documented trade that keeps a
-    deleted root from taking its members with it.
-    """
-
-    def setUp(self):
-        self.user = User.objects.create(firebase_id="test-user-thread")
-        self.root = _link(self.user, thread=None)
-        self.member = _link(self.user, thread=self.root)
-
-    def test_an_ungrouped_link_has_no_thread(self):
-        ungrouped = _link(self.user)
-        self.assertIsNone(ungrouped.thread_id)
-
-    def test_a_root_is_reachable_from_its_members(self):
-        self.assertIsNone(self.root.thread_id)
-        self.assertEqual(self.member.thread, self.root)
-        self.assertEqual(list(self.root.thread_members.all()), [self.member])
-
-    def test_deleting_a_root_un_threads_its_members_instead_of_cascading(self):
-        self.root.delete()
-
-        member = SocialMediaLink.objects.get(pk=self.member.pk)
-        self.assertIsNone(member.thread_id)

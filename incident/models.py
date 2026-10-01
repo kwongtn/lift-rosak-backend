@@ -14,6 +14,8 @@ from ordered_model.models import OrderedModel, OrderedModelManager, OrderedModel
 from safedelete.managers import SafeDeleteManager, SafeDeleteQueryset
 from safedelete.models import SOFT_DELETE, SafeDeleteModel
 from simple_history.models import HistoricalRecords
+from tree_queries.fields import TreeNodeForeignKey
+from tree_queries.models import OrderableTreeNode
 
 from incident.enums import (
     CalendarIncidentChronologyIndicator,
@@ -409,7 +411,7 @@ class SocMedAccount(TimeStampedModel):
         ordering = ("platform", "handle")
 
 
-class SocialMediaLink(TimeStampedModel):
+class SocialMediaLink(TimeStampedModel, OrderableTreeNode):
     url = models.URLField()
     title = models.CharField(max_length=256, blank=True, default="")
     description = models.TextField(blank=True, default="")
@@ -490,7 +492,7 @@ class SocialMediaLink(TimeStampedModel):
     # Untouched provider payload, kept for export fidelity. No raw-audit table.
     raw_payload = models.JSONField(default=dict, blank=True)
 
-    # --- Display datetime + thread grouping -----------------------------------
+    # --- Display datetime + link hierarchy (tree) -----------------------------
     # ``occurred_at`` is the user-facing "when did this happen" instant: what the
     # card renders and what every feed/queue ordering is built on. It is NOT the
     # same thing as ``created`` (submission time), which stays the provenance
@@ -511,31 +513,41 @@ class SocialMediaLink(TimeStampedModel):
     # the composite index is DESC-only in intent.
     occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
 
-    # Self-referencing grouping. A thread is represented by its ROOT row: the
-    # root has ``thread_id is None`` and IS the thread; every other member points
-    # at that root through this FK.
+    # --- Ordered nested link tree ---------------------------------------------
+    # Supersedes the flat one-level ``thread`` self-FK shipped in 0030. That field
+    # carried a service-enforced depth-1 invariant — "``thread`` ALWAYS points at
+    # a ROOT, so a member never points at another member" — which is precisely
+    # what nesting removes: a sublink now has its own sublinks, and the whole
+    # hierarchy is reachable from any row. Successor of the depth-1 rule is the
+    # **cycle guard in ``save()`` below** plus ``MAX_THREAD_DEPTH`` in the
+    # grouping service (G1); the permission half of the old rule is unchanged.
     #
-    # INVARIANT (documented here, enforced by the grouping service, not by the DB):
-    # ``thread`` ALWAYS points at a ROOT — i.e. ``link.thread.thread_id is None``.
-    # A member never points at another member, and the graph is therefore exactly
-    # one level deep with no cycles. A resolver can safely assume
-    # ``thread.thread_members`` are all direct members with no further hop.
+    # ``tree_queries.OrderableTreeNode`` supplies ``position`` and
+    # ``Meta.ordering = ["position"]``; this field overrides the inherited FK, so
+    # the *only* thing declared here is the FK configuration. Nothing about
+    # ``tree_path`` is stored: it is a recursive-CTE annotation recomputed per
+    # query, so there is no redundant column, no in-memory tree and no save
+    # signal. The library locates the tree by the field NAME ``parent`` and its
+    # CTE hardcodes ``parent_id`` (which Django derives from the name), so an FK
+    # configured differently from the abstract default still works.
     #
-    # ``on_delete=SET_NULL`` is a deliberate trade: deleting a root UN-THREADS its
-    # members (they become singletons, ``thread_id`` back to NULL) instead of
-    # cascading a group-delete the operator never asked for. Losing the grouping
-    # is recoverable; losing the links is not. Group deletions are a separate,
-    # explicit act (``thread=None`` per link, then delete), not a cascade.
-    thread = models.ForeignKey(
+    # ``on_delete=SET_NULL`` is a deliberate non-destructive trade, and it is the
+    # OPPOSITE of the library's default (the inherited FK is ``CASCADE``): deleting
+    # a link PROMOTES its sublinks to roots (``parent_id`` back to NULL, recursively
+    # for the whole subtree) instead of cascade-deleting a group the operator
+    # never asked to delete. Losing the grouping is recoverable; losing the links
+    # is not. Verified empirically — the CTE never inspects ``on_delete``, and the
+    # promotion keeps the subtree reachable from its new roots.
+    parent = TreeNodeForeignKey(
         "self",
         null=True,
         blank=True,
         default=None,
         on_delete=models.SET_NULL,
-        related_name="thread_members",
+        related_name="children",
     )
 
-    class Meta:
+    class Meta(OrderableTreeNode.Meta):
         constraints = [
             # Structural idempotency backstop for re-scrape; the service also
             # re-reads on IntegrityError (no advisory lock, unlike feed_links).
@@ -564,7 +576,94 @@ class SocialMediaLink(TimeStampedModel):
             from incident.services.urls import canonicalize_url
 
             self.normalized_url = canonicalize_url(self.url) or None
+        self._guard_tree_cycle(kwargs.get("update_fields"))
         super().save(*args, **kwargs)
+
+    # Django marks a writer explicitly; an override would otherwise drop the
+    # flag and make this look like a side-effect-free accessor to the collector
+    # and to template/query tooling.
+    save.alters_data = True
+
+    def _guard_tree_cycle(self, update_fields: Any) -> None:
+        """Reject a ``parent`` write that would put a node inside its own subtree.
+
+        WHY THIS IS NOT THE LIBRARY'S JOB: ``tree_queries`` puts its loop
+        protection in ``TreeNode.clean()``, and ``clean()`` is only ever run by
+        ``full_clean()``. The grouping service calls ``save()``, so a plain
+        ``link.parent = other; link.save()`` creates the cycle SILENTLY. The row
+        is still in the table but is unreachable from the recursive CTE, which
+        anchors on ``parent_id IS NULL`` — and the failure mode is worse than
+        "invisible": ``ancestors()`` on a node inside a cycle raises
+        ``DoesNotExist`` (the CTE-wrapped ``.get()`` cannot see a node the CTE
+        cannot reach), i.e. a 500 rather than an empty list. Running the same
+        check here, before the row is written, is the only place it is cheap.
+
+        RAISES ``django.core.exceptions.ValidationError`` — the same type
+        ``TreeNode.clean()`` raises, so a caller that already handles
+        ``full_clean()`` needs no new ``except``. Deliberately NOT
+        ``IncidentServiceError``: that is the service layer's domain-error type
+        for an API-boundary rejection (permission, depth, G1's cycle refusal),
+        and a model cannot import it without a cycle. A bare ``assert`` is
+        banned repo-wide (stripped under ``python -O``).
+
+        ``full_clean()`` is intentionally NOT called instead: it would
+        re-validate every unrelated field on every save. The library's own
+        ``clean()`` still runs for any caller that does opt in — the MRO reaches
+        ``TreeNode.clean()`` through ``OrderableTreeNode`` — so this guard is
+        additive, not a replacement.
+
+        ``update_fields`` that cannot name ``parent`` cannot move a node, so the
+        check (two queries) is skipped on those paths. That is not
+        hypothetical: ``telegram_provider.handlers`` moderates with
+        ``link.save(update_fields=["status"])`` and would pay the check per link.
+
+        BOTH SPELLINGS MUST BE MATCHED, because in Django a field has TWO
+        accepted spellings in ``update_fields``, not one.
+        ``Options._non_pk_concrete_field_names`` puts ``field.name`` AND
+        ``field.attname`` into the same allowlist set, and
+        ``Model._save_table`` keeps a field when
+        ``f.name in update_fields or f.attname in update_fields`` — so
+        ``save(update_fields=["parent_id"])`` is legal and the emitted UPDATE
+        really does carry the ``parent`` COLUMN. A caller may therefore spell the
+        FK either way, and testing for ``"parent"`` alone returns early on the
+        attname spelling — letting the exact cycle this guard exists to reject
+        land with no error. General lesson, because this is a trap the API sets
+        up silently: whenever a guard is scoped to "the fields this partial
+        write can carry", match ``{f.name, f.attname}`` for every concrete field
+        it protects. ``"the field's name"`` is not one string in Django's
+        contract, and nothing raises when a caller picks the other one.
+
+        Not covered, by construction: ``bulk_create`` and ``bulk_update`` bypass
+        ``save()`` entirely. The grouping service therefore rejects cycles
+        itself (G1) — the same reason it assigns ``position`` explicitly.
+        """
+        if not self.pk or not self.parent_id:
+            # A root has no parent, so there is no edge to close a loop on; and
+            # an unsaved instance has no subtree to fall into yet.
+            return
+        if update_fields is not None and not {"parent", "parent_id"} & set(
+            update_fields
+        ):
+            return
+        if self.parent_id == self.pk:
+            # The degenerate cycle, caught up front: the ancestor walk below
+            # cannot see it (a node is not its own ancestor) but it is just as
+            # fatal to the CTE.
+            raise ValidationError(
+                f"SocialMediaLink {self.pk} cannot be its own parent."
+            )
+        # `ancestors()` adds the tree fields itself (`.with_tree_fields()`), which
+        # a bare `TreeNode.objects` queryset does NOT carry — querying
+        # `tree_path` off it raises `AttributeError`.
+        if (
+            self.__class__._default_manager.ancestors(self.parent_id, include_self=True)
+            .filter(pk=self.pk)
+            .exists()
+        ):
+            raise ValidationError(
+                f"SocialMediaLink {self.pk} cannot be made a descendant of "
+                f"itself (via SocialMediaLink {self.parent_id})."
+            )
 
 
 class LineStatusReport(TimeStampedModel):

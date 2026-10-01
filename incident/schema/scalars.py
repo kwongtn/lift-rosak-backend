@@ -14,7 +14,7 @@ from incident.enums import PassengerStatus
 from incident.schema.keyset import decode_keyset_cursor, encode_keyset_cursor
 
 # Module-level (not a re-export via ``incident.services``) on purpose: importing
-# the one predicate every thread field needs must not drag the whole service
+# the one predicate every hierarchy field needs must not drag the whole service
 # package — and its own imports — into a scalar's import graph.
 from incident.services.social_link_visibility import is_publicly_visible
 from operation.schema.scalars import Line, PassengerStatusCount, Station, Vehicle
@@ -113,6 +113,60 @@ class CalendarIncidentCategoryScalar:
     name: str
 
 
+def _publicly_visible_subtree(
+    rows: List[models.SocialMediaLink],
+) -> List[models.SocialMediaLink]:
+    """Drop the non-public rows from a flat subtree, keeping the rest in order.
+
+    Two rules, in this order, and the second is the one that is easy to miss:
+
+    1. ``is_publicly_visible`` — the shared moderation predicate, imported by
+       name at the top of this module. Not re-implemented here and not pushed
+       into a queryset: two copies of a moderation rule is how a public feed
+       leaks a hidden row's URL through a nested field.
+    2. **A descendant of a row that rule removed is removed too.** A HIDDEN
+       middle node stays in the tree, so its visible children are in
+       ``rows`` — but no client can reach them through ``sublinks``, because the
+       node they hang off is not in the list the client walks. Counting them
+       (``sublinkCount``) while the nesting cannot show them is precisely the
+       badge/list disagreement this design exists to make impossible, and it
+       would appear the first time an admin hid a node with children. So the
+       suppressed set accumulates: hidden rows AND rows orphaned by a hidden
+       ancestor, in one pass.
+
+    The pass works because the loader returns the subtree depth-first: a row's
+    parent has already been judged by the time the row itself is reached, so
+    ``suppressed`` is a complete answer for every row and no set of ancestors is
+    needed. That is a real dependency on the loader's ordering, not a stylistic
+    choice — it is why ``batch_load_sublink_subtrees`` sorts the way it does.
+    """
+    kept: List[models.SocialMediaLink] = []
+    suppressed = set()
+    for row in rows:
+        if row.parent_id in suppressed or not is_publicly_visible(row):
+            suppressed.add(row.pk)
+            continue
+        kept.append(row)
+    return kept
+
+
+async def _visible_subtree(info: Info, link_id: int) -> List[models.SocialMediaLink]:
+    """This link's publicly-visible descendants, one loader call for both fields.
+
+    ``sublinkCount`` and ``sublinks`` are two views of ONE fetched list, which is
+    the whole point: the loader caches per request (``rosak/context.py``
+    deep-copies the loader dict), so asking for both costs the same single
+    query, and the badge cannot drift from the list it labels because there is
+    no second count anywhere in the schema to drift from.
+
+    The moderation filter lives here, once, rather than in each field: it is the
+    loader that returns raw rows (see its docstring), and this is the single
+    point where they become public GraphQL data.
+    """
+    rows = await info.context.loaders["incident"]["sublink_subtrees"].load(link_id)
+    return _publicly_visible_subtree(rows)
+
+
 @strawberry_django.type(models.SocialMediaLink)
 class SocialMediaLinkScalar:
     id: strawberry.auto
@@ -139,81 +193,144 @@ class SocialMediaLinkScalar:
     # rather than inferring it from a status.
     is_automated: bool
 
-    # --- Thread grouping (see ``SocialMediaLink.thread``) ----------------------
-    # ``thread_id`` is a plain model attribute (the FK's attname), so this is a
-    # free field read — no query, no loader. Null exactly when this link IS a
-    # thread root, which is also what makes it the client-side "render me as a
-    # root with N links" signal.
-    thread_id: Optional[strawberry.ID]
+    # --- Link hierarchy (see ``SocialMediaLink.parent``) ------------------------
+    # ``parent_id`` is the parent link's id, read straight off the row (the FK's
+    # attname), so it costs no query and no loader. ``None`` for a root — which
+    # is what makes it the client's "walk up to the root from here" handle, and
+    # the reason a client must not read it as "this link is in a thread".
+    parent_id: Optional[strawberry.ID]
+
+    # This link's SIBLING SEQUENCE: its rank among the children of ITS OWN
+    # parent, ascending. Read straight off the row, so it costs no loader and no
+    # query — which is the whole reason it is a plain attribute and not a
+    # resolver. Exposed because ``reorderSocialMediaLinks`` writes it and,
+    # until now, NOTHING COULD READ IT BACK: a client could set an order and
+    # never see it confirmed, and the console's sequence column had to be faked
+    # from ``occurredAt`` — a different ordering, which would have made reorder
+    # meaningless.
+    #
+    # ⚠️ **IT IS A SIBLING ORDER, NOT A GLOBAL ONE, and the two are not the same
+    # list.** ``position`` is scoped to ONE parent, so it is only comparable
+    # between two links with the same ``parentId``. It is also the ONLY ordering
+    # in this schema that is not ``occurredAt DESC, id DESC``: the feed, the
+    # console queue and an incident's ``links`` all order on the event instant,
+    # and only ``sublinks`` follows ``position``. Sorting a mixed list of links
+    # by it interleaves unrelated conversations.
+    #
+    # ⚠️ **TWO ROOTS CAN SHARE A VALUE, LEGITIMATELY.** A root's parent is
+    # ``None``, so all roots are one sibling set with its own numbering, and
+    # ``position`` 10 under root A has nothing to do with ``position`` 10 under
+    # root B. So it is never a global tie-break, never a sort key across parents,
+    # and never a stable identity — ``id`` is the only thing that identifies a
+    # link, and ``(position, id)`` is the order inside one sibling set.
+    #
+    # ⚠️ **THE NUMBERING IS GAP-SPACED: 10, 20, 30, … — NOT 1, 2, 3.** That is
+    # what lets a sibling be inserted between two others without renumbering
+    # them, and it means the value is NOT an index: ``position`` 40 does not mean
+    # "the fourth", and a client that renders an ordinal from it will be wrong.
+    # Nothing constrains it to be unique either — the service renumbers a whole
+    # sibling set on every write, a hand-edited row can carry a duplicate, and
+    # ``0`` is the column's own default, so it is the value a row written outside
+    # ``save()`` carries. Treat it as a number to sort on, never as an index and
+    # never as "unset".
+    #
+    # It is what ``reorderSocialMediaLinks(parentId, linkIds)`` writes: that
+    # mutation takes a PERMUTATION of one existing sibling set and renumbers it
+    # ``10, 20, 30, …``, so a client reads ``position`` to render the current
+    # order and sends the desired one back. Read it, never set it — there is no
+    # input for it anywhere in the schema, on purpose: the mutation is the only
+    # writer, so a hand-numbered value cannot enter the store through the API.
+    position: int
 
     @strawberry_django.field
     async def is_thread_root(self) -> bool:
-        # Derived from the already-loaded ``thread_id`` attribute: a query here
-        # would buy nothing (``thread is None`` IS the definition) and would turn
-        # a 20-row feed into 20 extra round trips. Null ``thread_id`` covers
-        # BOTH the root of a real thread and an ordinary unthreaded link — the
-        # degenerate one-member thread — which is why this is true for a plain
-        # link too.
-        return self.thread_id is None
+        """Whether this link is the TOP of its hierarchy (``parentId`` is null).
 
-    @strawberry_django.field
-    async def thread_size(self, info: Info) -> int:
-        """How many links this thread has, counting the root as 1.
+        ⚠️ **A root marker, NOT a "has sublinks" marker — and it is true for an
+        ordinary ungrouped link too.** ``parentId is None`` describes a link that
+        nothing points at, which is exactly as true of a lone link on the feed
+        (a "thread" of one) as of the root of a real conversation. So it cannot
+        decide whether to draw the "N links" chip or the expand chevron: the only
+        correct affordance test is ``sublinkCount > 0`` (``sublinks.length > 0``),
+        which is false for a lone link and true for a root that has children.
 
-        This is the number the "N links" badge shows, so it counts only
-        publicly-visible members: a hidden or unapproved-automated member is
-        attached to the thread but not openable by a visitor, and counting it
-        would advertise a link that 404s into moderation.
-
-        A **member** also reports ``1``, and must: the loader is keyed by this
-        row's own id, and nothing carries ``thread_id == member.id`` (a member
-        points at the root, never the reverse), so a member's member-list is
-        empty by the same model invariant that makes depth 1. So ``1`` means
-        "no publicly-visible members hang off me", which is the true answer for
-        a member *and* for an ordinary unthreaded link — the two are
-        indistinguishable from this field. Do not read it as the group's size
-        for any row that is not a root.
-
-        That is the same trap as ``isThreadRoot`` (``thread_id is None`` is
-        true for a plain link too), so a client must gate on
-        ``threadSize > 1`` / ``threadLinks.length > 0`` and not on
-        ``isThreadRoot``. ``1`` is the "not a group" sentinel for both.
-
-        Derived from the SAME loader call as ``threadLinks`` (which caches per
-        request) rather than from a separate count query. Both fields therefore
-        read one filtered list, so the badge and the expanded thread are
-        structurally incapable of disagreeing.
+        Derived from the already-loaded ``parent_id`` attribute: a query here
+        would buy nothing (that attribute IS the definition) and would turn a
+        20-row feed into 20 extra round trips.
         """
-        members = await info.context.loaders["incident"]["thread_members"].load(self.id)
-        return 1 + sum(1 for member in members if is_publicly_visible(member))
+        return self.parent_id is None
 
     @strawberry_django.field
-    async def thread_links(self, info: Info) -> List["SocialMediaLinkScalar"]:
-        """The thread's members, oldest first — for the expanded thread list.
+    async def sublink_count(self, info: Info) -> int:
+        """How many publicly-visible links hang BELOW this one, at any depth.
 
-        Members only, never the root itself (the caller already renders it), and
-        empty for an unthreaded link. Depth is exactly 1 by model invariant
-        (``thread`` always points at a root), so there is no recursion here and
-        no further hop to guard against a cycle.
+        This is the number the "N links" chip shows, so it counts only
+        publicly-visible descendants: a HIDDEN — or unapproved automated — one
+        is attached to the tree but not openable by a visitor, and counting it
+        would advertise a link that leads nowhere. It is the same rule the feed's
+        own queryset-level ``.exclude()`` pair applies, in per-row form
+        (``services/social_link_visibility.is_publicly_visible``).
 
-        Also empty for a **member**: the loader is keyed by this row's id, and
-        by the same invariant no row points at a member, so asking a member for
-        its thread yields nothing — even though the member visibly belongs to one
-        (``threadId`` names it, ``threadSize`` says 1). Query the ROOT for the
-        member list; this is why a client must not reconstruct a thread from an
-        arbitrary row it happens to be holding. ``[]`` therefore means "nothing
-        hangs off me", not "I am in no thread" — see ``threadSize``.
+        ⚠️ **It is THIS node's own descendant count, not the size of its tree.**
+        A link with sublinks of its own reports those (at every depth below it);
+        a childless link reports ``0``. A client that wants the whole
+        conversation must walk ``parentId`` up to the root and read the root's
+        count. This is the opposite of the depth-1 design it replaces, where a
+        member's ``threadSize`` necessarily reported the thread's size because a
+        member could not have children of its own — a shape that made
+        "recursively ask every node" return the thread size N times, once per
+        level. Here it cannot: each node answers for itself, and summing the
+        level-by-level counts is how a client would get a number that is wrong by
+        the depth it just double-counted.
 
-        Visibility-filtered with the shared predicate: returning a hidden member
-        would leak its URL/title through a nested field, which is exactly the
-        moderation decision the feed-level ``.exclude()`` exists to honour. The
-        filter is applied on EVERY surface, ``mine`` included — only the
+        ``0`` for a childless link, so ``sublinkCount > 0`` is the only correct
+        "draw the affordance" test — ``isThreadRoot`` cannot be used, because it
+        is true for every ungrouped link too (see there).
+
+        Derived from the SAME loader call as ``sublinks``, which caches per
+        request, rather than from a count query of its own: one query instead of
+        two, and the chip is structurally incapable of disagreeing with the list
+        it labels. That property is why a descendant whose own parent is not
+        publicly visible is excluded from BOTH — counting a link the client
+        cannot reach through the nesting would break the agreement the moment
+        somebody hid a middle node.
+        """
+        return len(await _visible_subtree(info, self.id))
+
+    @strawberry_django.field
+    async def sublinks(self, info: Info) -> List["SocialMediaLinkScalar"]:
+        """This link's DIRECT children, in ``position`` order — the nested list.
+
+        Ordered by ``position``, the sibling sequence ``reorderSocialMediaLinks``
+        writes; not by ``occurred_at`` (that is the FEED's ordering — a group is a
+        conversation, not a timeline, and its members are not necessarily
+        contiguous in time) and not by ``id``.
+
+        ``[]`` for a childless link. That is not an error state, it is the
+        overwhelmingly common one, and it is why the chip test is on the count
+        rather than on ``isThreadRoot``.
+
+        **Recursive**: every element is a ``SocialMediaLinkScalar`` carrying the
+        same ``sublinks`` / ``sublinkCount`` / ``parentId`` fields, so a client
+        walks the nesting by asking each child for its own children. What the
+        read side returns is bounded by what the STORE holds
+        (``MAX_THREAD_DEPTH``, write side) and by what the client selects: a
+        deeper selection than we store simply comes back empty, never wrong. The
+        loader fetched each subtree whole, so the depth of the tree does not
+        change the number of queries.
+
+        Visibility-filtered with the shared predicate, exactly as
+        ``sublinkCount`` is — see ``services/social_link_visibility`` for why the
+        two copies of the rule (queryset-level and per-row) are deliberate and
+        why the filter applies on EVERY surface, ``mine`` included: only the
         queryset-level gates in ``get_public_social_media_links`` are exempt
-        there. See ``services/social_link_visibility.is_publicly_visible`` for
-        why the two deliberately differ.
+        there.
         """
-        members = await info.context.loaders["incident"]["thread_members"].load(self.id)
-        return [member for member in members if is_publicly_visible(member)]
+        rows = await _visible_subtree(info, self.id)
+        # The loader returns the subtree depth-first with siblings already in
+        # ``position`` order, so filtering on ``parent_id`` preserves that order:
+        # no field sorts, so no two fields can sort the same children differently.
+        return [row for row in rows if row.parent_id == self.id]
 
     @strawberry_django.field
     async def vote_score(self, info: Info) -> int:

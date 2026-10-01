@@ -205,18 +205,29 @@ class SocialMediaLinkMutations:
         self,
         info: Info,
         link_ids: List[strawberry.ID],
-        thread_id: Optional[strawberry.ID] = None,
+        parent_id: Optional[strawberry.ID] = None,
     ) -> GenericMutationReturn:
-        """Group links into one thread; omit ``threadId`` to start a new one.
+        """Group links as sublinks; omit ``parentId`` to start a new thread.
 
         Deliberately a dedicated id-only mutation rather than a mode of
         ``updateSocialMediaLink``: that input is REPLACE-NOT-PATCH (it blanks
         ``title`` and strips four M2M tag sets on every call), so routing a
         grouping action through it would silently destroy the links' metadata.
 
-        Returns the root's id in ``id`` so the client can refetch that one
-        thread (root + members) instead of guessing which row it now belongs
-        to — the same convention ``submitLineStatusReport`` uses.
+        Returns the root's id in ``id`` so the client can refetch that one thread
+        (root + sublinks) instead of guessing which row it now belongs to — the
+        same convention ``submitLineStatusReport`` uses.
+
+        ``parentId`` is a BREAKING RENAME of the previous ``threadId``, and
+        deliberately NOT an alias. An alias would keep accepting the old
+        argument and so keep serving the one-level behaviour it named: a client
+        sending ``threadId`` would go on nesting its links under the thread's
+        root and would never discover that the sublink level it now wants is
+        spelled differently. It is declared ``ID = null`` rather than a
+        ``Maybe`` because omitted and explicit null genuinely mean the same thing
+        here — "no target, elect a root" — and a ``Maybe`` would advertise a
+        third state that does not exist. ``reorderSocialMediaLinks`` below is the
+        opposite case, and does need one.
         """
         is_admin = await has_admin_claim(info.context.user)
         try:
@@ -224,7 +235,7 @@ class SocialMediaLinkMutations:
                 info.context.user,
                 is_admin=is_admin,
                 link_ids=[int(link_id) for link_id in link_ids],
-                thread_id=(int(thread_id) if thread_id is not None else None),
+                parent_id=(int(parent_id) if parent_id is not None else None),
             )
         except services.IncidentServiceError as exc:
             raise_service_error(exc)
@@ -234,14 +245,59 @@ class SocialMediaLinkMutations:
     async def ungroup_social_media_links(
         self, info: Info, link_ids: List[strawberry.ID]
     ) -> GenericMutationReturn:
-        """Detach the given links from their threads. ``ok`` only — there is no
-        row to name back, since ungrouping a root leaves its members in place.
+        """Detach the given links, promoting them to roots. ``ok`` only — there is
+        no row to name back, since a link's own sublinks stay attached to it.
         """
         is_admin = await has_admin_claim(info.context.user)
         try:
             await social_link_threads.ungroup_social_media_links(
                 info.context.user,
                 is_admin=is_admin,
+                link_ids=[int(link_id) for link_id in link_ids],
+            )
+        except services.IncidentServiceError as exc:
+            raise_service_error(exc)
+        return GenericMutationReturn(ok=True)
+
+    @strawberry.mutation(permission_classes=[IsLoggedIn])
+    async def reorder_social_media_links(
+        self,
+        info: Info,
+        link_ids: List[strawberry.ID],
+        parent_id: strawberry.Maybe[Optional[strawberry.ID]] = strawberry.UNSET,
+    ) -> GenericMutationReturn:
+        """Set one sibling sequence explicitly; ``ok`` only.
+
+        WHY A ``Maybe`` HERE AND NOT IN ``groupSocialMediaLinks``: there, omitted
+        and ``null`` mean the same thing (elect a root), so ``ID = null`` is the
+        honest signature. Here they are genuinely DIFFERENT requests — an explicit
+        ``parentId: null`` means "reorder the ROOTS" and is a real use (the
+        console deciding which link leads a thread), while an OMITTED
+        ``parentId`` names no sibling set at all. A plain ``ID = null`` would
+        silently answer the second with the first, so a client that forgot the
+        argument would reorder every root in the system.
+
+        The three states, all of which reach this resolver:
+
+        * UNSET (omitted) — falsy, because ``Some.__bool__`` is always ``True``
+          while ``UNSET`` is falsy. Rejected below.
+        * ``Some(None)`` — truthy, ``.value is None``: reorder the roots.
+        * ``Some(ID)`` — truthy, ``.value`` is the id: reorder that link's sublinks.
+        """
+        if not parent_id:
+            raise GraphQLError(
+                "reorderSocialMediaLinks requires parentId. Send an explicit "
+                "null to reorder the roots, or the id of the link whose sublinks "
+                "are being ordered."
+            )
+        is_admin = await has_admin_claim(info.context.user)
+        try:
+            await social_link_threads.reorder_social_media_links(
+                info.context.user,
+                is_admin=is_admin,
+                parent_id=(
+                    int(parent_id.value) if parent_id.value is not None else None
+                ),
                 link_ids=[int(link_id) for link_id in link_ids],
             )
         except services.IncidentServiceError as exc:

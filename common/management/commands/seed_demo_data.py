@@ -644,7 +644,10 @@ class Command(BaseCommand):
             )
         )
         link_qs = SocialMediaLink.objects.filter(user_id__in=user_ids)
-        link_ids = list(link_qs.values_list("id", flat=True))
+        # ``.order_by()`` clears the model default added by migration 0031
+        # (``Meta.ordering = ["position"]``): these ids are only a membership set
+        # for the vote filter below, so the implicit sibling rank buys nothing.
+        link_ids = list(link_qs.order_by().values_list("id", flat=True))
         content_type = ContentType.objects.get_for_model(SocialMediaLink)
         vote_qs = Vote.objects.filter(
             user_id__in=user_ids, content_type=content_type, object_id__in=link_ids

@@ -673,8 +673,9 @@ type Mutation {
   markSocialMediaLinkCompleted(socialMediaLinkId: ID!): GenericMutationReturn!
   updateSocialMediaLink(socialMediaLinkId: ID!, input: SocialMediaLinkInput!): GenericMutationReturn!
   deleteSocialMediaLink(socialMediaLinkId: ID!): GenericMutationReturn!
-  groupSocialMediaLinks(linkIds: [ID!]!, threadId: ID = null): GenericMutationReturn!
+  groupSocialMediaLinks(linkIds: [ID!]!, parentId: ID = null): GenericMutationReturn!
   ungroupSocialMediaLinks(linkIds: [ID!]!): GenericMutationReturn!
+  reorderSocialMediaLinks(linkIds: [ID!]!, parentId: ID): GenericMutationReturn!
   submitFeedLink(input: FeedLinkInput!): FeedLinkPayload!
   submitLineStatusReport(input: LineStatusReportInput!): GenericMutationReturn!
   upvoteSocialMediaLink(socialMediaLinkId: ID!): GenericMutationReturn!
@@ -824,15 +825,16 @@ type SocialMediaLinkScalar {
   completed: Boolean!
   completedAt: DateTime
   isAutomated: Boolean!
-  threadId: ID
+  parentId: ID
+  position: Int!
   user: UserScalar!
   categories: [CalendarIncidentCategoryScalar!]!
   lines: [Line!]!
   vehicles: [Vehicle!]!
   stations: [Station!]!
   isThreadRoot: Boolean!
-  threadSize: Int!
-  threadLinks: [SocialMediaLinkScalar!]!
+  sublinkCount: Int!
+  sublinks: [SocialMediaLinkScalar!]!
   voteScore: Int!
   voteBreakdown: VoteBreakdown!
   userVote: Int!

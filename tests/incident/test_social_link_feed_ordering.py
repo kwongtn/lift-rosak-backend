@@ -18,9 +18,19 @@ What is pinned here:
 * ``currentServiceDayOnly`` / ``lastWeekOnly`` / ``alignPageToDay`` keyed on
   ``occurred_at``, since a window on a different column than the ordering puts a
   backdated row at the top of a day it does not belong to;
-* ``collapseThreads`` — roots only, ``totalCount`` over roots, the flat default
-  unchanged, and no collapse under ``mine``;
-* the console queue's ``occurredAfter`` / ``occurredBefore`` and its ordering.
+* ``collapseThreads`` — roots only (``parent_id IS NULL``), ``totalCount`` over
+  roots, the flat default unchanged, and no collapse under ``mine``;
+* the query SHAPE the collapse and the windows produce: a collapsed page narrows
+  on ``parent_id IS NULL`` and never on the retired flat ``thread`` column, and
+  only a collapsed *windowed* page carries a recursive CTE at all — the flag is
+  false on every other surface, so an uncollapsed feed must not grow one;
+* ``_event_window`` widening to a DESCENDANT AT ANY DEPTH (a 3-level and a
+  4-level conversation), never rescuing a wholly out-of-window conversation and
+  never becoming restrictive;
+* the console queue's ``occurredAfter`` / ``occurredBefore`` and its ordering;
+* that both link resolvers still emit ``ORDER BY occurred_at DESC, id DESC``,
+  since ``Meta.ordering = ["position"]`` (inherited from ``OrderableTreeNode``)
+  now applies to any queryset that forgets to order.
 
 Runs under plain ``django.test.TestCase`` + ``asgiref.sync.async_to_sync`` and
 deliberately does NOT import pytest: pytest is not installed in the app image, so
@@ -33,7 +43,10 @@ from datetime import datetime, time, timedelta
 from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import async_to_sync
+from cachalot.api import cachalot_disabled
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from dotmap import DotMap
 
@@ -126,6 +139,38 @@ class SocialLinkFeedOrderingBase(TestCase):
 
     def _ids(self, feed):
         return [edge["node"]["id"] for edge in feed["edges"]]
+
+    def _feed_capture(self, *, page_only=False, **variables):
+        """Run the feed once and return ``(feed, sql_touching_the_link_table)``.
+
+        The shape assertions are about the SQL the resolver EMITS, not about the
+        rows it returns: "narrows on ``parent_id`` and never on ``thread``" and
+        "carries a recursive CTE only when collapsed AND windowed" are claims
+        about the query, and a passing result set can hide a wrong predicate.
+        The query selects only ``id``/``created``, so the scalar's own subtree
+        loader never runs and the only statements touching this table are the
+        count and the page.
+
+        ``cachalot_disabled`` is load-bearing, not decoration: the app has
+        ``cachalot`` installed, and it serves a repeated identical query from
+        cache without touching the database. A test that runs the same feed
+        twice — once for the rows, once for the SQL — would then capture
+        *nothing* and every shape assertion over that empty string would pass
+        vacuously, which is precisely the failure these assertions exist to
+        catch. ``page_only`` drops the ``totalCount`` statement, which is
+        legitimately unordered because the count is taken before ``order_by``.
+        """
+        with cachalot_disabled(), CaptureQueriesContext(connection) as ctx:
+            feed = self._feed(first=10, **variables)
+        return feed, "\n".join(
+            query["sql"]
+            for query in ctx.captured_queries
+            if "incident_socialmedialink" in query["sql"]
+            and not (page_only and "COUNT(" in query["sql"])
+        )
+
+    def _link_sql(self, **variables):
+        return self._feed_capture(**variables)[1]
 
     def _console(self, *, after=None, before=None):
         # A ``Maybe[datetime]`` argument may be OMITTED but not explicitly null
@@ -341,37 +386,60 @@ class FeedWindowTests(SocialLinkFeedOrderingBase):
         # The rows really do disagree, so the assertion above is not vacuous.
         self.assertLess(in_day.created, out_of_day.created)
 
-    def test_collapsed_thread_enters_the_window_by_a_member_even_when_its_root_is_out(
+    def _conversation(self, slug, *occurred_at):
+        """A chain of links, each hung under the one before it.
+
+        Returns the chain root-first, so ``chain[0]`` is the root and
+        ``chain[-1]`` is the deepest sublink. Nesting is what the feed now has to
+        reason about: "in the conversation" is an arbitrary-depth question, so
+        the fixtures are built by descending rather than by attaching siblings
+        to a single root.
+        """
+        chain = []
+        parent = None
+        for index, instant in enumerate(occurred_at):
+            link = self._link(f"{slug}-{index}", occurred_at=instant, parent=parent)
+            chain.append(link)
+            parent = link
+        return chain
+
+    def test_a_collapsed_conversation_enters_the_window_by_a_sublink_two_levels_down(
         self,
     ):
-        """A collapsed card is admitted by the WHOLE thread, not by its root.
+        """A collapsed card is admitted by the WHOLE SUBTREE, not by its root.
 
-        Grouping elects the EARLIEST link as root, so the root is the thread's
-        first event and every member is LATER than it. That makes "the root is
-        outside the window while a member is inside it" the ORDINARY shape for
-        any conversation that opened before the window and got a follow-up
-        inside it — it needs no ``occurredAt`` edit to happen and is not an edge
-        case. A root-keyed window then drops the whole thread from a feed the
-        member belongs in, and the member becomes unreachable: the collapsed
-        surface renders the ROOT, and the root was filtered out.
+        Grouping elects the EARLIEST link as root, so the root is the
+        conversation's first event and every descendant is LATER than it. That
+        makes "the root is outside the window while something below it is inside
+        it" the ORDINARY shape for any conversation that opened before the
+        window and got a follow-up inside it — it needs no ``occurredAt`` edit
+        to happen and is not an edge case. A root-keyed window then drops the
+        whole conversation from a feed the follow-up belongs in, and the
+        follow-up becomes unreachable: the collapsed surface renders the ROOT,
+        and the root was filtered out.
 
-        The window asks "what happened today". A thread is in it if any part of
-        it happened today.
+        Depth 2 is where the one-level design ran out: a sublink of a sublink is
+        exactly the case a "has a parent" test could not express.
         """
         boundary = service_day_start(timezone.now())
 
-        # Conversation opened yesterday, someone posts a follow-up today.
-        root = self._link("window-root-stale", occurred_at=boundary - timedelta(days=1))
-        member = self._link(
-            "window-member-fresh", occurred_at=boundary + timedelta(hours=6)
+        # Opened two days ago, a reply yesterday, and the follow-up that
+        # actually happened today is two levels below the root.
+        root, reply, follow_up = self._conversation(
+            "window-deep",
+            boundary - timedelta(days=2),
+            boundary - timedelta(days=1),
+            boundary + timedelta(hours=6),
         )
-        SocialMediaLink.objects.filter(pk=member.pk).update(thread=root)
 
-        # The root-keyed reading would return an empty page; only the thread-wide
-        # reading returns anything. Assert the shape so the test cannot pass
-        # vacuously on a fixture where the two readings happen to agree.
+        # The root-keyed reading would return an empty page; only the
+        # subtree-wide reading returns anything. Assert the shape so the test
+        # cannot pass vacuously on a fixture where the two readings agree.
         self.assertLess(root.occurred_at, boundary)
-        self.assertGreaterEqual(member.occurred_at, boundary)
+        self.assertLess(reply.occurred_at, boundary)
+        self.assertGreaterEqual(follow_up.occurred_at, boundary)
+        self.assertEqual(follow_up.parent_id, reply.id)
+        self.assertEqual(reply.parent_id, root.id)
 
         collapsed = self._feed(
             first=10, currentServiceDayOnly=True, collapseThreads=True
@@ -379,43 +447,151 @@ class FeedWindowTests(SocialLinkFeedOrderingBase):
         self.assertEqual(self._ids(collapsed), [str(root.id)])
         self.assertEqual(collapsed["totalCount"], 1)
 
-        # The member rides inside that card rather than being dropped from the
-        # feed, which is the difference between "not listed" and "not reachable".
-        # The FLAT feed still judges the member on its own ``occurred_at`` — the
-        # widening belongs to collapse, it does not rewrite anyone's date — and
-        # returns the member as its own row.
+        # The follow-up rides inside that card rather than being dropped from
+        # the feed, which is the difference between "not listed" and "not
+        # reachable". The FLAT feed still judges each row on its own
+        # ``occurred_at`` — the widening belongs to collapse, it does not rewrite
+        # anyone's date — and returns the follow-up as its own row.
         flat = self._feed(first=10, currentServiceDayOnly=True)
-        self.assertEqual(self._ids(flat), [str(member.id)])
+        self.assertEqual(self._ids(flat), [str(follow_up.id)])
 
-    def test_a_thread_entirely_outside_the_window_stays_out(self):
-        # The converse guard: widening must not admit threads with nothing in
-        # the window, or the flag would stop being a filter at all.
+    def test_a_collapsed_conversation_enters_the_window_by_a_sublink_three_levels_down(
+        self,
+    ):
+        """Same argument one level deeper: a great-grandchild is still "in".
+
+        Nothing about the window is depth-limited: the write side caps how deep
+        real data gets, but the read side must not assume a depth it was not
+        told. If the widening were rewritten as a fixed number of hops, this
+        fixture is where it would start returning an empty page while every
+        shallower test still passed.
+        """
         boundary = service_day_start(timezone.now())
-        # Both beyond the 7-day window (which reaches back six days).
-        root = self._link("stale-root", occurred_at=boundary - timedelta(days=10))
-        member = self._link("stale-member", occurred_at=boundary - timedelta(days=12))
-        SocialMediaLink.objects.filter(pk=member.pk).update(thread=root)
+
+        root, level_1, level_2, level_3 = self._conversation(
+            "window-deeper",
+            boundary - timedelta(days=3),
+            boundary - timedelta(days=2),
+            boundary - timedelta(days=1),
+            boundary + timedelta(hours=6),
+        )
+
+        self.assertLess(level_2.occurred_at, boundary)
+        self.assertGreaterEqual(level_3.occurred_at, boundary)
+        self.assertEqual(level_3.parent_id, level_2.id)
+
+        collapsed = self._feed(
+            first=10, currentServiceDayOnly=True, collapseThreads=True
+        )
+        self.assertEqual(self._ids(collapsed), [str(root.id)])
+        self.assertEqual(collapsed["totalCount"], 1)
+
+    def test_a_conversation_entirely_outside_the_window_stays_out(self):
+        # The converse guard: widening must not admit conversations with nothing
+        # in the window, or the flag would stop being a filter at all. A three-
+        # level chain, because the failure mode this guards is an OR that
+        # disables itself — and a naive implementation of that OR is exactly
+        # what a recursive EXISTS invites.
+        boundary = service_day_start(timezone.now())
+        # Every level beyond the 7-day window (which reaches back six days).
+        root, reply, follow_up = self._conversation(
+            "stale",
+            boundary - timedelta(days=10),
+            boundary - timedelta(days=11),
+            boundary - timedelta(days=12),
+        )
 
         collapsed = self._feed(first=10, lastWeekOnly=True, collapseThreads=True)
 
-        # Only the root is even a candidate, and neither it nor its member is in
-        # the window — so the widened predicate must not rescue it.
+        # Only the root is even a candidate, and nothing in its subtree is in the
+        # window — so the widened predicate must not rescue it.
         self.assertLess(root.occurred_at, last_week_start(timezone.now()))
+        self.assertLess(follow_up.occurred_at, last_week_start(timezone.now()))
         self.assertEqual(self._ids(collapsed), [])
         self.assertEqual(collapsed["totalCount"], 0)
 
-    def test_a_root_in_window_keeps_its_thread_even_if_no_member_is(self):
+    def test_a_root_in_window_keeps_its_conversation_even_if_no_sublink_is(self):
         # Widening is additive, never restrictive: a root inside the window is
         # admitted on its own ``occurred_at`` exactly as the flat feed would.
         boundary = service_day_start(timezone.now())
         root = self._link("fresh-root", occurred_at=boundary + timedelta(hours=2))
-        member = self._link("older-member", occurred_at=boundary - timedelta(days=10))
-        SocialMediaLink.objects.filter(pk=member.pk).update(thread=root)
+        child = self._link(
+            "older-child", occurred_at=boundary - timedelta(days=10), parent=root
+        )
+        grandchild = self._link(
+            "older-grandchild",
+            occurred_at=boundary - timedelta(days=11),
+            parent=child,
+        )
 
         collapsed = self._feed(first=10, lastWeekOnly=True, collapseThreads=True)
 
-        self.assertLess(member.occurred_at, last_week_start(timezone.now()))
+        self.assertLess(grandchild.occurred_at, last_week_start(timezone.now()))
         self.assertEqual(self._ids(collapsed), [str(root.id)])
+
+    def test_the_uncollapsed_feed_has_no_recursive_subquery(self):
+        """The widening is built ONLY on the collapsed path.
+
+        ``collapseThreads`` is false on every other surface, so if the recursive
+        subquery were built unconditionally every one of them would inherit a
+        recursive walk it has no use for. Asserted on the emitted SQL rather
+        than on the results, because the rows are identical either way — that is
+        the whole point.
+        """
+        boundary = service_day_start(timezone.now())
+        self._conversation(
+            "shape", boundary - timedelta(days=1), boundary + timedelta(hours=1)
+        )
+
+        self.assertNotIn("WITH RECURSIVE", self._link_sql(currentServiceDayOnly=True))
+        self.assertNotIn("WITH RECURSIVE", self._link_sql(lastWeekOnly=True))
+        # Collapsing without a window is likewise free of recursion: the root
+        # narrowing is a plain indexed null test on ``parent_id``.
+        self.assertNotIn("WITH RECURSIVE", self._link_sql(collapseThreads=True))
+        # ...and turning the window on under collapse is what introduces it.
+        self.assertIn(
+            "WITH RECURSIVE",
+            self._link_sql(collapseThreads=True, currentServiceDayOnly=True),
+        )
+
+    def test_both_window_flags_together_carry_one_recursive_cte_each(self):
+        """Two windows, two subqueries, two CTEs that share a name.
+
+        Both flags compose on one queryset, so one statement carries the
+        library's ``__tree`` CTE twice, once per subquery. Each is scoped to its
+        own sub-select, so the shadowing is legal — but it is exactly the kind
+        of thing that turns into "WITH RECURSIVE ... duplicate" or a silent
+        cross-talk between the two walks, so the combination is pinned.
+        """
+        boundary = service_day_start(timezone.now())
+        root, child = self._conversation("both", boundary - timedelta(days=1), boundary)
+
+        # One execution, both halves: the rows and the statement that produced
+        # them, so the SQL assertion cannot be handed an empty capture.
+        collapsed, sql = self._feed_capture(
+            currentServiceDayOnly=True,
+            lastWeekOnly=True,
+            collapseThreads=True,
+        )
+        # The fixture's root is out of both windows, its child is in both, so
+        # the collapse admits exactly that one root.
+        self.assertEqual(self._ids(collapsed), [str(root.id)])
+        self.assertEqual(collapsed["totalCount"], 1)
+        self.assertEqual(child.parent_id, root.id)
+        # Two per statement — the page fetch and the ``totalCount`` query, which
+        # runs the same widened predicate. Four in total, which is also the proof
+        # that the count is taken AFTER the windows: a count taken before them
+        # would carry no CTE at all and would disagree with the page.
+        self.assertEqual(sql.count("WITH RECURSIVE"), 4)
+        self.assertEqual(
+            self._feed_capture(
+                page_only=True,
+                currentServiceDayOnly=True,
+                lastWeekOnly=True,
+                collapseThreads=True,
+            )[1].count("WITH RECURSIVE"),
+            2,
+        )
 
     def test_last_week_only_windows_on_occurred_at(self):
         now = timezone.now()
@@ -511,13 +687,15 @@ class AlignPageToDayTests(SocialLinkFeedOrderingBase):
 
 
 class CollapseThreadsTests(SocialLinkFeedOrderingBase):
-    def _thread_fixture(self):
-        """Two threads whose members are interleaved by ``occurred_at``.
+    def _tree_fixture(self):
+        """Two conversations whose sublinks are interleaved by ``occurred_at``.
 
-        Ordering by event time is what breaks client-side grouping: the members
-        of a thread are not adjacent, so a flat page cannot be regrouped after
-        the fact. ``root_a``/``root_b`` are the roots (earliest event of their
-        group, matching the grouping service's root selection).
+        Ordering by event time is what breaks client-side grouping: a
+        conversation's sublinks are not adjacent, so a flat page cannot be
+        regrouped after the fact. ``root_a``/``root_b`` are the roots (earliest
+        event of their conversation, matching the grouping service's root
+        selection), and ``child_a``/``grandchild_a`` make it a real TREE rather
+        than the flat one-level group the flag used to describe.
         """
         day = timezone.now().date()
 
@@ -526,30 +704,34 @@ class CollapseThreadsTests(SocialLinkFeedOrderingBase):
 
         root_a = self._link("thread-root-a", occurred_at=at(9))
         solo = self._link("thread-solo", occurred_at=at(10))
-        member_a = self._link("thread-member-a", occurred_at=at(11), thread=root_a)
+        child_a = self._link("thread-child-a", occurred_at=at(11), parent=root_a)
         root_b = self._link("thread-root-b", occurred_at=at(12))
-        member_b = self._link("thread-member-b", occurred_at=at(13), thread=root_b)
-        return root_a, solo, member_a, root_b, member_b
+        child_b = self._link("thread-child-b", occurred_at=at(13), parent=root_b)
+        grandchild_a = self._link(
+            "thread-grandchild-a", occurred_at=at(14), parent=child_a
+        )
+        return root_a, solo, child_a, root_b, child_b, grandchild_a
 
     def test_collapse_returns_only_roots_and_counts_them(self):
-        root_a, solo, member_a, root_b, member_b = self._thread_fixture()
+        root_a, solo, child_a, root_b, child_b, grandchild_a = self._tree_fixture()
 
         flat = self._feed(first=10, collapseThreads=False)
         collapsed = self._feed(first=10, collapseThreads=True)
 
-        # Members are not adjacent in the flat order — the premise for
+        # Sublinks are not adjacent in the flat order — the premise for
         # collapsing at all.
         self.assertEqual(
             self._ids(flat),
             [
-                str(member_b.id),
+                str(grandchild_a.id),
+                str(child_b.id),
                 str(root_b.id),
-                str(member_a.id),
+                str(child_a.id),
                 str(solo.id),
                 str(root_a.id),
             ],
         )
-        self.assertEqual(flat["totalCount"], 5)
+        self.assertEqual(flat["totalCount"], 6)
 
         self.assertEqual(
             self._ids(collapsed), [str(root_b.id), str(solo.id), str(root_a.id)]
@@ -558,18 +740,59 @@ class CollapseThreadsTests(SocialLinkFeedOrderingBase):
         self.assertEqual(collapsed["totalCount"], 3)
 
         returned = {int(node_id) for node_id in self._ids(collapsed)}
-        self.assertNotIn(member_a.id, returned)
-        self.assertNotIn(member_b.id, returned)
+        self.assertNotIn(child_a.id, returned)
+        self.assertNotIn(child_b.id, returned)
+        self.assertNotIn(grandchild_a.id, returned)
         self.assertTrue(
-            all(SocialMediaLink.objects.get(pk=pk).thread_id is None for pk in returned)
+            all(SocialMediaLink.objects.get(pk=pk).parent_id is None for pk in returned)
         )
-        # The members themselves are untouched in storage — this is a read-side
+        # The sublinks themselves are untouched in storage — this is a read-side
         # narrowing, not a re-parenting.
-        self.assertEqual(SocialMediaLink.objects.count(), 5)
-        self.assertIsNotNone(SocialMediaLink.objects.get(pk=member_a.id).thread_id)
+        self.assertEqual(SocialMediaLink.objects.count(), 6)
+        self.assertEqual(
+            SocialMediaLink.objects.get(pk=child_a.id).parent_id, root_a.id
+        )
+        self.assertEqual(
+            SocialMediaLink.objects.get(pk=grandchild_a.id).parent_id, child_a.id
+        )
+
+    def test_collapse_narrows_on_parent_id_and_never_on_the_retired_thread_column(self):
+        # The predicate is a claim about the schema, not about the rows: the
+        # flat ``thread`` self-FK is gone, and "is a root" is now the single
+        # structural statement ``parent_id IS NULL``. Captured from the SQL the
+        # resolver emitted, because a result-set assertion cannot tell a correct
+        # predicate from a fixture that happens to agree with a wrong one.
+        self._tree_fixture()
+
+        collapsed = self._link_sql(collapseThreads=True)
+        self.assertIn('"incident_socialmedialink"."parent_id" IS NULL', collapsed)
+        self.assertNotIn("thread_id", collapsed)
+
+        flat = self._link_sql(collapseThreads=False)
+        self.assertNotIn('"incident_socialmedialink"."parent_id" IS NULL', flat)
+        self.assertNotIn("thread_id", flat)
+
+    def test_a_three_level_conversation_collapses_to_its_root_alone(self):
+        # The nesting case: two hops below the root, so a collapse that still
+        # thought in terms of "one member per thread" would put a sublink of a
+        # sublink on the page as if it were a card of its own.
+        root_a, solo, child_a, root_b, child_b, grandchild_a = self._tree_fixture()
+
+        collapsed = self._feed(first=10, collapseThreads=True)
+
+        self.assertEqual(grandchild_a.parent_id, child_a.id)
+        self.assertEqual(child_a.parent_id, root_a.id)
+        self.assertEqual(
+            self._ids(collapsed), [str(root_b.id), str(solo.id), str(root_a.id)]
+        )
+        self.assertNotIn(str(grandchild_a.id), self._ids(collapsed))
+        # Still one card per conversation, so the count is roots — three
+        # conversations (root_a's two-level one, root_b's, and the unthreaded
+        # link), not six links.
+        self.assertEqual(collapsed["totalCount"], 3)
 
     def test_default_flat_feed_is_identical_to_explicit_false(self):
-        self._thread_fixture()
+        self._tree_fixture()
 
         omitted = self._feed(first=10)
         explicit = self._feed(first=10, collapseThreads=False)
@@ -577,15 +800,15 @@ class CollapseThreadsTests(SocialLinkFeedOrderingBase):
         # "Byte-identical to today's behaviour": same ids, same cursors, same
         # count, same page info.
         self.assertEqual(omitted, explicit)
-        self.assertEqual(omitted["totalCount"], 5)
+        self.assertEqual(omitted["totalCount"], 6)
         self.assertFalse(omitted["pageInfo"]["hasNextPage"])
 
     def test_collapse_is_ignored_under_mine(self):
-        root_a, solo, member_a, root_b, member_b = self._thread_fixture()
+        root_a, solo, child_a, root_b, child_b, grandchild_a = self._tree_fixture()
         other = User.objects.create(firebase_id="feed-ordering-other")
         stranger = self._link(
             "thread-stranger",
-            occurred_at=datetime.combine(timezone.now().date(), time(14, 0)),
+            occurred_at=datetime.combine(timezone.now().date(), time(15, 0)),
             user=other,
         )
 
@@ -597,18 +820,90 @@ class CollapseThreadsTests(SocialLinkFeedOrderingBase):
         )
 
         # "My Submitted Links" is a personal list: every row the caller
-        # submitted is a row they expect to find, members included.
+        # submitted is a row they expect to find, sublinks included — at every
+        # depth, since a submitter nesting a reply is still their own row.
         own_ids = {
             str(root_a.id),
             str(solo.id),
-            str(member_a.id),
+            str(child_a.id),
             str(root_b.id),
-            str(member_b.id),
+            str(child_b.id),
+            str(grandchild_a.id),
         }
         self.assertEqual(flat_mine, collapsed_mine)
         self.assertEqual(set(self._ids(collapsed_mine)), own_ids)
-        self.assertEqual(collapsed_mine["totalCount"], 5)
+        self.assertEqual(collapsed_mine["totalCount"], 6)
         self.assertNotIn(str(stranger.id), self._ids(collapsed_mine))
+        # ...and the suppression is visible in the SQL: no root narrowing at all.
+        self.assertNotIn(
+            '"incident_socialmedialink"."parent_id" IS NULL',
+            self._link_sql(mine=True, collapseThreads=True),
+        )
+
+    def test_the_collapsed_page_cursor_still_encodes_occurred_at_and_id(self):
+        # The collapse must not disturb the cursor contract: a page unit is a
+        # root, but the keyset is still the (occurred_at, id) pair the ordering
+        # uses, or a cursor minted from this page would not resume anywhere.
+        root_a, solo, child_a, root_b, child_b, grandchild_a = self._tree_fixture()
+
+        collapsed = self._feed(first=10, collapseThreads=True)
+
+        for edge in collapsed["edges"]:
+            node = SocialMediaLink.objects.get(pk=int(edge["node"]["id"]))
+            self.assertEqual(
+                decode_keyset_cursor(edge["cursor"]), (node.occurred_at, node.id)
+            )
+        self.assertEqual(
+            collapsed["pageInfo"]["endCursor"], collapsed["edges"][-1]["cursor"]
+        )
+
+    def test_collapse_reaches_only_the_public_feed_and_the_other_hosts_stay_flat(self):
+        """``/insiden``, the situasi tab and the per-incident lists stay flat.
+
+        They are separate surfaces that render every link as its own card, so
+        they must keep returning the whole tree un-collapsed and complete. The
+        structural half of that is in the schema: ``collapseThreads`` exists on
+        exactly one field, so those hosts cannot ask for a collapse even by
+        accident. The behavioural half is below — the console queue (the same
+        flat-list shape) returns all three levels of a conversation.
+        """
+        sdl = schema.as_str()
+        carriers = [
+            line.strip() for line in sdl.splitlines() if "collapseThreads" in line
+        ]
+        self.assertEqual(
+            len(carriers),
+            1,
+            f"collapseThreads must exist on exactly one field, found: {carriers}",
+        )
+        self.assertTrue(carriers[0].startswith("publicSocialMediaLinks("))
+        # The per-incident ``CalendarIncidentScalar.links`` (the /insiden and
+        # situasi shape) takes no collapse argument either.
+        scalar_block = sdl.split("type CalendarIncidentScalar {")[1].split("\n}")[0]
+        self.assertIn("links(first:", scalar_block)
+        self.assertNotIn("collapseThreads", scalar_block)
+        # ...and the console queue's own signature is collapse-free by
+        # construction, so the assertion above is not an artefact of this file.
+        self.assertNotIn("collapseThreads", CONSOLE_QUERY)
+
+        root_a, solo, child_a, root_b, child_b, grandchild_a = self._tree_fixture()
+
+        rows = self._console()
+
+        # Every level of every conversation, flat and complete, in the queue's
+        # own ``-occurred_at, -id`` order.
+        self.assertEqual(
+            [row["id"] for row in rows],
+            [
+                str(grandchild_a.id),
+                str(child_b.id),
+                str(root_b.id),
+                str(child_a.id),
+                str(solo.id),
+                str(root_a.id),
+            ],
+        )
+        self.assertEqual(SocialMediaLink.objects.filter(parent__isnull=True).count(), 3)
 
 
 class ConsoleQueueOrderingTests(SocialLinkFeedOrderingBase):
@@ -705,3 +1000,62 @@ class ConsoleQueueOrderingTests(SocialLinkFeedOrderingBase):
             )
         self.assertIsNotNone(result.errors)
         self.assertIn("createdAfter", str(result.errors))
+
+
+class ExplicitOrderByTests(SocialLinkFeedOrderingBase):
+    """``Meta.ordering`` is now ``["position"]``, so ``-occurred_at, -id`` is
+    an EXPLICIT choice on every link surface — not an inherited default.
+
+    ``SocialMediaLink`` inherits ``OrderableTreeNode``, which sets
+    ``Meta.ordering = ["position"]`` for sibling sequencing. That default now
+    applies to any queryset that forgets to order itself, and it is a perfectly
+    plausible order to inherit by accident: a plain queryset would come back
+    clustered by insertion, ordered by a column that is global rather than
+    grouped by parent. Both link resolvers already ordered explicitly, so this
+    is a re-confirmation rather than a fix — but "already correct" is exactly
+    the kind of claim that silently stops being true, and the emitted SQL is the
+    only place it is visible.
+    """
+
+    FEED_ORDER = 'ORDER BY "incident_socialmedialink"."occurred_at" DESC, "incident_socialmedialink"."id" DESC'
+
+    def test_the_public_feed_still_orders_by_occurred_at_desc_id_desc(self):
+        day = timezone.now().date()
+        self._link("order-explicit-a", occurred_at=datetime.combine(day, time(9)))
+        self._link("order-explicit-b", occurred_at=datetime.combine(day, time(12)))
+
+        page_sql = self._feed_capture(page_only=True)[1]
+
+        self.assertIn(self.FEED_ORDER, page_sql)
+        # Not the inherited default, in either spelling.
+        self.assertNotIn('ORDER BY "incident_socialmedialink"."position"', page_sql)
+
+    def test_a_collapsed_page_still_orders_by_occurred_at_desc_id_desc(self):
+        day = timezone.now().date()
+        root = self._link("order-root", occurred_at=datetime.combine(day, time(9)))
+        self._link(
+            "order-child",
+            occurred_at=datetime.combine(day, time(10)),
+            parent=root,
+        )
+
+        page_sql = self._feed_capture(page_only=True, collapseThreads=True)[1]
+
+        self.assertIn(self.FEED_ORDER, page_sql)
+        self.assertNotIn('ORDER BY "incident_socialmedialink"."position"', page_sql)
+
+    def test_the_console_queue_still_orders_by_occurred_at_desc_id_desc(self):
+        day = timezone.now().date()
+        self._link("queue-order-a", occurred_at=datetime.combine(day, time(9)))
+        self._link("queue-order-b", occurred_at=datetime.combine(day, time(12)))
+
+        with cachalot_disabled(), CaptureQueriesContext(connection) as ctx:
+            self._console()
+
+        queue_sql = "\n".join(
+            query["sql"]
+            for query in ctx.captured_queries
+            if "incident_socialmedialink" in query["sql"]
+        )
+        self.assertIn(self.FEED_ORDER, queue_sql)
+        self.assertNotIn('ORDER BY "incident_socialmedialink"."position"', queue_sql)

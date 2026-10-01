@@ -1,17 +1,28 @@
 """Single source of truth for "may this link be shown to the public?".
 
-``get_public_social_media_links`` inlines the two exclusion gates below, and
-the threaded card needs the same answer per *member* link (``threadLinks`` /
-``threadSize`` count what a visitor would actually be able to open, not what is
-merely attached to the root). Two copies of a moderation rule is how a public
-feed ends up leaking hidden rows through a thread badge, so the rule lives here
-and every surface imports it.
+``get_public_social_media_links`` inlines the two exclusion gates below, and the
+nested link tree needs the same answer per *sublink* (``sublinks`` /
+``sublinkCount`` count what a visitor would actually be able to open, not what is
+merely attached to the row above it). Two copies of a moderation rule is how a
+public feed ends up leaking hidden rows through a thread badge, so the rule lives
+here and every surface imports it.
 
 Imported by name as
 ``from incident.services.social_link_visibility import is_publicly_visible`` —
 this module is deliberately *not* re-exported from ``incident.services`` so a
 modest addition cannot drag the whole service package into a scalar field's
 import graph.
+
+WHERE IT IS APPLIED — EXACTLY ONE PLACE
+---------------------------------------
+The only importer in the tree is ``incident.schema.scalars``, and it applies the
+predicate in exactly one function, ``_publicly_visible_subtree``. ``sublinks``
+and ``sublinkCount`` are two reads of that one function's output, so the badge
+cannot disagree with the list it labels. The loader
+(``incident.schema.loaders.batch_load_sublink_subtrees``) returns RAW rows and
+never filters, precisely so this module stays the only copy of the rule; see its
+docstring for why duplicating it as a queryset ``.exclude()`` there is the
+failure mode this arrangement exists to prevent.
 """
 
 from incident.enums import SocialMediaLinkStatus
@@ -33,7 +44,7 @@ def is_publicly_visible(link: SocialMediaLink) -> bool:
       pair under ``mine``, so an owner still sees their own HIDDEN and
       unapproved-automated rows on "My Submitted Links";
     * this *per-row* predicate is applied unconditionally — by the scalar's
-      ``threadLinks`` / ``threadSize`` on every surface, ``mine`` included.
+      ``sublinks`` / ``sublinkCount`` on every surface, ``mine`` included.
 
     So a hidden member is not listed inside a thread on the ``mine`` page either.
     The coherence argument: the owner's own list is a list of *their

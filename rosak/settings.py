@@ -113,6 +113,8 @@ INSTALLED_APPS = [
     "safedelete",
     "simple_history",
     "cachalot",
+    # nested, ordered link trees; raises tree_queries.E001 if omitted
+    "tree_queries",
     "operation",
     "common",
     "reporting",

@@ -6,7 +6,8 @@ import pendulum
 import strawberry
 from asgiref.sync import sync_to_async
 from django.contrib.contenttypes.models import ContentType
-from django.db.models import Count, Exists, Min, OuterRef, Q
+from django.db.models import BigIntegerField, Count, Min, Q, QuerySet
+from django.db.models.expressions import RawSQL
 from django.utils import timezone
 from strawberry.exceptions import GraphQLError
 from strawberry.types import Info
@@ -305,49 +306,178 @@ def last_week_start(now: datetime) -> datetime:
     return datetime.combine((now - timedelta(days=6)).date(), time.min)
 
 
+def _in_window_subtree_roots(bound: datetime) -> QuerySet:
+    """Subquery of the root ids whose subtree holds a link at/after ``bound``.
+
+    The shape is a *single un-correlated* recursive CTE, folded into the
+    caller's filter as ``pk__in`` — one SQL statement, one tree walk, no
+    per-row subquery. Read ``tree_path[1]`` as "the root of the tree this row
+    belongs to", so the set is exactly "the conversations that had something
+    happen in this window", which is the question a window asks.
+
+    WHY NOT THE OBVIOUS CORRELATED ``EXISTS``. The previous wave correlated
+    ``Exists`` against the outer row's ``pk``, which was a two-hop indexed
+    lookup and cheap. The same shape at tree depth means "is any descendant of
+    this row in the window", which can only be answered by walking the subtree
+    — so the correlated subquery would have to run the recursion *per candidate
+    root*. A correlated SubPlan re-executes on every outer row (there is no
+    correlation-free part Postgres can hoist out of it), and ``EXPLAIN
+    (ANALYZE)`` on the hand-written correlated form shows exactly that: a
+    ``Recursive Union`` nested inside ``EXISTS(SubPlan 2)``, i.e. one full
+    ``Seq Scan`` of the table as the CTE anchor per row. Un-correlated, the
+    planner turns the same work into ``ANY (id = (hashed SubPlan N).col1)`` with
+    the subplan at ``loops=1``: the walk happens once, is hashed, and the outer
+    scan probes it. One walk per query instead of one per row is the whole
+    difference, and the ORM cannot even express the correlated form — its
+    ``tree_path__contains`` lookup is literal-only (``OuterRef("pk")`` raises
+    ``TypeError: Field 'id' expected a number but got Col(...)``) and
+    ``RawSQL`` cannot carry an ``OuterRef`` *parameter*
+    (``can't adapt type 'OuterRef'``), so the outer column would have to be
+    interpolated as guessed alias text. The un-correlated form is both cheaper
+    and the only one that is writable without guessing at aliases.
+
+    WHY THE SUBTREE ROOT AND NOT "THE ANCESTORS OF THE ROW". Because the caller
+    filters to roots, the only ancestor that can match a candidate row is the
+    root, and every node in a tree shares one — so mapping each in-window node
+    to its tree's root loses nothing and yields a set the size of the number of
+    conversations rather than the number of links. It also folds the "the root
+    itself is in the window" case in for free: a root's own ``tree_path`` is
+    ``[root]``, so ``tree_path[1]`` is the root and the row admits itself
+    without a second code path. ``_event_window`` still ORs the plain
+    ``occurred_at >= bound`` in so the widening is *additive by construction* —
+    a root inside the window stays in even if this subquery were wrong.
+
+    WHY THE SUBQUERY IS DELIBERATELY UNFILTERED (no status, no moderation
+    excludes, no ``incident_id``). The window asks "what happened in this
+    window", and what happened does not stop being a fact because a member was
+    hidden — and the moderation asymmetry is *root-only* by design (see
+    ``_event_window``), so letting a member's status decide whether its
+    conversation appears would smuggle the gate back in through the widening.
+    Everything that decides *visibility* stays on the outer query, which is the
+    queryset that actually returns rows. The price is that the walk covers the
+    whole table rather than the page: bounded by the table, not by page size,
+    and paid only when a window flag and ``collapse_threads`` are both on.
+
+    ``RawSQL`` here is not a shortcut past the ORM, it is the one thing the ORM
+    has no expression for. ``__tree`` is the CTE django-tree-queries prepends to
+    every tree query and inner-joins to the base table on ``__tree.tree_pk =
+    socialmedialink.id``; the name is part of that library's compiler contract
+    (its own ``TreeColumn`` annotation renders the same identifier, and
+    ``TreeJoin.table_name`` is the declaration), not a private detail, and the
+    only alternative — a hand-rolled recursive CTE walking ``parent_id`` upward
+    — would be a second, unreviewed implementation of the tree in raw SQL. A
+    rename upstream surfaces as a ``ProgrammingError`` on the first collapsed
+    windowed feed, not as a silently empty list. The ``::bigint`` cast matches
+    the pk type so the comparison holds whatever the pk's integer width is; the
+    array is 1-based, hence index 1 for the root.
+
+    🔴 ``tree_filter``/``tree_exclude`` — the library's documented performance
+    lever — are NOT used here, and applying them to this bound is not merely
+    slower, it is **wrong**. They restrict the base table *before* the
+    recursion, so filtering the rank table down to the in-window rows deletes
+    the out-of-window root from the CTE, the recursion can no longer reach
+    anything below it, and each orphaned descendant becomes a root of its own
+    truncated tree: ``tree_path[1]`` then returns the descendant instead of the
+    conversation's real root, and the widening silently stops working. Verified
+    against a 3-level tree whose root and child are both out of window — the
+    unfiltered subquery admits the root, the ``tree_filter``-ed one does not. It
+    also forfeits the cheap CTE: any tree filter forces the ``__rank_table``
+    variant with a ``ROW_NUMBER()`` window over the whole table, where the
+    unfiltered query gets the ``__tree``-only template.
+    """
+    return (
+        SocialMediaLink.objects.with_tree_fields()
+        .filter(occurred_at__gte=bound)
+        .annotate(
+            subtree_root=RawSQL(
+                "(__tree.tree_path[1])::bigint",
+                (),
+                output_field=BigIntegerField(),
+            )
+        )
+        # ``.distinct()`` is load-bearing twice over: it is the deduplication the
+        # set needs (a conversation with four in-window links would otherwise be
+        # listed four times), and it is what suppresses the library's implicit
+        # depth-first ``ORDER BY __tree.tree_ordering`` — a sort of every row in
+        # the table on an un-indexable computed array, for a subquery whose
+        # result is only ever probed for membership. The library skips both the
+        # ordering and the tree columns in a ``DISTINCT`` subquery, and an
+        # explicit ``.order_by()`` does NOT have that effect (the tree compiler
+        # tests truthiness of the ordering, and "no ordering" is empty).
+        .distinct()
+        .values("subtree_root")
+    )
+
+
 def _event_window(bound: datetime, *, collapse: bool) -> Q:
-    """``occurred_at >= bound``, widened to the whole thread when collapsed.
+    """``occurred_at >= bound``, widened to the whole subtree when collapsed.
 
     On the flat feed a row IS an event, so the window is one comparison. Under
-    ``collapse_threads`` a row is a THREAD rendered by its root, and the two are
-    no longer the same question: the window asks "did this happen in this
-    window?", and a collapsed card's answer is "did *anything* in this
+    ``collapse_threads`` a row is a CONVERSATION rendered by its root, and the
+    two are no longer the same question: the window asks "did this happen in
+    this window?", and a collapsed card's answer is "did *anything* in this
     conversation happen in this window?". Filtering on the root alone answers a
     stricter question than the flag advertises — ``currentServiceDayOnly`` reads
     as "today's activity", not "threads that started today".
 
     The root-only reading is not a near-miss: grouping elects the EARLIEST link
-    as root precisely so a thread reads oldest-first, which means every member
-    is LATER than its root by construction. A conversation that opened before
-    the window and got a follow-up inside it therefore has a root outside the
-    window and a member inside it, and the root-keyed filter drops the entire
-    thread from the feed the follow-up belongs in. Since the collapsed surface
-    renders the ROOT, the member is then not merely unlisted — it is
-    unreachable, which is what makes this worth fixing rather than documenting.
-    That shape needs no ``occurredAt`` edit; the editable event time only adds
-    the mirror-image case on top of it, where an admin moves a member EARLIER
-    than its root and the "root is earliest" premise stops holding outright.
+    as root precisely so a conversation reads oldest-first, which means every
+    descendant is LATER than its root by construction. A conversation that
+    opened before the window and got a follow-up inside it therefore has a root
+    outside the window and a descendant inside it, and the root-keyed filter
+    drops the entire conversation from the feed the follow-up belongs in. Since
+    the collapsed surface renders the ROOT, the follow-up is then not merely
+    unlisted — it is unreachable, which is what makes this worth fixing rather
+    than documenting. That shape needs no ``occurredAt`` edit; the editable
+    event time only adds the mirror-image case on top of it, where an admin
+    moves a descendant EARLIER than its root and the "root is earliest" premise
+    stops holding outright.
 
-    The converse is accepted, not fixed: a root admitted only because a member
-    is in the window carries the ROOT's (older) timestamp on the card, so a
-    "today" feed can show a card stamped before today. Ordering stays on the
-    root for the same reason the keyset cursor does — the row is the page unit,
-    so a mixed-thread page still has one deterministic order. The card nests the
-    in-window member next to it, which is the honest rendering: the
+    Nesting widens this from a corner to the ordinary case, because "in the
+    conversation" is now a question about an arbitrary-depth subtree rather than
+    a single ``thread`` column: a root two levels above the in-window link is
+    the same argument, and a reader who checked only the root's own children
+    would have the same defect the first wave fixed, one level up. So the
+    widening follows the whole subtree at any depth, and the three properties
+    the tests pin hold at every depth: it **admits** a root whose descendant at
+    any level is in-window; it never **rescues** a conversation with nothing in
+    the window (it is a filter, not an OR that disables itself when the answer
+    is no); and it never becomes **restrictive** (a root in-window is admitted
+    on its own ``occurred_at``, which the first disjunct states outright).
+
+    ⚠️ **The window is NOT resolved on the root — the moderation gates are, and
+    the asymmetry is deliberate, and nesting makes it far more visible.** A
+    collapsed row is admitted into ``currentServiceDayOnly`` / ``lastWeekOnly``
+    if the ROOT *or any of its descendants* occurred at/after the bound, while
+    visibility and status are still decided on the root alone. Under a flat
+    thread the gap was one level and easy to read as an oversight; under a tree
+    a root can be arbitrarily far from the link that dragged it into a window,
+    which is exactly why the two questions must stay separate. Both are the
+    fail-safe direction for their own question: a window asks "what happened in
+    this window", and a conversation is in it if any part of it was, whereas a
+    moderation gate asks "may this be shown", and the cautious answer for a
+    shared object is that hiding any representative removes the whole group.
+    Conflating them would either leak a hidden descendant into a day-grouped
+    feed or drop a just-reported link from today's activity.
+
+    The converse is accepted, not fixed: a root admitted only because a
+    descendant is in the window carries the ROOT's (older) timestamp on the
+    card, so a "today" feed can show a card stamped before today. Ordering
+    stays on the root for the same reason the keyset cursor does — the row is
+    the page unit, so a mixed page still has one deterministic order. The card
+    nests the in-window link next to it, which is the honest rendering: the
     conversation did have something today.
 
-    Implemented as a correlated ``EXISTS`` rather than a join to
-    ``thread_members`` on purpose: a join multiplies a root by its number of
-    in-window members, which would inflate ``totalCount`` and repeat edges
+    Implemented as a subquery (``_in_window_subtree_roots``) rather than a join
+    to the descendants on purpose: a join multiplies a root by its number of
+    in-window descendants, which would inflate ``totalCount`` and repeat edges
     within one page unless every downstream filter also carried ``.distinct()``.
-    ``Exists`` cannot multiply rows, so the collapsed page, its count and its
+    A subquery cannot multiply rows, so the collapsed page, its count and its
     keyset are byte-identical to the flat path apart from the extra predicate.
     """
     if not collapse:
         return Q(occurred_at__gte=bound)
-    return Q(occurred_at__gte=bound) | Exists(
-        SocialMediaLink.objects.filter(thread_id=OuterRef("pk"), occurred_at__gte=bound)
-    )
+    return Q(occurred_at__gte=bound) | Q(pk__in=_in_window_subtree_roots(bound))
 
 
 async def get_public_social_media_links(
@@ -400,10 +530,10 @@ async def get_public_social_media_links(
     (see ``last_week_start``); it composes with ``current_service_day_only``
     (both narrow the same queryset).
 
-    ``collapse_threads`` (default ``False``) swaps the flat member list for
-    thread roots — see below. ``totalCount`` is the size of the whole filtered
-    set after *every* narrowing (window flags, ``status``, and thread collapse
-    when requested), unaffected by the ``after`` cursor and by
+    ``collapse_threads`` (default ``False``) swaps the flat link list for
+    conversation roots — see below. ``totalCount`` is the size of the whole
+    filtered set after *every* narrowing (window flags, ``status``, and the
+    collapse when requested), unaffected by the ``after`` cursor and by
     ``align_page_to_day``, so "Showing N of M" stays truthful: M counts what the
     surface can show, not what a flat list would have contained.
 
@@ -418,71 +548,82 @@ async def get_public_social_media_links(
     leaves the page exactly as it would be without alignment. Both flags default
     to ``False``.
 
-    ``collapse_threads`` — thread-root pages.
+    ``collapse_threads`` — conversation-root pages over the link tree.
 
-    When ``true`` the queryset is narrowed to thread roots
-    (``thread IS NULL``) and each root carries its members through the scalar's
-    ``threadLinks`` / ``threadSize``, so a page of N cards shows N conversations
-    rather than the first N fragments of them. The narrowing happens *before*
-    the count and before the cursor, so ``totalCount`` counts roots.
+    When ``true`` the queryset is narrowed to tree roots (``parent IS NULL``)
+    and each root carries its subtree through the scalar's ``sublinks`` /
+    ``sublinkCount``, so a page of N cards shows N conversations rather than the
+    first N fragments of them. "Thread" is now a *tree*, not a flat group: a
+    root can have children, children can have their own children, and only the
+    roots are page units. The narrowing happens *before* the count and before
+    the cursor, so ``totalCount`` counts roots.
 
     Why roots must be paginated rather than grouped client-side: with
-    ``occurred_at`` ordering, a thread's members are **not** adjacent. An admin
-    can group a 09:00 post with an 11:00 post, and between them sit whatever
-    else happened — including members of *other* threads. A flat page is
-    therefore not a superset of whole threads, so no post-processing of one page
-    can reconstruct the grouping: a member's root may not even be on the page.
-    Paginating over roots and nesting the members is the only shape in which
-    "every conversation that starts here is fully shown" is true.
+    ``occurred_at`` ordering, a conversation's descendants are **not** adjacent.
+    An admin can group a 09:00 post with an 11:00 post, and between them sit
+    whatever else happened — including sublinks of *other* conversations. A flat
+    page is therefore not a superset of whole conversations, so no
+    post-processing of one page can reconstruct the grouping: a descendant's
+    root may not even be on the page. Paginating over roots and nesting the
+    subtree is the only shape in which "every conversation that starts here is
+    fully shown" is true — and with nesting, "fully shown" also means every
+    level of it, which is why the read side fetches a whole subtree in one
+    query rather than a level at a time.
 
-    The visibility rule that follows from it: **a thread is public iff its root
-    is public**, so hiding a root hides its whole thread on a collapsed surface
-    (the gates below are queryset-level and see the root row). That coupling is
-    accepted rather than worked around — the console shows each row's
-    ``threadSize``, so an admin can see what a moderation decision will take
-    with it before making it.
+    The visibility rule that follows from it: **a conversation is public iff its
+    root is public**, so hiding a root hides its whole subtree on a collapsed
+    surface (the gates below are queryset-level and see the root row). That
+    coupling is accepted rather than worked around — the console shows each
+    row's ``sublinkCount``, so an admin can see what a moderation decision will
+    take with it before making it.
 
     ⚠️ **The time windows are NOT resolved on the root — the moderation gates
-    are, and the asymmetry is deliberate.** A collapsed row is admitted into
-    ``currentServiceDayOnly`` / ``lastWeekOnly`` if the ROOT *or any of its
-    members* occurred at/after the bound (``_event_window``), while visibility
-    and status are still decided on the root alone. Both are the fail-safe
-    direction for their own question: a window asks "what happened in this
-    window", and a thread is in it if any part of it was, whereas a moderation
-    gate asks "may this be shown", and the cautious answer for a shared object
-    is that hiding any representative removes the whole group. Conflating them
-    would either leak a hidden member into a day-grouped feed or drop a
-    just-reported link from today's activity.
+    are, and the asymmetry is deliberate and load-bearing here.** A collapsed
+    row is admitted into ``currentServiceDayOnly`` / ``lastWeekOnly`` if the
+    ROOT *or any of its descendants, at any depth* occurred at/after the bound
+    (``_event_window``), while visibility and status are still decided on the
+    root alone. Both are the fail-safe direction for their own question: a
+    window asks "what happened in this window", and a conversation is in it if
+    any part of it was, whereas a moderation gate asks "may this be shown", and
+    the cautious answer for a shared object is that hiding any representative
+    removes the whole group. Conflating them would either leak a hidden
+    descendant into a day-grouped feed or drop a just-reported link from
+    today's activity. Nesting is what makes the split non-negotiable: the
+    distance between the row that is moderated and the row that happened is no
+    longer bounded by one hop, so a single shared rule could not serve both
+    questions.
 
     This is not a rare corner. Grouping elects the earliest link as root so the
-    thread reads oldest-first, so members are LATER than the root by
+    conversation reads oldest-first, so descendants are LATER than the root by
     construction: any conversation that opened before the window and got a
-    follow-up inside it has a root outside the window and a member inside it.
-    Resolved on the root, the whole thread — and with it the follow-up, since
-    the collapsed surface renders the root — vanished from the day's feed.
-    Making ``occurredAt`` editable adds the mirror case (an admin moves a member
-    earlier than its root, so "the root is earliest" stops being an invariant),
-    which is why the root-only reading could not be left as a documented quirk.
+    follow-up inside it has a root outside the window and a descendant inside
+    it — at depth 1 or, once sublinks have their own sublinks, at depth 2+.
+    Resolved on the root, the whole conversation — and with it the follow-up,
+    since the collapsed surface renders the root — vanished from the day's
+    feed. Making ``occurredAt`` editable adds the mirror case (an admin moves a
+    descendant earlier than its root, so "the root is earliest" stops being an
+    invariant), which is why the root-only reading could not be left as a
+    documented quirk.
 
-    The accepted consequence: a root admitted only because a member is in the
-    window renders with the ROOT's older ``occurredAt`` on its card, so a
+    The accepted consequence: a root admitted only because a descendant is in
+    the window renders with the ROOT's older ``occurredAt`` on its card, so a
     "today" feed can show a card stamped before today. It is a rendering quirk,
-    not a filter bug — the link is reachable, and its thread is exactly where
-    the user expects it. Re-grouping the thread (the console's "Group into
-    thread" over the whole set) re-elects the earliest link as root and makes
-    the card's timestamp correct again.
+    not a filter bug — the link is reachable, and its conversation is exactly
+    where the user expects it. Re-grouping the conversation (the console's
+    "Group into thread" over the whole set) re-elects the earliest link as root
+    and makes the card's timestamp correct again.
 
     ``collapse_threads`` is **ignored when ``mine`` is requested**: "My
     Submitted Links" is the caller's own list of their own submissions, where
-    every row they submitted is the row they expect to find, so members are
+    every row they submitted is the row they expect to find, so sublinks are
     never collapsed there. ``mine`` also stays ungated by moderation, for the
     same personal reason (see the excludes below).
     """
 
     mine_requested = mine is not None and mine.value
-    # Thread collapse is a *feed* affordance, so it is suppressed for ``mine``:
+    # Tree collapse is a *feed* affordance, so it is suppressed for ``mine``:
     # that page is the caller's own list of their own submissions, and hiding
-    # their own members behind a root would be data loss on a personal list.
+    # their own sublinks behind a root would be data loss on a personal list.
     collapse_requested = collapse_threads and not mine_requested
     if mine_requested:
         user = info.context.user
@@ -518,11 +659,12 @@ async def get_public_social_media_links(
     #
     # The same rule exists as a per-row predicate,
     # ``incident.services.social_link_visibility.is_publicly_visible``, which is
-    # the single source of truth and is what non-queryset code (the scalar
-    # thread fields) imports. These two excludes are its queryset-level twin and
-    # are deliberately NOT replaced by it: a per-row Python filter would not
-    # shrink ``totalCount`` or the fetched page, so page and count would stop
-    # agreeing. Any change to the rule must be made in the shared predicate first.
+    # the single source of truth and is what non-queryset code (the scalar's
+    # ``sublinks`` / ``sublinkCount``) imports. These two excludes are its
+    # queryset-level twin and are deliberately NOT replaced by it: a per-row
+    # Python filter would not shrink ``totalCount`` or the fetched page, so page
+    # and count would stop agreeing. Any change to the rule must be made in the
+    # shared predicate first.
     #
     # Deliberately not applied to ``mine``: that page is the owner's own
     # submission list, not a public feed, so a person can still see (and seek
@@ -542,16 +684,25 @@ async def get_public_social_media_links(
     )
 
     # Thread collapse, before both the count and the cursor: a collapsed page
-    # paginates over roots and nests the members on each root, so "M of M" must
+    # paginates over roots and nests the subtree on each root, so "M of M" must
     # count roots too. Placed after the moderation gates because visibility is
-    # decided on the root row — a thread is public iff its root is public.
+    # decided on the root row — a conversation is public iff its root is.
+    #
+    # ``parent__isnull`` is CHEAPER than the flat ``thread`` column it replaces,
+    # not merely differently spelled. Both are plain indexed null tests on a
+    # self-FK, but the old column existed only to *mark membership* — a second
+    # statement of something ``parent`` now says structurally. "Is a root" and
+    # "has no parent" are the same question here, so the narrowing costs what
+    # the old one did and reads as the data model instead of a convention.
     if collapse_requested:
-        queryset = queryset.filter(thread__isnull=True)
+        queryset = queryset.filter(parent__isnull=True)
 
     # The windows run AFTER the collapse narrowing above, so on a collapsed page
-    # they are evaluated over the whole thread, not over the root that represents
-    # it — see ``_event_window``. Without the collapse they are the plain
-    # single-column comparison, unchanged.
+    # they are evaluated over the whole subtree, not over the root that
+    # represents it — see ``_event_window``. Without the collapse they are the
+    # plain single-column comparison, unchanged, which is the point of the
+    # ``collapse`` flag: the recursive subquery that widens the window is built
+    # only on the collapsed path, so no other surface pays for it.
     if current_service_day_only:
         queryset = queryset.filter(
             _event_window(
