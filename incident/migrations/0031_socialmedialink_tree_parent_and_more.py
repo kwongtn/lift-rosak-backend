@@ -44,6 +44,26 @@ into the flat one-level shape the old model could express, and ``position`` has
 no pre-0030 column to map onto at all, so it is zeroed. No row is ever deleted
 in either direction.
 
+DEFERRED-FK / DDL TRAP — WHY THE DATA MIGRATION ENDS WITH ``SET CONSTRAINTS``
+----------------------------------------------------------------------------
+``parent`` and ``thread`` are ``DEFERRABLE INITIALLY DEFERRED`` (Django's
+PostgreSQL default), so the re-parenting UPDATE queues constraint-trigger events
+that only fire at COMMIT. PostgreSQL refuses ANY DDL on a table with pending
+trigger events, and the operation that follows this ``RunPython`` IS DDL —
+``RemoveField(thread)`` forward, ``RemoveField(position)`` in reverse. Without
+the flush at the end of each half, a database whose links were actually threaded
+aborts with:
+
+    cannot ALTER TABLE "incident_socialmedialink" because it has pending
+    trigger events
+
+and the migration is never recorded. The dev database held **zero** thread
+members when 0031 was authored, so nothing was queued and the bug stayed
+invisible there; it only appeared against staging, whose three threaded rows
+re-parent and then block the trailing ``RemoveField``. ``flush_deferred_constraints``
+(``SET CONSTRAINTS ALL IMMEDIATE``) fires the queued checks immediately and
+empties the queue before the DDL runs.
+
 THE CONVERSION IS DEFENSIVE CODE, NOT A DATA RESCUE
 ---------------------------------------------------
 The dev database holds 44 links and **0** thread members, so on the machine this
@@ -104,6 +124,7 @@ convention has to be re-checked first.
 """
 
 import django.db.models.deletion
+from django.db import connection as default_connection
 from django.db import migrations, models
 from django.db.models import F, Window
 from django.db.models.functions import RowNumber
@@ -113,6 +134,35 @@ POSITION_STEP = 10
 
 #: ``bulk_update`` batch size, same as incident/0024's ``BATCH_SIZE``.
 BATCH_SIZE = 500
+
+
+def flush_deferred_constraints(schema_editor):
+    """Force this transaction's queued deferred FK checks to run NOW.
+
+    ``parent`` and ``thread`` are ``DEFERRABLE INITIALLY DEFERRED`` (Django's
+    PostgreSQL default). A ``parent_id``/``thread_id`` UPDATE therefore queues
+    constraint-trigger events that would only fire at COMMIT — and PostgreSQL
+    refuses ANY DDL on a table with pending trigger events:
+
+        cannot ALTER TABLE "incident_socialmedialink" because it has pending
+        trigger events
+
+    The operation that follows each ``RunPython`` here is exactly such DDL
+    (``RemoveField(thread)`` forward, ``RemoveField(position)`` in reverse), so
+    on a database that actually holds threaded rows the whole migration aborts
+    half-way. On an empty/never-threaded table no events are queued and the bug
+    is invisible — which is why it only surfaced against staging data.
+    ``SET CONSTRAINTS ALL IMMEDIATE`` fires the queued checks at once and
+    empties the queue, leaving nothing for the DDL to trip over.
+
+    The fallback connection exists for the unit tests, which call these
+    functions with a synthetic ``schema_editor=None`` against the test database.
+    """
+    connection = (
+        schema_editor.connection if schema_editor is not None else default_connection
+    )
+    with connection.cursor() as cursor:
+        cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
 
 def convert_threads_to_tree(apps, schema_editor):
@@ -156,6 +206,10 @@ def convert_threads_to_tree(apps, schema_editor):
     if batch:
         SocialMediaLink.objects.bulk_update(batch, ["position"])
 
+    # The ``parent_id`` UPDATE above queued deferred FK checks; ``RemoveField``
+    # (the next operation) is DDL and would abort on them. Fire them here.
+    flush_deferred_constraints(schema_editor)
+
 
 def revert_tree_to_threads(apps, schema_editor):
     """Reverse half: rebuild ``thread`` from ``parent``, zero ``position``.
@@ -178,6 +232,9 @@ def revert_tree_to_threads(apps, schema_editor):
     # ``position`` has no pre-0031 counterpart. Zero is the field default the
     # ``AddField`` would have produced, i.e. the closest reversible value.
     SocialMediaLink.objects.all().update(position=0)
+    # The ``thread_id`` UPDATE above queued deferred FK checks; the next
+    # operation is ``RemoveField(position)``, which is DDL. Fire them here.
+    flush_deferred_constraints(schema_editor)
 
 
 class Migration(migrations.Migration):

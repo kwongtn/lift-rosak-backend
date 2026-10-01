@@ -72,6 +72,7 @@ migration_0031 = importlib.import_module(
 )
 
 MIGRATION_0030 = "0030_socialmedialink_occurred_at_socialmedialink_thread_and_more"
+MIGRATION_0031 = "0031_socialmedialink_tree_parent_and_more"
 
 #: Naive local instants, deliberately spread so ``occurred_at`` order and ``id``
 #: order disagree (see the module docstring).
@@ -496,3 +497,83 @@ class ReverseMigrationTests(LegacyThreadTestCase):
         self.assertEqual(SocialMediaLink.objects.get(pk=member_a.pk).parent_id, root.pk)
         self.assertEqual(SocialMediaLink.objects.get(pk=member_b.pk).parent_id, root.pk)
         self.assertIsNone(SocialMediaLink.objects.get(pk=root.pk).parent_id)
+
+
+class ExecutorRoundTripTests(TestCase):
+    """0031 replayed by the executor over rows that were ACTUALLY threaded.
+
+    Every test above calls the migration's data functions directly, so none of
+    them ever runs the ``RemoveField`` that follows each half — and that DDL is
+    exactly what trips over the deferred FK events the re-parenting UPDATE
+    queues. On a database with threaded rows, ``RemoveField(thread)`` aborts
+    with ``ObjectInUse: cannot ALTER TABLE ... because it has pending trigger
+    events``, 0031 is never recorded, and the app then serves against a 0030
+    schema (``column incident_socialmedialink.position does not exist``). That
+    is the staging failure this class pins: it reverses 0031, recreates the
+    pre-0031 threaded shape, and replays the migration in BOTH directions.
+
+    Deliberately a ``TestCase``, not a ``TransactionTestCase``: the outer test
+    transaction makes the whole executor round trip roll back — schema and the
+    ``django_migrations`` row included — so the shared test database is left
+    exactly as it was found. A ``TransactionTestCase`` here would flush every
+    table on teardown and destroy migration-seeded rows (the incident 0027
+    system author) for the rest of the suite.
+    """
+
+    @staticmethod
+    def _executor():
+        return MigrationExecutor(connection)
+
+    def test_forward_and_reverse_over_threaded_rows(self):
+        self._executor().migrate([("incident", MIGRATION_0030)])
+
+        user = User.objects.create(firebase_id="test-user-0031-executor")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO incident_socialmedialink
+                    (created, modified, url, title, description, status,
+                     user_id, completed, is_automated, raw_payload, occurred_at)
+                VALUES (now(), now(), 'https://example.com/root', '', '',
+                        'live', %s, false, false, '{}', now())
+                RETURNING id
+                """,
+                [user.pk],
+            )
+            root_id = cursor.fetchone()[0]
+            cursor.execute(
+                """
+                INSERT INTO incident_socialmedialink
+                    (created, modified, url, title, description, status,
+                     user_id, completed, is_automated, raw_payload, occurred_at,
+                     thread_id)
+                VALUES (now(), now(), 'https://example.com/member', '', '',
+                        'live', %s, false, false, '{}', now(), %s)
+                RETURNING id
+                """,
+                [user.pk, root_id],
+            )
+            member_id = cursor.fetchone()[0]
+
+        # Forward. Before the constraint flush this raised ObjectInUse and the
+        # migration was never recorded.
+        self._executor().migrate([("incident", MIGRATION_0031)])
+
+        root = SocialMediaLink.objects.get(pk=root_id)
+        member = SocialMediaLink.objects.get(pk=member_id)
+        self.assertIsNone(root.parent_id)
+        self.assertEqual(member.parent_id, root.pk)
+        self.assertEqual(root.position, migration_0031.POSITION_STEP)
+
+        # Reverse. The reverse half writes ``thread_id`` and is in the same
+        # deferred-events-then-DDL trap, so it is part of the regression.
+        self._executor().migrate([("incident", MIGRATION_0030)])
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT thread_id FROM incident_socialmedialink WHERE id = %s",
+                [member_id],
+            )
+            self.assertEqual(cursor.fetchone()[0], root_id)
+
+        # Leave the schema at HEAD for whatever test runs next.
+        self._executor().migrate([("incident", MIGRATION_0031)])
