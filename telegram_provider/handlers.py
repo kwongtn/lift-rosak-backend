@@ -221,6 +221,24 @@ async def delete(update: Update, context) -> None:
         return
 
 
+def normalize_vehicle_number(vehicle_number: str) -> str:
+    """Remove spaces from a vehicle number when spaces are its only special characters."""
+    if all(character.isalnum() or character.isspace() for character in vehicle_number):
+        return vehicle_number.replace(" ", "")
+    return vehicle_number
+
+
+def vehicle_number_match_key(vehicle_number: str) -> str:
+    """Return the case-insensitive key used to match a vehicle number.
+
+    Matching is exact on the characters before the first space after
+    normalisation, so ``EMU 03`` matches ``EMU03`` while ``03`` matches
+    ``03 (40 renum)``.
+    """
+    key = normalize_vehicle_number(vehicle_number).split(" ", 1)[0]
+    return key.casefold()
+
+
 async def spot(update: Update, context) -> None:
     # Check if user has verified account
     user = await User.objects.filter(telegram_id=update.message.from_user.id).afirst()
@@ -256,16 +274,21 @@ async def spot(update: Update, context) -> None:
             await update.message.reply_html(text=error_text)
             raise Exception(error_text)
 
-        # Search for vehicle
-        vehicle = await Vehicle.objects.filter(
-            Q(identification_no__istartswith=args.vehicle_number, lines__in=lines)
-            & ~Q(
-                status__in=[
-                    VehicleStatus.MARRIED,
-                    VehicleStatus.DECOMMISSIONED,
-                ]
-            )
-        ).afirst()
+        # Search for vehicle among every vehicle assigned to the channel's
+        # lines. Identification numbers such as "EMU 03" or "03 (40 renum)"
+        # cannot be compared with a plain __istartswith lookup, so candidates
+        # are filtered in Python on their exact match key instead.
+        vehicle_key = vehicle_number_match_key(args.vehicle_number)
+        vehicle: Vehicle | None = None
+        async for candidate in Vehicle.objects.filter(lines__in=lines).exclude(
+            status__in=[
+                VehicleStatus.MARRIED,
+                VehicleStatus.DECOMMISSIONED,
+            ]
+        ):
+            if vehicle_number_match_key(candidate.identification_no) == vehicle_key:
+                vehicle = candidate
+                break
 
         if vehicle is None:
             error_text = (

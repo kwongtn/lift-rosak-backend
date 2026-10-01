@@ -14,6 +14,10 @@ Total commits: 115
 - **(this commit)** [feat](incident): the nine vote mutations (link, incident, chronology × up/down/remove) acknowledge with `VoteMutationPayload` — `ok` retained plus `userVote`/`voteScore`/`upvotes`/`downvotes` — instead of a bare `ok`, because a client given only `ok` must project the new score itself and that projection races its own echo and every other voter; `services/votes.py` returns a `VoteOutcome` in one aggregate round-trip, all nine share one `_vote_payload`, the nine retypings are NAMED in `EXPECTED_ACCEPTED_BREAKING_CHANGES` (15) with a new `_CHANGED_TYPE` anti-rot shape, SDL snapshot regenerated — see `docs/progress/2026/10/01.md`
 
 
+#### Telegram Provider (1 commits)
+
+- **(this commit)** [feat](telegram_provider): `/spot` vehicle matching is now an **exact match key** after space normalisation instead of `identification_no__istartswith` — all vehicles on all of the channel's lines (retired statuses excluded) are filtered in Python; `normalize_vehicle_number()` strips spaces only when spaces are a number's sole special characters (`EMU 03` → `EMU03`, `03 (40 renum)` untouched) and `vehicle_number_match_key()` casefolds the characters before the first space (`03 (40 renum)` → `03`), so `EMU03` ↔ `EMU 03` and `03` ↔ `03 (40 renum)` while `/spot 01` no longer silently matches `011`/`012`; 9 new tests, **89** in `telegram_provider` — see `docs/progress/2026/10/01.md`
+
 ### 2026-09 (43 commits)
 
 #### Incident (27 commits)

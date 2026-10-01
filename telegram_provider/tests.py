@@ -22,8 +22,11 @@ from telegram_provider.handlers import (
     delete_link,
     error_handler,
     media,
+    normalize_vehicle_number,
+    spot,
     spotting_today,
     submit_link,
+    vehicle_number_match_key,
 )
 from telegram_provider.models import TelegramLogs
 from telegram_provider.parsers import link_parser, spotting_today_parser
@@ -1802,3 +1805,248 @@ class ApproveHandlerTests(TestCase):
         mocks["link_log"].objects.filter.assert_not_called()
         self.link.asave.assert_not_awaited()
         self.assertEqual(self.link.status, SocialMediaLinkStatus.PENDING_APPROVAL)
+
+
+class VehicleNumberMatchKeyTests(TestCase):
+    """Pure tests for the /spot vehicle-number normalisation and match key."""
+
+    def test_normalize_vehicle_number_removes_spaces_when_only_special_characters(
+        self,
+    ):
+        self.assertEqual(normalize_vehicle_number("EMU 03"), "EMU03")
+        self.assertEqual(normalize_vehicle_number("  EMU 03 "), "EMU03")
+        self.assertEqual(normalize_vehicle_number("EMU03"), "EMU03")
+
+    def test_normalize_vehicle_number_keeps_bracketed_numbers(self):
+        self.assertEqual(normalize_vehicle_number("03 (40 renum)"), "03 (40 renum)")
+
+    def test_match_key_uses_characters_before_the_first_space(self):
+        self.assertEqual(vehicle_number_match_key("EMU 03"), "emu03")
+        self.assertEqual(vehicle_number_match_key("EMU03"), "emu03")
+        self.assertEqual(vehicle_number_match_key("03 (40 renum)"), "03")
+        self.assertEqual(vehicle_number_match_key("03"), "03")
+
+    def test_match_key_is_exact_and_case_insensitive(self):
+        self.assertEqual(
+            vehicle_number_match_key("emu03"),
+            vehicle_number_match_key("EMU 03"),
+        )
+        # Exact: "03" must not match "03x", nor "EMU" the longer "EMU 03".
+        self.assertNotEqual(
+            vehicle_number_match_key("03"),
+            vehicle_number_match_key("03x"),
+        )
+        self.assertNotEqual(
+            vehicle_number_match_key("EMU"),
+            vehicle_number_match_key("EMU 03"),
+        )
+
+
+class _AsyncIterable:
+    """Minimal async-iterable stand-in for a filtered Django queryset."""
+
+    def __init__(self, items):
+        self._items = items
+
+    def __aiter__(self):
+        async def _generator():
+            for item in self._items:
+                yield item
+
+        return _generator()
+
+
+class SpotHandlerTests(TestCase):
+    """Coverage for the /spot handler's vehicle lookup.
+
+    Plain TestCase (not IsolatedAsyncioTestCase) driven via asyncio.run(),
+    matching the LinkHandlerTests pattern: the handler's async-ORM lookups
+    would use a connection invisible to the TestCase transaction, so every
+    model class is patched and its queryset methods stubbed. The Vehicle
+    queryset is stubbed with an async-iterable so the handler's Python-side
+    match-key filtering runs for real.
+    """
+
+    def setUp(self):
+        self.line = MagicMock(name="line")
+        self.line.id = 42
+        self.user = MagicMock(name="user")
+        self.user.id = 99
+        self.telegram_log = MagicMock(name="telegram_log")
+        self.telegram_log.id = 888
+        self.event_source = MagicMock(name="event_source")
+        self.event_source.id = 5
+        self.event = MagicMock(name="event")
+        self.event.id = 1234
+        self.event.asave = AsyncMock()
+
+    @contextmanager
+    def _mock_handlers(self):
+        with ExitStack() as stack:
+            mocks = {}
+            mocks["user"] = stack.enter_context(
+                patch("telegram_provider.handlers.User")
+            )
+            mocks["line"] = stack.enter_context(
+                patch("telegram_provider.handlers.Line")
+            )
+            mocks["vehicle"] = stack.enter_context(
+                patch("telegram_provider.handlers.Vehicle")
+            )
+            mocks["event_source"] = stack.enter_context(
+                patch("telegram_provider.handlers.EventSource")
+            )
+            mocks["event"] = stack.enter_context(
+                patch("telegram_provider.handlers.Event")
+            )
+            mocks["telegram_log"] = stack.enter_context(
+                patch("telegram_provider.handlers.TelegramLogs")
+            )
+            mocks["event_log"] = stack.enter_context(
+                patch("telegram_provider.handlers.TelegramSpottingEventLog")
+            )
+            mocks["retry"] = stack.enter_context(
+                patch(
+                    "telegram_provider.handlers.retry_on_error",
+                    new_callable=AsyncMock,
+                )
+            )
+            yield mocks
+
+    def _make_update(self, text):
+        update = MagicMock(name="update")
+        update.message = MagicMock(name="message")
+        update.message.text = text
+        update.message.from_user = MagicMock()
+        update.message.from_user.id = 12345
+        update.message.message_id = 777
+        update.message.date = datetime(
+            2026, 10, 1, 4, 30, tzinfo=ZoneInfo("Asia/Kuala_Lumpur")
+        )
+        update.message.reply_html = AsyncMock()
+        update.message.reply_text = AsyncMock()
+        update.message.set_reaction = AsyncMock()
+        update.effective_chat = MagicMock()
+        update.effective_chat.id = 123456
+        return update
+
+    def _make_vehicle(self, identification_no, vehicle_id):
+        vehicle = MagicMock(name=f"vehicle_{identification_no}")
+        vehicle.id = vehicle_id
+        vehicle.identification_no = identification_no
+        vehicle.status = VehicleStatus.IN_SERVICE
+        return vehicle
+
+    def _stub_user(self, mocks, user):
+        mocks["user"].objects.filter.return_value.afirst = AsyncMock(return_value=user)
+
+    def _stub_line(self, mocks, exists=True):
+        mocks["line"].objects.filter.return_value.aexists = AsyncMock(
+            return_value=exists
+        )
+
+    def _stub_vehicles(self, mocks, vehicles):
+        qs = mocks["vehicle"].objects.filter.return_value
+        qs.exclude.return_value = _AsyncIterable(vehicles)
+        return qs
+
+    def _stub_success(self, mocks):
+        mocks["event_source"].objects.filter.return_value.afirst = AsyncMock(
+            return_value=self.event_source
+        )
+        telegram_log_qs = mocks["telegram_log"].objects.filter.return_value
+        telegram_log_qs.order_by.return_value.afirst = AsyncMock(
+            return_value=self.telegram_log
+        )
+        mocks["event_log"].objects.acreate = AsyncMock()
+        mocks["event"].return_value = self.event
+
+    def test_spot_matches_spaced_number_after_normalisation(self):
+        update = self._make_update("/spot EMU03")
+        vehicle = self._make_vehicle("EMU 03", vehicle_id=7)
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks)
+            self._stub_vehicles(mocks, [vehicle])
+            self._stub_success(mocks)
+            asyncio.run(spot(update, MagicMock()))
+
+        # All lines of the channel were fetched, then all their vehicles.
+        mocks["line"].objects.filter.assert_called_once_with(telegram_channel_id=123456)
+        mocks["vehicle"].objects.filter.assert_called_once()
+        self.assertEqual(mocks["event"].call_args.kwargs["vehicle_id"], 7)
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
+        )
+
+    def test_spot_matches_renumbered_number_on_characters_before_first_space(self):
+        update = self._make_update("/spot 03")
+        vehicle = self._make_vehicle("03 (40 renum)", vehicle_id=40)
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks)
+            self._stub_vehicles(mocks, [vehicle])
+            self._stub_success(mocks)
+            asyncio.run(spot(update, MagicMock()))
+
+        self.assertEqual(mocks["event"].call_args.kwargs["vehicle_id"], 40)
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
+        )
+
+    def test_spot_skips_non_matching_candidates_and_excludes_retired_statuses(self):
+        update = self._make_update("/spot 03")
+        vehicles = [
+            self._make_vehicle("EMU 03", vehicle_id=7),
+            self._make_vehicle("03 (40 renum)", vehicle_id=40),
+        ]
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks)
+            qs = self._stub_vehicles(mocks, vehicles)
+            self._stub_success(mocks)
+            asyncio.run(spot(update, MagicMock()))
+
+        qs.exclude.assert_called_once_with(
+            status__in=[VehicleStatus.MARRIED, VehicleStatus.DECOMMISSIONED]
+        )
+        self.assertEqual(mocks["event"].call_args.kwargs["vehicle_id"], 40)
+
+    def test_spot_matching_is_case_insensitive(self):
+        update = self._make_update("/spot emu03")
+        vehicle = self._make_vehicle("EMU 03", vehicle_id=7)
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks)
+            self._stub_vehicles(mocks, [vehicle])
+            self._stub_success(mocks)
+            asyncio.run(spot(update, MagicMock()))
+
+        self.assertEqual(mocks["event"].call_args.kwargs["vehicle_id"], 7)
+
+    def test_spot_prefix_of_a_vehicle_number_does_not_match(self):
+        update = self._make_update("/spot EMU")
+        vehicles = [
+            self._make_vehicle("EMU 03", vehicle_id=7),
+            self._make_vehicle("EMU 04", vehicle_id=8),
+        ]
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            self._stub_line(mocks)
+            self._stub_vehicles(mocks, vehicles)
+            self._stub_success(mocks)
+            with self.assertRaises(Exception):
+                asyncio.run(spot(update, MagicMock()))
+
+        mocks["event"].assert_not_called()
+        update.message.reply_html.assert_awaited_once_with(
+            text="No vehicle found with the number <code>EMU</code>"
+        )
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
+        )

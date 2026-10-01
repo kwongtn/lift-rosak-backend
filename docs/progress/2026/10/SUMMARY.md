@@ -5,6 +5,7 @@ Total commits: 0 committed (1 change in progress, uncommitted at the time of wri
 ## Commit Type Distribution
 
 - feat: 0
+- **(this commit)** feat: 1
 - **(uncommitted)** feat: 1
 - **(uncommitted)** fix: 3
 
@@ -21,3 +22,7 @@ Total commits: 0 committed (1 change in progress, uncommitted at the time of wri
 ### Common (1 commit)
 
 - **(this commit)** [fix](common): `test_get_user_data_query_profile_aggregates` anchored two fixture events to `now() - 1 day` while asserting the **current-month** trend bucket held six, so on the 1st of any month yesterday is last month and the suite failed `4 != 6`. The second fixture day is now month-relative (yesterday, or today on the 1st) with the `withMostEntries(DAY)` expectation following it; month count stays 6 and favourite-vehicle counts are day-agnostic — see `docs/progress/2026/10/01.md`
+
+### Telegram Provider (1 commit)
+
+- **(this commit)** [feat](telegram_provider): `/spot` vehicle matching is now an **exact match key** after space normalisation instead of `identification_no__istartswith` — all vehicles on all of the channel's lines (retired statuses excluded) are fetched and filtered in Python; `normalize_vehicle_number()` strips spaces only when spaces are a number's sole special characters (`EMU 03` → `EMU03`, `03 (40 renum)` untouched) and `vehicle_number_match_key()` casefolds the characters before the first space (`03 (40 renum)` → `03`), so `EMU03` ↔ `EMU 03` and `03` ↔ `03 (40 renum)` while `/spot 01` no longer silently matches `011`/`012`; 9 new tests (`SpotHandlerTests` + pure key tests), **89** in `telegram_provider` — see `docs/progress/2026/10/01.md`
