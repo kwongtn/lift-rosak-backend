@@ -21,8 +21,9 @@ from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase, modify_settings, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from dotmap import DotMap
 from graphql import GraphQLError
@@ -50,8 +51,13 @@ from incident.models import (
     VehicleIncident,
 )
 from incident.services import official_posts
-from incident.services.errors import OfficialPostFetchError
-from incident.services.line_status import load_line_status_history
+from incident.services.errors import LineStatusValidationError, OfficialPostFetchError
+from incident.services.line_status import (
+    MAX_LINES_PER_HISTORY_REQUEST,
+    load_line_status_history,
+    load_lines_status_history,
+    load_network_status_history,
+)
 from incident.services.official_posts import (
     UNASSIGNED_AGENCY_NAME,
     RawPost,
@@ -1294,6 +1300,462 @@ class LineStatusHistoryTests(TestCase):
         buckets = async_to_sync(load_line_status_history)(self.line.id)
 
         self.assertEqual(buckets, [])
+
+
+#: Absolute wall-clock anchors for the service-day history tests below.
+#: Deliberately NOT derived from ``service_day_start``: that rolls back to the
+#: PREVIOUS day before 03:00, so a fixture anchored through it silently
+#: describes a different day than the one under test (MISTAKES.md, 2026-10-01),
+#: and ``USE_TZ = False`` makes the wrongness silent rather than loud. Instead
+#: ``_HISTORY_DAY_START_HOUR`` is passed as the loader's ``day_start_hour``, so
+#: the window's first hour IS ``_HISTORY_DAY_START`` at every hour of the day,
+#: and ``_HISTORY_NOW`` is comfortably inside that window.
+_HISTORY_DAY_START_HOUR = 3
+_HISTORY_DAY_START = datetime(2026, 1, 2, 3, 0)
+_HISTORY_NOW = datetime(2026, 1, 2, 20, 0)
+
+
+class ServiceDayHistoryFixtureMixin:
+    """Row factory for the service-day history tests (shared by both loaders)."""
+
+    def setUp(self):
+        self.user = User.objects.create(firebase_id="history-multi-test-user")
+        self.line = Line.objects.create(
+            code="HM1", display_name="History Multi Line", display_color="#008800"
+        )
+        self.other_line = Line.objects.create(
+            code="HM2",
+            display_name="History Multi Other Line",
+            display_color="#880088",
+        )
+
+    def _report(self, line, status, at):
+        """A ``LineStatusReport`` stamped at ``at``.
+
+        ``created`` is ``auto_now_add``, so the row is written first and its
+        timestamp moved with an ``UPDATE`` — the same two-step the existing
+        history fixtures use.
+        """
+        report = LineStatusReport.objects.create(
+            line=line, status=status, user=self.user
+        )
+        LineStatusReport.objects.filter(pk=report.pk).update(created=at)
+        return report
+
+
+class NetworkStatusHistoryTests(ServiceDayHistoryFixtureMixin, TestCase):
+    """``load_network_status_history``: one grouped read over every line."""
+
+    def test_network_history_is_empty_when_nothing_was_reported(self):
+        buckets = async_to_sync(load_network_status_history)(
+            _HISTORY_DAY_START_HOUR, now=_HISTORY_NOW
+        )
+
+        self.assertEqual(buckets, [])
+
+    def test_network_history_returns_all_24_hours_once_anything_is_reported(self):
+        self._report(
+            self.line,
+            PassengerStatus.CROWDED,
+            _HISTORY_DAY_START + timedelta(minutes=30),
+        )
+
+        buckets = async_to_sync(load_network_status_history)(
+            _HISTORY_DAY_START_HOUR, now=_HISTORY_NOW
+        )
+
+        self.assertEqual(len(buckets), 24)
+        self.assertEqual(
+            [bucket.hour_start for bucket in buckets],
+            sorted(bucket.hour_start for bucket in buckets),
+        )
+        self.assertEqual(buckets[0].hour_start, _HISTORY_DAY_START)
+        self.assertEqual(
+            buckets[-1].hour_start, _HISTORY_DAY_START + timedelta(hours=23)
+        )
+        self.assertEqual(buckets[-1].hour_end, _HISTORY_DAY_START + timedelta(hours=24))
+        self.assertEqual(sum(bucket.count for bucket in buckets), 1)
+        # Every bucket's breakdown adds up to its own count, the invariant a
+        # stacked chart depends on (``bucket_hourly`` promises it per bucket).
+        for bucket in buckets:
+            self.assertEqual(sum(bucket.status_counts.values()), bucket.count)
+        self.assertEqual(buckets[0].count, 1)
+        self.assertEqual(buckets[0].dominant_status, PassengerStatus.CROWDED)
+        self.assertEqual(buckets[1].count, 0)
+        self.assertEqual(buckets[1].status_counts, {})
+
+    def test_network_history_combines_every_line_into_the_same_hour(self):
+        self._report(
+            self.line,
+            PassengerStatus.CROWDED,
+            _HISTORY_DAY_START + timedelta(minutes=5),
+        )
+        self._report(
+            self.other_line,
+            PassengerStatus.DELAYED,
+            _HISTORY_DAY_START + timedelta(minutes=45),
+        )
+
+        buckets = async_to_sync(load_network_status_history)(
+            _HISTORY_DAY_START_HOUR, now=_HISTORY_NOW
+        )
+
+        self.assertEqual(len(buckets), 24)
+        first = buckets[0]
+        self.assertEqual(first.count, 2)
+        self.assertEqual(
+            first.status_counts,
+            {PassengerStatus.CROWDED: 1, PassengerStatus.DELAYED: 1},
+        )
+        self.assertEqual(sum(bucket.count for bucket in buckets), 2)
+        self.assertEqual(sum(sum(b.status_counts.values()) for b in buckets), 2)
+
+    def test_network_history_ignores_reports_outside_the_service_day(self):
+        # Before the service-day start (02:30) and after ``now`` (21:00): both
+        # outside ``[day_start, now]``, so neither may reach a bucket.
+        self._report(
+            self.line,
+            PassengerStatus.DISRUPTED,
+            _HISTORY_DAY_START - timedelta(minutes=30),
+        )
+        self._report(
+            self.line,
+            PassengerStatus.DISRUPTED,
+            _HISTORY_NOW + timedelta(hours=1),
+        )
+        self._report(
+            self.other_line,
+            PassengerStatus.NORMAL,
+            _HISTORY_DAY_START + timedelta(minutes=15),
+        )
+
+        buckets = async_to_sync(load_network_status_history)(
+            _HISTORY_DAY_START_HOUR, now=_HISTORY_NOW
+        )
+
+        self.assertEqual(sum(bucket.count for bucket in buckets), 1)
+        self.assertEqual(
+            [(b.hour_start, b.count) for b in buckets if b.count],
+            [(_HISTORY_DAY_START, 1)],
+        )
+        self.assertEqual(buckets[0].status_counts, {PassengerStatus.NORMAL: 1})
+
+    def test_network_history_is_empty_when_every_report_falls_outside(self):
+        self._report(
+            self.line,
+            PassengerStatus.DISRUPTED,
+            _HISTORY_DAY_START - timedelta(minutes=1),
+        )
+
+        buckets = async_to_sync(load_network_status_history)(
+            _HISTORY_DAY_START_HOUR, now=_HISTORY_NOW
+        )
+
+        self.assertEqual(buckets, [])
+
+    def test_network_history_uses_one_query_whatever_the_row_count(self):
+        for index in range(6):
+            self._report(
+                self.line if index % 2 else self.other_line,
+                PassengerStatus.NORMAL,
+                _HISTORY_DAY_START + timedelta(hours=index),
+            )
+
+        with CaptureQueriesContext(connection) as captured:
+            buckets = async_to_sync(load_network_status_history)(
+                _HISTORY_DAY_START_HOUR, now=_HISTORY_NOW
+            )
+
+        self.assertEqual(len(captured.captured_queries), 1)
+        self.assertEqual(len(buckets), 24)
+        self.assertEqual(sum(bucket.count for bucket in buckets), 6)
+
+    def test_network_history_rejects_an_out_of_range_day_start_hour(self):
+        for hour in (-1, 24):
+            with self.assertRaises(LineStatusValidationError):
+                async_to_sync(load_network_status_history)(hour, now=_HISTORY_NOW)
+
+
+class LinesStatusHistoryTests(ServiceDayHistoryFixtureMixin, TestCase):
+    """``load_lines_status_history``: per-line buckets in ONE query."""
+
+    def test_lines_history_returns_one_entry_per_line_in_the_requested_order(self):
+        self._report(
+            self.line,
+            PassengerStatus.CROWDED,
+            _HISTORY_DAY_START + timedelta(minutes=10),
+        )
+        self._report(
+            self.other_line,
+            PassengerStatus.DELAYED,
+            _HISTORY_DAY_START + timedelta(hours=1, minutes=10),
+        )
+
+        histories = async_to_sync(load_lines_status_history)(
+            [self.other_line.id, self.line.id],
+            _HISTORY_DAY_START_HOUR,
+            now=_HISTORY_NOW,
+        )
+
+        self.assertEqual(
+            [history.line_id for history in histories],
+            [self.other_line.id, self.line.id],
+        )
+        for history in histories:
+            self.assertEqual(len(history.buckets), 24)
+        self.assertEqual(sum(b.count for b in histories[0].buckets), 1)
+        self.assertEqual(
+            histories[0].buckets[1].dominant_status, PassengerStatus.DELAYED
+        )
+        self.assertEqual(histories[0].buckets[1].count, 1)
+        self.assertEqual(sum(b.count for b in histories[1].buckets), 1)
+        self.assertEqual(
+            histories[1].buckets[0].dominant_status, PassengerStatus.CROWDED
+        )
+        self.assertEqual(histories[1].buckets[0].count, 1)
+        # Nothing leaked across the two lines: each carries only its own report.
+        self.assertEqual(histories[0].buckets[0].count, 0)
+        self.assertEqual(histories[1].buckets[1].count, 0)
+
+    def test_lines_history_gives_a_line_with_no_reports_an_empty_bucket_list(self):
+        self._report(
+            self.line,
+            PassengerStatus.NORMAL,
+            _HISTORY_DAY_START + timedelta(minutes=5),
+        )
+
+        histories = async_to_sync(load_lines_status_history)(
+            [self.line.id, self.other_line.id],
+            _HISTORY_DAY_START_HOUR,
+            now=_HISTORY_NOW,
+        )
+
+        empty = next(h for h in histories if h.line_id == self.other_line.id)
+        self.assertEqual(empty.buckets, [])
+
+    def test_lines_history_collapses_duplicate_ids_to_one_entry(self):
+        self._report(
+            self.line,
+            PassengerStatus.NORMAL,
+            _HISTORY_DAY_START + timedelta(minutes=5),
+        )
+
+        histories = async_to_sync(load_lines_status_history)(
+            [self.line.id, self.line.id], _HISTORY_DAY_START_HOUR, now=_HISTORY_NOW
+        )
+
+        self.assertEqual([h.line_id for h in histories], [self.line.id])
+
+    def test_lines_history_batches_many_lines_into_one_query(self):
+        for index in range(3):
+            for line in (self.line, self.other_line):
+                self._report(
+                    line,
+                    PassengerStatus.NORMAL,
+                    _HISTORY_DAY_START + timedelta(hours=index),
+                )
+
+        with CaptureQueriesContext(connection) as captured:
+            histories = async_to_sync(load_lines_status_history)(
+                [self.line.id, self.other_line.id],
+                _HISTORY_DAY_START_HOUR,
+                now=_HISTORY_NOW,
+            )
+
+        self.assertEqual(len(captured.captured_queries), 1)
+        self.assertEqual(len(histories), 2)
+        for history in histories:
+            self.assertEqual(len(history.buckets), 24)
+            self.assertEqual(sum(b.count for b in history.buckets), 3)
+
+    def test_lines_history_accepts_exactly_the_maximum_id_count(self):
+        histories = async_to_sync(load_lines_status_history)(
+            list(range(1, MAX_LINES_PER_HISTORY_REQUEST + 1)),
+            _HISTORY_DAY_START_HOUR,
+            now=_HISTORY_NOW,
+        )
+
+        self.assertEqual(len(histories), MAX_LINES_PER_HISTORY_REQUEST)
+        self.assertTrue(all(history.buckets == [] for history in histories))
+
+    def test_lines_history_rejects_more_ids_than_the_cap(self):
+        too_many = list(range(1, MAX_LINES_PER_HISTORY_REQUEST + 2))
+
+        with self.assertRaises(LineStatusValidationError) as raised:
+            async_to_sync(load_lines_status_history)(
+                too_many, _HISTORY_DAY_START_HOUR, now=_HISTORY_NOW
+            )
+
+        self.assertIn(str(MAX_LINES_PER_HISTORY_REQUEST), str(raised.exception))
+
+    def test_empty_line_ids_answer_without_touching_the_database(self):
+        with CaptureQueriesContext(connection) as captured:
+            histories = async_to_sync(load_lines_status_history)(
+                [], _HISTORY_DAY_START_HOUR, now=_HISTORY_NOW
+            )
+
+        self.assertEqual(histories, [])
+        self.assertEqual(captured.captured_queries, [])
+
+    def test_lines_history_still_validates_the_day_start_hour(self):
+        with self.assertRaises(LineStatusValidationError):
+            async_to_sync(load_lines_status_history)(
+                [self.line.id], 24, now=_HISTORY_NOW
+            )
+
+
+class StatusHistoryQueryTests(ServiceDayHistoryFixtureMixin, TestCase):
+    """The two new root queries, executed through the real schema.
+
+    The resolvers take ``now`` from the clock, so these fixtures cannot use the
+    absolute anchors the service tests do: they place the reports on the
+    CURRENT hour and pass that same hour as ``dayStartHour``, which makes the
+    service day's first bucket the current one at every hour of the day (and
+    still inside ``[day_start, now]``, since the hour is never in the future).
+    """
+
+    def _current_hour(self):
+        return timezone.now().replace(minute=0, second=0, microsecond=0)
+
+    def test_graphql_network_history_exposes_the_full_service_day(self):
+        hour = self._current_hour()
+        self._report(self.line, PassengerStatus.CROWDED, hour)
+        self._report(self.other_line, PassengerStatus.DELAYED, hour)
+
+        result = execute_graphql(
+            """
+            query($hour: Int!) {
+              networkStatusHistory(dayStartHour: $hour) {
+                hourStart
+                hourEnd
+                count
+                dominantStatus
+                statusCounts { status count }
+              }
+            }
+            """,
+            variables={"hour": hour.hour},
+        )
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        buckets = result.data["networkStatusHistory"]
+        self.assertEqual(len(buckets), 24)
+        self.assertEqual(buckets[0]["count"], 2)
+        self.assertEqual(buckets[0]["hourStart"], hour.isoformat())
+        self.assertEqual(
+            buckets[0]["statusCounts"],
+            [
+                {"status": "CROWDED", "count": 1},
+                {"status": "DELAYED", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            sum(entry["count"] for entry in buckets[0]["statusCounts"]),
+            buckets[0]["count"],
+        )
+        # CROWDED and DELAYED tie on count, so the more severe one wins.
+        self.assertEqual(buckets[0]["dominantStatus"], "DELAYED")
+        self.assertEqual(buckets[1]["count"], 0)
+        self.assertEqual(buckets[1]["statusCounts"], [])
+
+    def test_graphql_network_history_is_an_empty_list_with_no_reports(self):
+        result = execute_graphql(
+            "query { networkStatusHistory { count } }",
+        )
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        self.assertEqual(result.data["networkStatusHistory"], [])
+
+    def test_graphql_lines_history_returns_one_entry_per_requested_line(self):
+        hour = self._current_hour()
+        self._report(self.line, PassengerStatus.CROWDED, hour)
+
+        result = execute_graphql(
+            """
+            query($ids: [ID!]!, $hour: Int!) {
+              linesStatusHistory(lineIds: $ids, dayStartHour: $hour) {
+                lineId
+                buckets { hourStart count dominantStatus }
+              }
+            }
+            """,
+            variables={
+                "ids": [str(self.line.id), str(self.other_line.id)],
+                "hour": hour.hour,
+            },
+        )
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        histories = result.data["linesStatusHistory"]
+        self.assertEqual(
+            [history["lineId"] for history in histories],
+            [str(self.line.id), str(self.other_line.id)],
+        )
+        self.assertEqual(len(histories[0]["buckets"]), 24)
+        self.assertEqual(histories[0]["buckets"][0]["count"], 1)
+        self.assertEqual(histories[0]["buckets"][0]["dominantStatus"], "CROWDED")
+        # The line that never reported carries an EMPTY list, not a zero-filled
+        # one — that empty list is the "no data" state the client renders.
+        self.assertEqual(histories[1]["buckets"], [])
+
+    def test_graphql_lines_history_with_an_empty_id_list_returns_nothing(self):
+        result = execute_graphql(
+            "query { linesStatusHistory(lineIds: []) { lineId } }",
+        )
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        self.assertEqual(result.data["linesStatusHistory"], [])
+
+    def test_graphql_lines_history_rejects_more_ids_than_the_cap(self):
+        ids = [str(number) for number in range(1, MAX_LINES_PER_HISTORY_REQUEST + 2)]
+
+        result = execute_graphql(
+            "query($ids: [ID!]!) { linesStatusHistory(lineIds: $ids) { lineId } }",
+            variables={"ids": ids},
+        )
+
+        self.assertIsNotNone(result.errors)
+        self.assertIn("64", str(result.errors[0].message))
+
+    def test_graphql_network_history_rejects_an_out_of_range_day_start_hour(self):
+        result = execute_graphql(
+            "query { networkStatusHistory(dayStartHour: 99) { count } }",
+        )
+
+        self.assertIsNotNone(result.errors)
+
+    def test_graphql_history_queries_still_agree_with_the_single_line_query(self):
+        hour = self._current_hour()
+        self._report(self.line, PassengerStatus.CROWDED, hour)
+
+        result = execute_graphql(
+            """
+            query($id: ID!, $ids: [ID!]!, $hour: Int!) {
+              lineStatusHistory(lineId: $id, dayStartHour: $hour) { count }
+              linesStatusHistory(lineIds: $ids, dayStartHour: $hour) {
+                buckets { count }
+              }
+              networkStatusHistory(dayStartHour: $hour) { count }
+            }
+            """,
+            variables={
+                "id": str(self.line.id),
+                "ids": [str(self.line.id)],
+                "hour": hour.hour,
+            },
+        )
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        single = result.data["lineStatusHistory"]
+        batched = result.data["linesStatusHistory"][0]["buckets"]
+        network = result.data["networkStatusHistory"]
+        self.assertEqual(
+            [bucket["count"] for bucket in single], [b["count"] for b in batched]
+        )
+        self.assertEqual(
+            [bucket["count"] for bucket in single],
+            [bucket["count"] for bucket in network],
+        )
 
 
 class PublicFeedContractTests(TestCase):

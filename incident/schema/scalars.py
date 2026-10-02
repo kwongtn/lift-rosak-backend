@@ -58,6 +58,23 @@ class LineStatusHourBucket:
     status_counts: List[PassengerStatusCount]
 
 
+@strawberry.type
+class LineStatusHistory:
+    """One line's hourly service-day history (``linesStatusHistory``).
+
+    ``buckets`` carries exactly what ``LineStatusHourBucket`` carries for the
+    single-line query, under the same contract: the full 24 service-day hours
+    once the line reported anything, and ``[]`` when it did not — so a client
+    renders "no data" per line from an empty list, not from a missing field.
+    No separate ``total``/``summary`` here on purpose: a client that wants one
+    number reads it off ``buckets`` rather than being able to believe a second
+    copy of it.
+    """
+
+    line_id: strawberry.ID
+    buckets: List[LineStatusHourBucket]
+
+
 @strawberry_django.type(models.LineStatusReport)
 class LineStatusReportScalar:
     id: strawberry.auto

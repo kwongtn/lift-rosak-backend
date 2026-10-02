@@ -30,6 +30,7 @@ from incident.schema.mutations.shared import raise_service_error
 from incident.schema.scalars import (
     CalendarIncidentGroupByDateSeverityScalar,
     CalendarIncidentHistoryEntryScalar,
+    LineStatusHistory,
     LineStatusHourBucket,
     LineStatusReportConnection,
     LineStatusReportEdge,
@@ -39,8 +40,14 @@ from incident.schema.scalars import (
     SocialMediaLinkPageInfo,
 )
 from incident.services.access import get_incident
-from incident.services.errors import IncidentServiceError
-from incident.services.line_status import load_line_status_history, service_day_start
+from incident.services.errors import IncidentServiceError, LineStatusValidationError
+from incident.services.line_status import (
+    HourBucket,
+    load_line_status_history,
+    load_lines_status_history,
+    load_network_status_history,
+    service_day_start,
+)
 from operation.schema.scalars import PassengerStatusCount
 
 _HISTORY_TYPE_MAP = {"+": "created", "~": "updated", "-": "deleted"}
@@ -972,6 +979,32 @@ async def get_calendar_incident_history(
     return entries
 
 
+def _hour_bucket(bucket: HourBucket) -> LineStatusHourBucket:
+    """Map one service bucket to its GraphQL shape.
+
+    The one place ``HourBucket`` becomes a ``LineStatusHourBucket``, shared by
+    all three history queries so they cannot disagree about the enum mapping or
+    about ``statusCounts`` ordering: ``PassengerStatus`` declaration order
+    (least → most severe), zero counts omitted, and the breakdown always sums to
+    ``count``.
+    """
+    return LineStatusHourBucket(
+        hour_start=bucket.hour_start,
+        hour_end=bucket.hour_end,
+        count=bucket.count,
+        dominant_status=PassengerStatus(bucket.dominant_status)
+        if bucket.dominant_status
+        else None,
+        status_counts=[
+            PassengerStatusCount(
+                status=status, count=bucket.status_counts[status.value]
+            )
+            for status in PassengerStatus
+            if bucket.status_counts.get(status.value, 0) >= 1
+        ],
+    )
+
+
 async def get_line_status_history(
     root,
     info: Info,
@@ -995,23 +1028,75 @@ async def get_line_status_history(
     except IncidentServiceError as exc:
         raise_service_error(exc)
 
-    return [
-        LineStatusHourBucket(
-            hour_start=bucket.hour_start,
-            hour_end=bucket.hour_end,
-            count=bucket.count,
-            dominant_status=PassengerStatus(bucket.dominant_status)
-            if bucket.dominant_status
-            else None,
-            status_counts=[
-                PassengerStatusCount(
-                    status=status, count=bucket.status_counts[status.value]
-                )
-                for status in PassengerStatus
-                if bucket.status_counts.get(status.value, 0) >= 1
-            ],
+    return [_hour_bucket(bucket) for bucket in buckets]
+
+
+async def get_network_status_history(
+    root,
+    info: Info,
+    day_start_hour: Optional[int] = 3,
+) -> List[LineStatusHourBucket]:
+    """Network-wide hourly passenger-status history for the current service day.
+
+    The same 24-bucket service-day series as ``lineStatusHistory``, with **no
+    line filter** — one read over every line's reports in the day, so a board
+    can draw the whole network's trend without fanning out one query per line.
+    Each bucket's ``count`` / ``dominantStatus`` / ``statusCounts`` are tallies
+    across ALL lines in that hour, not one line's.
+
+    Returns ``[]`` when nothing at all was reported that service day (the
+    "no data" state); otherwise the full 24 buckets, empty hours included. One
+    query per call, whatever the row count.
+    """
+    if day_start_hour is None:
+        day_start_hour = 3
+    try:
+        buckets = await load_network_status_history(day_start_hour)
+    except IncidentServiceError as exc:
+        raise_service_error(exc)
+
+    return [_hour_bucket(bucket) for bucket in buckets]
+
+
+async def get_lines_status_history(
+    root,
+    info: Info,
+    line_ids: List[strawberry.ID],
+    day_start_hour: Optional[int] = 3,
+) -> List[LineStatusHistory]:
+    """Per-line hourly passenger-status history for the current service day.
+
+    The batched sibling of ``lineStatusHistory``: ONE query answers every
+    requested line, so a screen that shows several lines' sparklines reads one
+    field instead of N. ``buckets`` per line follows the single-line contract
+    exactly — the full 24 hours from ``dayStartHour`` through 02:00 once the
+    line has any report that day, and ``[]`` (that line's "no data") when it has
+    none.
+
+    Returns one entry per requested id, in the requested order; ``[]`` for an
+    empty ``lineIds``. ``lineIds`` is length-capped by the service (a client bug
+    naming an unbounded id list must not become a service-day scan), and an
+    unparseable id is a validation error rather than a 500.
+    """
+    if day_start_hour is None:
+        day_start_hour = 3
+    try:
+        ids = [int(line_id) for line_id in line_ids]
+    except (TypeError, ValueError):
+        raise_service_error(
+            LineStatusValidationError("lineIds must contain only numeric line ids.")
         )
-        for bucket in buckets
+    try:
+        histories = await load_lines_status_history(ids, day_start_hour)
+    except IncidentServiceError as exc:
+        raise_service_error(exc)
+
+    return [
+        LineStatusHistory(
+            line_id=strawberry.ID(str(history.line_id)),
+            buckets=[_hour_bucket(bucket) for bucket in history.buckets],
+        )
+        for history in histories
     ]
 
 

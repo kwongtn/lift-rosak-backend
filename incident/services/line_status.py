@@ -4,9 +4,16 @@ Pure, dependency-light: ``consolidate`` is a plain function over in-memory
 values so it can be unit-tested without a database. ``load_line_pulses`` is the
 batched async loader that feeds the GraphQL DataLoader; it issues a constant
 number of queries regardless of how many line ids are requested.
+
+The service-day **history** side is three read-only loaders over one shared
+query (``_service_day_entries``): one line (``load_line_status_history``), the
+whole network at once (``load_network_status_history``), and N lines in a
+single query (``load_lines_status_history``). All three bucket through
+``bucket_hourly`` and all three cost ONE query however many rows or lines they
+cover.
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -33,6 +40,12 @@ DAY_START_HOUR = 3
 # A service day is exactly 24 hourly buckets: 03:00 through 02:00 next morning.
 HOURS_IN_SERVICE_DAY = 24
 _MAX_PULSE_LINKS = 5
+# Upper bound on the ids a single multi-line history read may name. The read is
+# one ``line_id__in`` query whatever the count, so this is not a query-count
+# guard — it bounds the rows a caller can pull into one response (the network
+# has ~a dozen lines, so 64 is generous), and it keeps a client bug that sends
+# the whole id space from turning into a full-table scan of the service day.
+MAX_LINES_PER_HISTORY_REQUEST = 64
 
 # Ordinal = enum declaration order.
 SEVERITY_RANK: dict[str, int] = {
@@ -81,6 +94,16 @@ class HourBucket:
     dominant_status: str | None
     # Per-status report counts; ``count`` is the sum of these values.
     status_counts: dict[str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class LineHistory:
+    """One line's hourly service-day history: ``buckets`` is ``[]`` when the
+    line reported nothing that day (the client's "no data" state), otherwise
+    the full 24-bucket series — exactly what ``bucket_hourly`` returns."""
+
+    line_id: int
+    buckets: list[HourBucket]
 
 
 def consolidate(
@@ -303,6 +326,61 @@ def bucket_hourly(
     return buckets
 
 
+async def _service_day_entries(
+    line_ids: Sequence[int] | None,
+    *,
+    day_start_hour: int = DAY_START_HOUR,
+    now: datetime | None = None,
+) -> tuple[datetime, datetime, list[tuple[int, ReportEntry]]]:
+    """Resolve the service-day window and read the rows inside it: ONE query.
+
+    The single place the ``day_start_hour`` validation, the
+    ``service_day_start`` arithmetic and the ``LineStatusReport`` read live, so
+    the three history loaders cannot drift apart on any of them.
+
+    ``line_ids`` selects the scope:
+
+    * ``None`` — every line's reports (the network-wide read). It filters on
+      ``created`` alone, and the table's index is ``(line, created)``, so this
+      is a sequential scan of the service day's rows; fine at current volume,
+      and the reason a network read is a *single* grouped query rather than a
+      loop over lines.
+    * a non-empty sequence — only those lines (``line_id__in``).
+    * an empty sequence — nothing. Answered from the window alone, so an empty
+      request costs ZERO queries.
+
+    Returns ``(now, day_start, rows)`` where ``rows`` pairs each report with its
+    ``line_id``, in ``created`` order, for the caller to bucket.
+    """
+    if not 0 <= day_start_hour <= 23:
+        raise LineStatusValidationError(
+            f"dayStartHour must be between 0 and 23, got {day_start_hour}."
+        )
+    resolved_now = now or timezone.now()
+    day_start = service_day_start(resolved_now, day_start_hour)
+    if line_ids is not None and not line_ids:
+        return resolved_now, day_start, []
+
+    queryset = LineStatusReport.objects.filter(
+        created__gte=day_start,
+        created__lte=resolved_now,
+    )
+    if line_ids is not None:
+        queryset = queryset.filter(line_id__in=line_ids)
+    rows = [
+        (
+            report.line_id,
+            ReportEntry(
+                status=report.status,
+                created=report.created,
+                link_id=report.link_id,
+            ),
+        )
+        async for report in queryset.order_by("created")
+    ]
+    return resolved_now, day_start, rows
+
+
 async def load_line_status_history(
     line_id: int,
     *,
@@ -314,22 +392,78 @@ async def load_line_status_history(
     Returns an empty list when the line has no report in the service day,
     otherwise the full 24-bucket series (see ``bucket_hourly``).
     """
-    if not 0 <= day_start_hour <= 23:
+    resolved_now, day_start, rows = await _service_day_entries(
+        [line_id], day_start_hour=day_start_hour, now=now
+    )
+    return bucket_hourly(
+        (entry for _, entry in rows), day_start=day_start, now=resolved_now
+    )
+
+
+async def load_network_status_history(
+    day_start_hour: int = DAY_START_HOUR,
+    *,
+    now: datetime | None = None,
+) -> list[HourBucket]:
+    """Network-wide hourly history over the current service day (one query).
+
+    The same series ``load_line_status_history`` builds, with **no line
+    filter**: ONE read of every ``LineStatusReport`` in the service day, then
+    one bucket pass over the combined stream. So a line's hour is not its own
+    bucket — the buckets describe the network, and ``dominant_status`` /
+    ``status_counts`` are tallies over every line's reports in that hour.
+
+    Returns ``[]`` when NOTHING was reported all day; otherwise the full
+    24-bucket series (see ``bucket_hourly``).
+    """
+    resolved_now, day_start, rows = await _service_day_entries(
+        None, day_start_hour=day_start_hour, now=now
+    )
+    return bucket_hourly(
+        (entry for _, entry in rows), day_start=day_start, now=resolved_now
+    )
+
+
+async def load_lines_status_history(
+    line_ids: Sequence[int],
+    day_start_hour: int = DAY_START_HOUR,
+    *,
+    now: datetime | None = None,
+) -> list[LineHistory]:
+    """Per-line hourly history for many lines at once (ONE query for N lines).
+
+    Returns one ``LineHistory`` per requested line, in the order requested; a
+    line with no report that service day carries ``buckets == []``, which the
+    client renders as its per-line "no data" state. Duplicate ids collapse to a
+    single entry (first occurrence wins).
+
+    An empty ``line_ids`` returns ``[]`` without touching the database.
+    ``line_ids`` is length-capped at ``MAX_LINES_PER_HISTORY_REQUEST`` so one
+    request cannot ask for an unbounded scan.
+    """
+    if len(line_ids) > MAX_LINES_PER_HISTORY_REQUEST:
         raise LineStatusValidationError(
-            f"dayStartHour must be between 0 and 23, got {day_start_hour}."
+            f"linesStatusHistory accepts at most "
+            f"{MAX_LINES_PER_HISTORY_REQUEST} line ids per call, got "
+            f"{len(line_ids)}."
         )
-    now = now or timezone.now()
-    day_start = service_day_start(now, day_start_hour)
-    entries = [
-        ReportEntry(
-            status=report.status,
-            created=report.created,
-            link_id=report.link_id,
-        )
-        async for report in LineStatusReport.objects.filter(
+    unique_ids = list(dict.fromkeys(line_ids))
+    resolved_now, day_start, rows = await _service_day_entries(
+        unique_ids, day_start_hour=day_start_hour, now=now
+    )
+
+    entries_by_line: dict[int, list[ReportEntry]] = {
+        line_id: [] for line_id in unique_ids
+    }
+    for row_line_id, entry in rows:
+        entries_by_line[row_line_id].append(entry)
+
+    return [
+        LineHistory(
             line_id=line_id,
-            created__gte=day_start,
-            created__lte=now,
-        ).order_by("created")
+            buckets=bucket_hourly(
+                entries_by_line[line_id], day_start=day_start, now=resolved_now
+            ),
+        )
+        for line_id in unique_ids
     ]
-    return bucket_hourly(entries, day_start=day_start, now=now)

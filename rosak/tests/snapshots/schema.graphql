@@ -483,6 +483,11 @@ enum LineStatus {
   TOTAL_DISRUPTION
 }
 
+type LineStatusHistory {
+  lineId: ID!
+  buckets: [LineStatusHourBucket!]!
+}
+
 type LineStatusHourBucket {
   hourStart: DateTime!
   hourEnd: DateTime!
@@ -778,6 +783,8 @@ type Query {
   calendarIncidentCategories: [CalendarIncidentCategoryScalar!]!
   calendarIncidentHistory(id: ID!, limit: Int! = 50): [CalendarIncidentHistoryEntryScalar!]!
   lineStatusHistory(lineId: ID!, dayStartHour: Int = 3): [LineStatusHourBucket!]!
+  networkStatusHistory(dayStartHour: Int = 3): [LineStatusHourBucket!]!
+  linesStatusHistory(lineIds: [ID!]!, dayStartHour: Int = 3): [LineStatusHistory!]!
   lineStatusReports(lineId: ID!, first: Int! = 20, after: String = null): LineStatusReportConnection!
   locations(filters: LocationFilter, order: LocationOrder, pagination: OffsetPaginationInput): [Location!]!
   buses(order: BusOrder, pagination: OffsetPaginationInput): [Bus!]!
