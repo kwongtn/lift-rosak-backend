@@ -39,7 +39,7 @@ TELEGRAM_MAX_TEXT_LENGTH = 4096
 #: Appended when the post text had to be cut. Counted against the budget, so a
 #: truncated body always states that it is truncated.
 TRUNCATION_MARKER = "\n\n…[truncated]"
-#: The console moderation queue the notification links to for approval.
+#: The console moderation queue the notification links to for review.
 CONSOLE_LINKS_PATH = "/console/insiden/links"
 #: Pseudo-handle reported by ``notify_official_post_links`` when no admin chat is
 #: configured. The webhook is not account-scoped, so there is no real handle to
@@ -127,15 +127,14 @@ def _build_notification_text(link: SocialMediaLink) -> str:
     # attributing to a registry handle, so the notification keeps an empty one.
     handle = link.socmed_account.handle if link.socmed_account_id else ""
     head = (
-        "<b>New official post — awaiting approval</b>\n"
+        "<b>New official post — published</b>\n"
         f"<b>Handle:</b> @{_telegram_escape(handle)}\n"
         f"<b>Posted:</b> {_telegram_escape(_format_posted_at(link.posted_at))}\n\n"
     )
     tail = (
         f'\n\n<a href="{_telegram_escape(link.url)}">Open the post on X</a>\n'
         f'<a href="{_telegram_escape(settings.FRONTEND_BASE_URL + CONSOLE_LINKS_PATH)}">'
-        "Approve in the console</a>\n\n"
-        "Reply to this message with <code>/approve</code> to publish it."
+        "Review in the console</a>"
     )
 
     body = _telegram_escape(link.description or "")
@@ -158,8 +157,10 @@ def _notify_new_link(link: SocialMediaLink) -> bool:
     stamps when asked for the log. A dead-lettered send returns ``None`` and
     writes no join row, so an un-notified post is **not** retried by a later
     tick: ingestion is idempotent, so the post is skipped, never re-announced.
-    The row still lands `PENDING_APPROVAL` and can be approved from the console,
-    which is why a raise is contained here rather than allowed to abort the run.
+    The row lands `LIVE` (auto-published by policy) and is already in the feed;
+    the join row still lets an admin reply `/approve` to it, which the handler
+    answers as a no-op ("Link is not awaiting approval."). A raise is contained
+    here rather than allowed to abort the run.
     """
     try:
         sent = async_to_sync(send_message)(
@@ -180,7 +181,7 @@ def _notify_new_link(link: SocialMediaLink) -> bool:
     if sent is None:
         logger.warning(
             "Official post notification was dead-lettered for link=%s; the row "
-            "stays PENDING_APPROVAL and can still be approved from the console",
+            "is already LIVE and visible in the feed",
             link.id,
         )
         return False

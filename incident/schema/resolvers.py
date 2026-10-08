@@ -235,6 +235,7 @@ async def get_social_media_links(
     search: strawberry.Maybe[str] = None,
     category_id: strawberry.Maybe[strawberry.ID] = None,
     completed: strawberry.Maybe[bool] = None,
+    hidden: strawberry.Maybe[bool] = None,
     line_id: strawberry.Maybe[strawberry.ID] = None,
     vehicle_id: strawberry.Maybe[strawberry.ID] = None,
     station_id: strawberry.Maybe[strawberry.ID] = None,
@@ -258,6 +259,14 @@ async def get_social_media_links(
     *submission*-time view ("what did we just get handed?") still has it: it is
     the ``created`` column on every row below.
 
+    ``hidden`` is the admin-console visibility filter. The console deliberately
+    lists **all statuses by default** — ``HIDDEN`` included, because an admin
+    has to be able to find a hidden row in order to un-hide it. This arg only
+    narrows that set: omitted (``None``) keeps the all-statuses default; ``true``
+    returns ONLY ``HIDDEN`` rows; ``false`` excludes ``HIDDEN`` rows. It is
+    tri-state on purpose, so "show hidden only", "hide hidden", and "leave it as
+    the console has always behaved" are three distinct requests.
+
     ⚠️ **Breaking GraphQL argument rename** (accepted deliberately): the filters
     were ``createdAfter`` / ``createdBefore`` and are now ``occurredAfter`` /
     ``occurredBefore``. The old names are *not* aliased — passing them is a
@@ -277,6 +286,15 @@ async def get_social_media_links(
 
     if completed is not None:
         queryset = queryset.filter(completed=completed.value)
+
+    # Admin-console visibility filter. Deliberately tri-state: omitted keeps the
+    # console's all-statuses default (HIDDEN included, so an admin can find and
+    # un-hide one), ``true`` narrows to HIDDEN only, ``false`` excludes HIDDEN.
+    if hidden is not None:
+        if hidden.value:
+            queryset = queryset.filter(status=SocialMediaLinkStatus.HIDDEN)
+        else:
+            queryset = queryset.exclude(status=SocialMediaLinkStatus.HIDDEN)
 
     if line_id is not None:
         queryset = queryset.filter(lines__id=int(line_id.value))
@@ -582,9 +600,13 @@ async def get_public_social_media_links(
     anonymous ``mine`` returns an empty page. ``status`` optionally narrows the
     feed to one approval status; omitted, both LIVE and PENDING_APPROVAL are
     returned (unchanged default) — except for automatically ingested posts,
-    which are excluded while ``PENDING_APPROVAL`` so an official announcement
-    only becomes public once an admin approves it. ``HIDDEN`` rows are never
-    returned on this public feed, not even when asked for by name.
+    which are excluded while ``PENDING_APPROVAL``. Official ingestion now writes
+    ``LIVE`` directly (auto-published by policy), so this is a **defensive**
+    net: it catches only legacy/imported automated rows still parked in the
+    approval state from before that policy, and it guarantees an official post
+    can never be public while unapproved even if one arrives by another writer.
+    ``HIDDEN`` rows are never returned on this public feed, not even when asked
+    for by name.
     ``current_service_day_only`` keeps only links that *occurred* within the
     current service day (03:00 rollover, see ``service_day_start``).
     ``last_week_only`` keeps only links occurring in the last six COMPLETED
@@ -758,13 +780,16 @@ async def get_public_social_media_links(
     if not mine_requested:
         queryset = queryset.exclude(status=SocialMediaLinkStatus.HIDDEN)
 
-    # Approval gates publication for automatically ingested posts: an
-    # unapproved official post is not public. Scoped to is_automated on
-    # purpose — a *community* link awaiting approval keeps today's behaviour
-    # and still surfaces (with its pending icon), so hiding pending rows
-    # wholesale would silently hide hand-submitted reports too. Applied before
-    # the count so totalCount and the page both agree with what is published.
-    # See the shared-predicate note above: same rule, queryset-level form.
+    # Defensive publication gate for automatically ingested posts: an official
+    # post is never public while PENDING_APPROVAL. Ingestion now writes LIVE
+    # (auto-published by policy), so this catches only legacy/imported automated
+    # rows still parked in the old approval state — it is a safety net, not the
+    # publish path. Scoped to is_automated on purpose — a *community* link
+    # awaiting approval keeps today's behaviour and still surfaces (with its
+    # pending icon), so hiding pending rows wholesale would silently hide
+    # hand-submitted reports too. Applied before the count so totalCount and the
+    # page both agree with what is published. See the shared-predicate note
+    # above: same rule, queryset-level form.
     queryset = queryset.exclude(
         is_automated=True, status=SocialMediaLinkStatus.PENDING_APPROVAL
     )

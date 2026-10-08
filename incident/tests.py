@@ -2390,7 +2390,7 @@ class OfficialPostIngestTests(TestCase):
         self.assertEqual(existing.socmed_account.handle, "askrapidkl")
         self.assertEqual(existing.post_id, self.posts[0].post_id)
 
-    def test_row_is_verbatim_mapped_and_pending_approval(self):
+    def test_row_is_verbatim_mapped_and_auto_published_live(self):
         # Long text so the CharField(256) title truncation is observable while
         # description keeps every character.
         bm_text = "⚠️ Gangguan di LRT Aliran Utama.\n\n" + "per MSI " * 80
@@ -2413,7 +2413,9 @@ class OfficialPostIngestTests(TestCase):
         self.assertEqual(link.title, bm_text[:256])
         self.assertEqual(len(link.title), 256)
         self.assertIs(link.is_automated, True)
-        self.assertEqual(link.status, SocialMediaLinkStatus.PENDING_APPROVAL)
+        # Official posts are auto-published (auto-approved) by policy, so an
+        # ingested row is LIVE — not parked in the approval queue.
+        self.assertEqual(link.status, SocialMediaLinkStatus.LIVE)
         self.assertEqual(link.user, self.author)
         # USE_TZ=False, so the aware input is stored as naive local time.
         self.assertEqual(link.posted_at, timezone.make_naive(posted_at))
@@ -3251,6 +3253,12 @@ class OfficialPostNotificationTests(TestCase):
         self.assertIn(f"{link.posted_at:%Y-%m-%d %H:%M}", text)
         self.assertIn(link.url, text)
         self.assertIn(f"{settings.FRONTEND_BASE_URL}/console/insiden/links", text)
+        # The copy states the post is published, not awaiting approval, and no
+        # longer advertises the /approve reply (which is a no-op on a LIVE row).
+        self.assertIn("New official post — published", text)
+        self.assertIn("Review in the console", text)
+        self.assertNotIn("awaiting approval", text)
+        self.assertNotIn("/approve", text)
         # Verbatim text, HTML-escaped (the fixture contains a bare `&`).
         self.assertIn(html.escape(link.description, quote=False), text)
         # Never the provider blob.
@@ -3303,7 +3311,7 @@ class OfficialPostNotificationTests(TestCase):
         # Truncated, and honest about being truncated; the actionable tail
         # (permalink + console link) survives.
         self.assertIn("…[truncated]", text)
-        self.assertTrue(text.endswith("to publish it."))
+        self.assertTrue(text.endswith("Review in the console</a>"))
         self.assertIn(post.url, text)
 
     def test_no_notification_and_no_join_row_when_admin_chat_id_is_empty(self):
@@ -3616,6 +3624,152 @@ class PublicFeedHiddenGateTests(TestCase):
         self.assertIs(rows[str(hidden.id)]["isAutomated"], True)
 
 
+class OfficialPostAutoPublicationTests(TestCase):
+    """Ingestion auto-publishes: a new official row is LIVE and on the feed.
+
+    The public feed's automated-``PENDING_APPROVAL`` gate is now a defensive net;
+    a row written by ``ingest_posts`` is ``LIVE`` and therefore never touches it.
+    """
+
+    feed_query = """
+        query Feed($first: Int) {
+            publicSocialMediaLinks(first: $first) {
+                totalCount
+                edges { node { id status isAutomated } }
+            }
+        }
+    """
+
+    def test_a_newly_ingested_post_is_live_and_appears_on_the_public_feed(self):
+        author = get_system_author()
+        posts = load_fixture_posts(str(SAMPLE_FIXTURE))
+        ingest_posts(posts, author=author)
+
+        row = SocialMediaLink.objects.get(post_id=posts[0].post_id)
+        self.assertEqual(row.status, SocialMediaLinkStatus.LIVE)
+        self.assertIs(row.is_automated, True)
+
+        result = execute_graphql(self.feed_query, variables={"first": 10})
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        feed = result.data["publicSocialMediaLinks"]
+        by_id = {edge["node"]["id"]: edge["node"] for edge in feed["edges"]}
+        self.assertIn(str(row.id), by_id)
+        self.assertEqual(by_id[str(row.id)]["status"], "LIVE")
+        self.assertIs(by_id[str(row.id)]["isAutomated"], True)
+
+
+class AutoApproveOfficialLinksBackfillTests(TestCase):
+    """Migration 0032: automated pending -> LIVE; HIDDEN / community untouched."""
+
+    def _link(self, user, *, slug, status, is_automated):
+        return SocialMediaLink.objects.create(
+            url=f"https://example.com/0032-{slug}",
+            title=slug,
+            user=user,
+            status=status,
+            is_automated=is_automated,
+        )
+
+    def test_only_automated_pending_rows_are_flipped_to_live(self):
+        import importlib
+
+        from django.apps import apps as django_apps
+
+        migration = importlib.import_module(
+            "incident.migrations.0032_autoapprove_official_links"
+        )
+        user = User.objects.create(firebase_id="gate-0032-backfill")
+
+        auto_pending = self._link(
+            user,
+            slug="auto-pending",
+            status=SocialMediaLinkStatus.PENDING_APPROVAL,
+            is_automated=True,
+        )
+        auto_hidden = self._link(
+            user,
+            slug="auto-hidden",
+            status=SocialMediaLinkStatus.HIDDEN,
+            is_automated=True,
+        )
+        community_pending = self._link(
+            user,
+            slug="community-pending",
+            status=SocialMediaLinkStatus.PENDING_APPROVAL,
+            is_automated=False,
+        )
+
+        migration.approve_pending_official_links(django_apps, None)
+
+        for link in (auto_pending, auto_hidden, community_pending):
+            link.refresh_from_db()
+        self.assertEqual(auto_pending.status, SocialMediaLinkStatus.LIVE)
+        # HIDDEN is a moderation verdict, never a lifecycle stage — untouched.
+        self.assertEqual(auto_hidden.status, SocialMediaLinkStatus.HIDDEN)
+        # Community links are out of the backfill's scope entirely.
+        self.assertEqual(
+            community_pending.status, SocialMediaLinkStatus.PENDING_APPROVAL
+        )
+
+
+class ConsoleQueueHiddenFilterTests(TestCase):
+    """The console-queue ``hidden`` tri-state arg, through the real schema."""
+
+    query = """
+        query Console($hidden: Boolean) {
+            socialMediaLinks(hidden: $hidden) { id status }
+        }
+    """
+
+    def setUp(self):
+        self.user = User.objects.create(firebase_id="console-hidden-filter")
+        self.hidden = SocialMediaLink.objects.create(
+            url="https://example.com/console-hidden",
+            title="hidden",
+            user=self.user,
+            status=SocialMediaLinkStatus.HIDDEN,
+        )
+        self.live = SocialMediaLink.objects.create(
+            url="https://example.com/console-live",
+            title="live",
+            user=self.user,
+            status=SocialMediaLinkStatus.LIVE,
+        )
+        self.pending = SocialMediaLink.objects.create(
+            url="https://example.com/console-pending",
+            title="pending",
+            user=self.user,
+            status=SocialMediaLinkStatus.PENDING_APPROVAL,
+        )
+
+    def _ids(self, variables):
+        with patch(
+            "rosak.permissions.has_admin_claim",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            result = execute_graphql(self.query, variables=variables, user=self.user)
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        return {row["id"] for row in result.data["socialMediaLinks"]}
+
+    def test_omitted_lists_every_status_hidden_included(self):
+        ids = self._ids({})
+        self.assertIn(str(self.hidden.id), ids)
+        self.assertIn(str(self.live.id), ids)
+        self.assertIn(str(self.pending.id), ids)
+
+    def test_true_returns_only_hidden(self):
+        ids = self._ids({"hidden": True})
+        self.assertEqual(ids, {str(self.hidden.id)})
+
+    def test_false_excludes_hidden_and_keeps_the_rest(self):
+        ids = self._ids({"hidden": False})
+        self.assertNotIn(str(self.hidden.id), ids)
+        self.assertIn(str(self.live.id), ids)
+        self.assertIn(str(self.pending.id), ids)
+
+
 class SocialMediaLinkAutomatedFlagTests(TestCase):
     """``isAutomated`` on the scalar, and who may set ``HIDDEN``."""
 
@@ -3737,10 +3891,11 @@ class IngestOfficialPostsCommandTests(TestCase):
         self.assertIn("skipped=0", out)
         self.assertIn("duplicate_urls=0", out)
         self.assertIn("dry_run=False", out)
+        # Ingestion auto-publishes: the imported rows land LIVE.
         self.assertEqual(
             SocialMediaLink.objects.filter(
                 socmed_account__handle="askrapidkl",
-                status=SocialMediaLinkStatus.PENDING_APPROVAL,
+                status=SocialMediaLinkStatus.LIVE,
             ).count(),
             2,
         )
@@ -5195,7 +5350,7 @@ class XWebhookDeliveryViewTests(TestCase):
                 WEBHOOK_URL, data=raw, content_type="application/json", headers=headers
             )
 
-    def test_a_signed_delivery_creates_exactly_one_pending_row(self):
+    def test_a_signed_delivery_creates_exactly_one_live_row(self):
         response = self._post(xaa_post_create_payload())
 
         self.assertEqual(response.status_code, 200)
@@ -5210,7 +5365,8 @@ class XWebhookDeliveryViewTests(TestCase):
             },
         )
         link = SocialMediaLink.objects.get(post_id=WEBHOOK_POST_ID)
-        self.assertEqual(link.status, SocialMediaLinkStatus.PENDING_APPROVAL)
+        # The webhook reaches ingest_posts, so it inherits auto-publication.
+        self.assertEqual(link.status, SocialMediaLinkStatus.LIVE)
         self.assertTrue(link.is_automated)
         self.assertEqual(link.user, get_system_author())
         # Verbatim after the single entity decode, including the ampersand.

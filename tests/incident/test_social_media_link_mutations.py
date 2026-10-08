@@ -434,3 +434,50 @@ async def test_admin_resolver_filters():
     )
     ids = {link.id for link in res}
     assert link_all.id in ids
+
+
+@pytest.mark.django_db
+async def test_admin_resolver_hidden_tri_state_filter():
+    """The console-queue ``hidden`` arg: only-HIDDEN / hide-HIDDEN / all.
+
+    ``None`` (omitted) must preserve the console's long-standing behaviour of
+    listing every status — HIDDEN included, because an admin has to find one in
+    order to un-hide it. The two explicit states narrow that set.
+    """
+    from incident.schema.resolvers import get_social_media_links
+
+    user = await _make_user(42)
+
+    async def _make(slug, status):
+        return await sync_to_async(SocialMediaLink.objects.create)(
+            url=f"https://x.com/lrt/status/{slug}",
+            title=slug,
+            user=user,
+            status=status,
+        )
+
+    hidden = await _make("flt-hidden", SocialMediaLinkStatus.HIDDEN)
+    pending = await _make("flt-pending", SocialMediaLinkStatus.PENDING_APPROVAL)
+    live = await _make("flt-live", SocialMediaLinkStatus.LIVE)
+
+    # Omitted -> all statuses (the console default), HIDDEN included.
+    all_ids = {link.id for link in await get_social_media_links(None)}
+    assert {hidden.id, pending.id, live.id} <= all_ids
+
+    # true -> ONLY HIDDEN.
+    hidden_ids = {
+        link.id
+        for link in await get_social_media_links(None, hidden=strawberry.Some(True))
+    }
+    assert hidden.id in hidden_ids
+    assert pending.id not in hidden_ids
+    assert live.id not in hidden_ids
+
+    # false -> HIDDEN excluded; the other statuses are untouched.
+    visible_ids = {
+        link.id
+        for link in await get_social_media_links(None, hidden=strawberry.Some(False))
+    }
+    assert hidden.id not in visible_ids
+    assert pending.id in visible_ids
+    assert live.id in visible_ids

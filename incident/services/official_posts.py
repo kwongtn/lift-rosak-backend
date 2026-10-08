@@ -20,8 +20,13 @@ worker rather than an async resolver:
   the bounded ``sync_account_profiles`` sweep over rows with a missing id).
 * ingesting — ``ingest_posts`` is idempotent per ``(socmed_account, post_id)``,
   backed by a partial unique constraint on the model plus a best-effort
-  ``normalized_url`` check, and creates rows ``PENDING_APPROVAL`` because
-  approval is the publish gate (decision D4). ``tweet_to_raw_post`` is also the
+  ``normalized_url`` check, and creates rows ``LIVE``: official posts are
+  auto-published (auto-approved) by policy, so they are visible the moment the
+  operator's own account announces them. The existence checks run before every
+  create, so a re-ingest of an already-stored ``(socmed_account, post_id)`` or
+  duplicate ``normalized_url`` row is skipped without a write — an admin who
+  hides an official row is therefore never overridden by the next fetch.
+  ``tweet_to_raw_post`` is also the
   single HTML-entity decode point for the post text, so both ingest paths (poll
   and webhook) store decoded text while ``raw_payload`` keeps the provider's
   original bytes.
@@ -543,9 +548,12 @@ def ingest_posts(
     possible for a handle-less post — is skipped and counted); existing
     ``(socmed_account, post_id)`` → skip; existing ``normalized_url`` → skip and
     count as a duplicate URL (the existing row is left alone and never upvoted
-    by a system author); otherwise create. Each create runs in its own short
-    ``transaction.atomic()`` so one bad post cannot roll back the batch, and an
-    ``IntegrityError`` from the partial unique constraint is the race backstop.
+    by a system author); otherwise create. A created row is ``LIVE``: official
+    posts are auto-published (auto-approved) by policy, so no admin action sits
+    between the provider's announcement and the public feed. Each create runs in
+    its own short ``transaction.atomic()`` so one bad post cannot roll back the
+    batch, and an ``IntegrityError`` from the partial unique constraint is the
+    race backstop.
 
     ``dry_run`` runs the same existence checks and counts what *would* be
     created (``created`` is therefore a projected count) but writes nothing, so a
@@ -562,7 +570,8 @@ def ingest_posts(
     (``services.x_webhooks.ingest_webhook_payload``) all arrive here — so writing
     the pair in one place is what makes the split drift-proof. A duplicate
     ``(socmed_account, post_id)`` or ``normalized_url`` match is skipped without
-    a write, so re-ingest never rewrites either column.
+    a write, so re-ingest neither rewrites either column nor resurrects an
+    admin-hidden official row.
     """
     created = 0
     skipped = 0
@@ -605,7 +614,12 @@ def ingest_posts(
                     title=post.text[:TITLE_MAX_LENGTH],
                     # Verbatim post text, never truncated.
                     description=post.text,
-                    status=SocialMediaLinkStatus.PENDING_APPROVAL,
+                    # Auto-published (auto-approved) by policy: an official
+                    # post is visible the moment the operator announces it. A
+                    # re-ingest skips an existing (socmed_account, post_id) or
+                    # normalized_url row without a write, so an admin who later
+                    # HIDES an official row is never overridden by a fetch.
+                    status=SocialMediaLinkStatus.LIVE,
                     is_automated=True,
                     user=author,
                     socmed_account=account,
