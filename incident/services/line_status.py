@@ -189,7 +189,16 @@ async def _links_by_id(link_ids: set[int]) -> dict[int, SocialMediaLink]:
     # (``Meta.ordering = ["position"]``): this result is keyed by pk, so the sort
     # is pure overhead and the implicit sibling rank is not even meaningful
     # across a set of unrelated links.
-    async for link in SocialMediaLink.objects.filter(pk__in=link_ids).order_by():
+    # ``select_related``/``prefetch_related`` cover the fields the GraphQL type
+    # resolves per link (``user``, ``lines``); DjangoOptimizerExtension cannot see
+    # loader-returned objects, so without these each link lazy-loads them.
+    queryset = (
+        SocialMediaLink.objects.filter(pk__in=link_ids)
+        .select_related("user")
+        .prefetch_related("lines")
+        .order_by()
+    )
+    async for link in queryset:
         links[link.pk] = link
     return links
 

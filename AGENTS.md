@@ -50,10 +50,11 @@ docker compose exec app celery -A rosak.celery_app worker -l INFO -c 2
 docker compose exec app celery -A rosak.celery_app beat -l INFO
 ```
 
-**Testing state (as of August 2026):** Full test suite passes with **180 tests** after
-the Strawberry GraphQL migration. `tests.py` was previously 0 bytes in `common`,
-`generic`, `mlptf`, `operation` and `reporting`; migration added 50+ new unit tests
-across all phases. No pytest/tox/coverage yet. **`ruff check` + `manage.py check` +
+**Testing state (as of October 2026):** The full serial suite (`manage.py test --keepdb`)
+passes with **537 tests** (it was 180 when the Strawberry GraphQL migration landed in August).
+Async tests under `tests/` are pytest-style and commit rows outside the test transaction. **After
+any pytest run, run `manage.py test` WITHOUT `--keepdb`**: a kept test DB then fails with
+~47 errors. No tox/coverage yet. **`ruff check` + `manage.py check` +
 `makemigrations --check` + full test suite are the verification gate.** If you touch a
 module, add tests for new behavior in the same change.
 

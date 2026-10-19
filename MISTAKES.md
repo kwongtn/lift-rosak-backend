@@ -11,6 +11,20 @@
 
 ## Traps
 
+### [2026-10-19] tests: async pytest tests under `tests/` commit rows outside the test transaction — a kept test DB then breaks `manage.py test --keepdb`
+
+**Problem**: After a pytest run that includes the async tests under `tests/`, `manage.py test --keepdb` reports about **47 errors** against the kept test database.
+**Root Cause**: The async pytest tests commit rows outside the per-test transaction, so the kept DB carries that data forward into the Django runner.
+**Fix**: _Workaround._ After any pytest run, run `docker compose exec app python manage.py test` **without** `--keepdb`, which rebuilds the test DB. Noted in `AGENTS.md` (testing state).
+**Prevention**: Never run pytest and `--keepdb` against the same test DB back to back. If the Django run suddenly shows dozens of errors after a pytest run, suspect the kept DB before the code.
+
+### [2026-10-19] incident: `DjangoOptimizerExtension` cannot see objects a DataLoader returns — the pulse-link N+1 on the front-page `lines` query
+
+**Problem**: The front-page `lines` query resolved each line's pulse links through a loader, and every link lazy-loaded its `user` and `lines`, one query per link.
+**Root Cause**: `DjangoOptimizerExtension` optimizes only the queryset Strawberry-Django builds for the field it resolves. Rows a DataLoader returns come from a plain queryset the extension never inspects, so their relations are not prefetched.
+**Fix**: _Fixed (uncommitted)._ `incident/services/line_status.py::_links_by_id` now uses `select_related("user").prefetch_related("lines")`. Pinned by `tests/incident/test_line_status_loader.py::test_pulse_links_query_count_does_not_scale_with_link_count`.
+**Prevention**: A loader that returns model instances must apply its own `select_related` / `prefetch_related` for every field its GraphQL type resolves. Pin it with a `CaptureQueriesContext` count test, as the loader test does.
+
 ### [2026-10-03] tests: patching `django.utils.timezone.now` does **not** freeze an `auto_now_add` stamp — a frozen-clock audit of a `create()`-based fixture describes a DIFFERENT instant
 
 **Problem**: The 2026-10-01 entry below recommends auditing a time-sensitive fixture class by "re-running the test module with `django.utils.timezone.now` frozen at a few hours". That technique silently does not apply to the row timestamps. Observed on 2026-10-03: with `django.utils.timezone.now` patched to `2026-10-03 00:05`, a `LineStatusReport.objects.create(...)` in the same test body stored `created = 2026-10-03 00:15:48` — the **real** wall clock — while `timezone.now()` read `00:05` and `line_status.service_day_start(...)` correctly resolved to the previous day's 03:00. The loader therefore compared a *real-now* row against a *frozen-now* window, and `assertEqual(len(buckets), 24)` failed with `0` — a failure indistinguishable, in shape and in stack, from the very 03:00-rollover trap the audit was hunting. Patching to an instant *later* than the real clock is not a workaround: then a row stamped before 03:00 real time falls outside that frozen day's service-day start and the same assertion fails the other way.
