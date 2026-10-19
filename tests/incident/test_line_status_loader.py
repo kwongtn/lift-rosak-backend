@@ -3,7 +3,10 @@
 from datetime import timedelta
 
 import pytest
-from asgiref.sync import sync_to_async
+from asgiref.sync import async_to_sync, sync_to_async
+from django.contrib.contenttypes.models import ContentType
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from common.models import User
@@ -128,3 +131,51 @@ async def test_pulse_links_are_newest_first_distinct_and_capped_at_five():
     assert [link.id for link in pulses[line.id].links] == [
         link.id for link in links[:5]
     ]
+
+
+@pytest.mark.django_db
+def test_pulse_links_query_count_does_not_scale_with_link_count():
+    user = User.objects.create(firebase_id="pulse-link-n1-user")
+    # Warm the ContentType cache so the counts reflect only the pulse reads.
+    ContentType.objects.get_for_model(SocialMediaLink)
+
+    def _lines_with_links(tag: str, links_per_line: int) -> list[Line]:
+        lines = []
+        for i in range(3):
+            line = Line.objects.create(
+                code=f"{tag}{i}", display_name=f"{tag}{i}", display_color="#FF0000"
+            )
+            for j in range(links_per_line):
+                link = SocialMediaLink.objects.create(
+                    url=f"https://example.com/pulse-n1-{tag}-{i}-{j}", user=user
+                )
+                link.lines.add(line)
+                LineStatusReport.objects.create(
+                    line=line,
+                    status=PassengerStatus.NORMAL,
+                    user=user,
+                    link=link,
+                )
+            lines.append(line)
+        return lines
+
+    def _load(lines: list[Line]):
+        with CaptureQueriesContext(connection) as captured:
+            pulses = async_to_sync(load_line_pulses)([line.id for line in lines])
+        return pulses, len(captured.captured_queries)
+
+    one_link_lines = _lines_with_links("S", 1)
+    five_link_lines = _lines_with_links("L", 5)
+
+    one_pulses, one_link_queries = _load(one_link_lines)
+    five_pulses, five_link_queries = _load(five_link_lines)
+
+    assert one_link_queries == five_link_queries
+    links = [link for pulse in five_pulses.values() for link in pulse.links]
+    assert len(links) == 15
+    # Touching the relations the GraphQL type exposes must not query per link.
+    with CaptureQueriesContext(connection) as touched:
+        for link in links:
+            assert link.user.id == user.id
+            assert len(link.lines.all()) == 1
+    assert touched.captured_queries == []
