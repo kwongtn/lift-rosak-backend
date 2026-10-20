@@ -19,8 +19,8 @@ def report_spotting_today(self, *args, **kwargs) -> None:
     # day that just ended (and still is if the worker picks the job up late).
     spotting_date = effective_spotting_date(datetime.now(ZoneInfo(settings.TIME_ZONE)))
 
-    # May need to rewrite as some channels have multiple lines. We only take the first one.
-    for line in Line.objects.distinct("telegram_channel_id"):
+    # telegram_channel_id is unique, so each channel gets exactly one digest.
+    for line in Line.objects.all():
         if not line.telegram_channel_id:
             continue
 

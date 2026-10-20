@@ -1192,30 +1192,11 @@ class ReportSpottingTodayTaskTests(TestCase):
 
         return fake_send_message
 
-    @staticmethod
-    def _ordered_line_proxy():
-        # `Line.objects.distinct("telegram_channel_id")` raises ProgrammingError
-        # on PostgreSQL unless the leading ORDER BY matches the DISTINCT ON
-        # field (Line.Meta.ordering is ["code"]). Proxy the real manager with
-        # the required ordering until the task declares it itself.
-        real_manager = Line.objects
-
-        class OrderedManager:
-            @staticmethod
-            def distinct(field_name):
-                return real_manager.order_by(field_name).distinct(field_name)
-
-        class LineProxy:
-            objects = OrderedManager()
-
-        return LineProxy
-
     def test_sends_digest_once_per_line_channel(self):
         calls = []
 
         with (
             patch("spotting.tasks.send_message", new=self._recording_send_stub(calls)),
-            patch("spotting.tasks.Line", new=self._ordered_line_proxy()),
         ):
             report_spotting_today.apply()
 
@@ -1243,7 +1224,6 @@ class ReportSpottingTodayTaskTests(TestCase):
 
         with (
             patch("spotting.tasks.send_message", new=self._recording_send_stub(calls)),
-            patch("spotting.tasks.Line", new=self._ordered_line_proxy()),
         ):
             report_spotting_today.apply()
 
@@ -1257,7 +1237,6 @@ class ReportSpottingTodayTaskTests(TestCase):
         calls = []
         with (
             patch("spotting.tasks.send_message", new=self._recording_send_stub(calls)),
-            patch("spotting.tasks.Line", new=self._ordered_line_proxy()),
             patch("spotting.tasks.datetime", **{"now.return_value": moment}),
         ):
             report_spotting_today.apply()
