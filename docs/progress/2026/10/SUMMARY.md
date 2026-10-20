@@ -7,7 +7,7 @@ Total commits: 0 committed (1 change in progress, uncommitted at the time of wri
 - feat: 0
 - **(this commit)** feat: 1
 - **(uncommitted)** feat: 2
-- **(uncommitted)** fix: 4
+- **(uncommitted)** fix: 5
 
 ## By Module/Feature
 
@@ -24,6 +24,10 @@ Total commits: 0 committed (1 change in progress, uncommitted at the time of wri
 - **(this commit)** [feat](incident): official posts now **auto-publish** — `ingest_posts` writes `SocialMediaLinkStatus.LIVE` (auto-approved by policy) and data migration `0032_autoapprove_official_links` backfills the rows the old policy left `PENDING_APPROVAL` (automated pending → `LIVE`; `HIDDEN` never touched; community links untouched; reverse is `noop` because re-pending would resurrect the old policy). The public-feed automated-pending exclusion and the `is_publicly_visible` predicate stay as a **defensive net** (they now only catch legacy/imported automated rows). The admin Telegram copy says "New official post — published" and "Review in the console" and no longer advertises `/approve` (which was already a no-op on a `LIVE` row). The console queue gains `socialMediaLinks(hidden: Boolean)`: omitted = all statuses (unchanged), `true` = only `HIDDEN`, `false` = exclude `HIDDEN`. SDL diff is the one additive arg; 5 new gate-visible tests in `incident/tests.py` plus updated ingest/webhook/notification assertions — see `docs/progress/2026/10/08.md`
 
 - **(uncommitted)** [fix](incident): front-page `lines` query N+1 on pulse links. `services/line_status._links_by_id` now uses `select_related("user").prefetch_related("lines")`, because `DjangoOptimizerExtension` cannot see loader-returned objects. Pinned by `test_pulse_links_query_count_does_not_scale_with_link_count` in `tests/incident/test_line_status_loader.py` — see `docs/progress/2026/10/19.md`
+
+### Operation (1 commit)
+
+- **(this commit)** [fix](operation): `Vehicle.lastSpottedAt: DateTime` — a same-day tiebreaker for `lastSpottingDate`, which is date-only and left seven vehicles tied on 2026-10-18 (the "Most Recently Spotted" card showed the wrong one). One `DISTINCT ON` loader returns the `created` of each vehicle's latest `(spotting_date, created)` event, with the same status exclusions as `lastSpottingDate`; new `last_spotted_at_from_vehicle_loader`, test `tests/operation/test_last_spotted_at_loader.py` — see `docs/progress/2026/10/20.md`
 
 ### Common (1 commit)
 

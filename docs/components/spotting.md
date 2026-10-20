@@ -46,7 +46,7 @@
 - **`LocationEvent`** type — `location` (PointField scalar), `accuracy`, `altitude`, `altitude_accuracy`, `heading`, `speed`.
 - **Celery task emitted:** `spotting.tasks.report_spotting_today` (see below).
 - **Outbound side effect:** Telegram HTML messages to per-`Line` channels.
-- **Reverse consumers of this app's data** (spotting is read _from_ elsewhere): `operation.schema.loaders` (`last_spotting_date_from_vehicle_loader`, `spotting_count_from_vehicle_loader`, `spottings_from_vehicle_loader`), `operation.schema.scalars` (`spottingTrends`, `vehicleSpottingTrends`), `common.schema.loaders.spottings_from_user_loader`, `common.schema.scalars.UserScalar.spottings*`, `telegram_provider.models.TelegramSpottingEventLog.spotting_event`, `telegram_provider.handlers` (creates `Event`s from bot commands), `telegram_provider.utils.get_daily_updates`, and `chartography` fleet-status aggregations.
+- **Reverse consumers of this app's data** (spotting is read _from_ elsewhere): `operation.schema.loaders` (`last_spotting_date_from_vehicle_loader`, `last_spotted_at_from_vehicle_loader`, `spotting_count_from_vehicle_loader`, `spottings_from_vehicle_loader`), `operation.schema.scalars` (`spottingTrends`, `vehicleSpottingTrends`), `common.schema.loaders.spottings_from_user_loader`, `common.schema.scalars.UserScalar.spottings*`, `telegram_provider.models.TelegramSpottingEventLog.spotting_event`, `telegram_provider.handlers` (creates `Event`s from bot commands), `telegram_provider.utils.get_daily_updates`, and `chartography` fleet-status aggregations.
 
 ### Dependencies
 

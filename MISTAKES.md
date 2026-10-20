@@ -11,6 +11,13 @@
 
 ## Traps
 
+### [2026-10-20] operation: Date-only `lastSpottingDate` cannot order same-day sightings
+
+**Problem**: The "Most Recently Spotted" card on the line overview showed vehicle 110 on MRT Kajang Line although vehicle 151 was spotted later. Seven vehicles tied on `lastSpottingDate` 2026-10-18, and the frontend picked among them by list order.
+**Root Cause**: `Event.spotting_date` is a `DateField`, so `Vehicle.last_spotting_date` carries no time of day. Any "latest" ordering built on it cannot separate same-day sightings, and the frontend comparator never returned `0` on ties.
+**Fix**: _Fixed (this commit)._ Added `Vehicle.lastSpottedAt: DateTime` (`scalars.py::last_spotted_at`), loaded by `batch_load_last_spotted_at_from_vehicle_id` via `last_spotted_at_from_vehicle_loader`. One `DISTINCT ON` query returns the `created` of each vehicle's event with the highest `(spotting_date, created)`, excluding the same statuses as `lastSpottingDate`. The frontend sorts by `lastSpottingDate`, then `lastSpottedAt`. Pinned by `tests/operation/test_last_spotted_at_loader.py`.
+**Prevention**: Do not order by a date-only column when rows can share a day. Add a finer-grained field (a timestamp) as the tiebreaker, and test with several rows on the same day.
+
 ### [2026-10-19] tests: async pytest tests under `tests/` commit rows outside the test transaction — a kept test DB then breaks `manage.py test --keepdb`
 
 **Problem**: After a pytest run that includes the async tests under `tests/`, `manage.py test --keepdb` reports about **47 errors** against the kept test database.

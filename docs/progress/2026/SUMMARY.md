@@ -4,7 +4,7 @@ Total commits: 115
 
 ## Monthly Breakdown
 
-### 2026-10 (0 commits committed, 2 uncommitted)
+### 2026-10 (0 commits committed, 3 uncommitted)
 
 #### Incident (1 commits)
 
@@ -18,6 +18,10 @@ Total commits: 115
 
 
 - **(this commit)** [feat](incident): official posts now **auto-publish** — `ingest_posts` writes `LIVE` (auto-approved by policy) and migration `0032_autoapprove_official_links` backfills the rows the old policy left `PENDING_APPROVAL` (automated pending → `LIVE`; `HIDDEN` never touched; community links untouched; reverse `noop`). The public-feed automated-pending exclusion stays as a defensive net. Telegram copy says "published" / "Review in the console" and drops the `/approve` prompt (already a no-op on `LIVE`). Console queue gains `socialMediaLinks(hidden: Boolean)` (omitted = all, true = only `HIDDEN`, false = exclude `HIDDEN`). SDL additive; 5 new gate-visible tests + updated ingest/webhook/notification assertions — see `docs/progress/2026/10/08.md`
+
+#### Operation (1 commits)
+
+- **(this commit)** [fix](operation): `Vehicle.lastSpottedAt: DateTime` tiebreaker for the date-only `lastSpottingDate` (same-day sightings tied, so "Most Recently Spotted" showed the wrong vehicle); `DISTINCT ON` loader `last_spotted_at_from_vehicle_loader` — see `docs/progress/2026/10/20.md`
 
 #### Telegram Provider (1 commits)
 
