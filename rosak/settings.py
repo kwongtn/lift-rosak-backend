@@ -399,7 +399,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # as AutoField (Django 2.0 era). With DEFAULT_AUTO_FIELD=BigAutoField, Django
 # wants an extra `0004_alter_advancedfilter_id` migration that can never be
 # committed to the package. Vendor the app's migrations so the missing
-# migration lives in this repo (see DJANGO_5.2_UPGRADE.md).
+# migration lives in this repo (advanced_filters_migrations/).
 MIGRATION_MODULES = {
     "advanced_filters": "advanced_filters_migrations",
 }
