@@ -1,78 +1,38 @@
 # Privacy Implementation — Public Profiles
 
-## Database Schema
+## Schema
 
-### User Model (`common.models.User`)
+- `common.models.User.spotting_data_public` — `BooleanField`, default `False` (strictly
+  opt-in); gates visibility of historical spottings on public profiles. Added in
+  `common/migrations/0019_user_spotting_data_public_userjejaktransaction.py`.
+- `UserScalar.spottingDataPublic: Boolean!` exposes the flag.
 
-- **Field**: `spotting_data_public` (BooleanField)
-- **Default**: `False` (strictly opt-in)
-- **Migration**: `0019_user_spotting_data_public_userjejaktransaction`
-- **Purpose**: Controls visibility of historical spotting data on public profiles
+## GraphQL
 
-## GraphQL Schema
+- **`publicUser(id: ID!): UserScalar`** — no permission class (public). `id` is the
+  user's **Firebase UID** (`User.firebase_id`), not the database pk. Returns `null` when
+  not found.
+- **`UserScalar.spottings: [EventScalar!]`** — enforced in the resolver
+  (`common/schema/scalars.py`):
+  - owner (authenticated user viewing own profile): full list
+  - non-owner + `spotting_data_public=True`: full list
+  - non-owner + `spotting_data_public=False`: `null` (`null` = private, `[]` = no data)
+- **`updateUser(input: UserInput!)`** — `IsLoggedIn`, updates only the caller.
+  `UserInput.spotting_data_public` is `Maybe[bool | None] = UNSET`; omitted leaves the
+  stored value unchanged (tri-state rules: [STRAWBERRY_MIGRATION.md](STRAWBERRY_MIGRATION.md)).
 
-### Queries
+## Contract
 
-#### `publicUser(id: ID!): UserScalar`
+| Tier                                           | Fields                                                                                                                            |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Always public                                  | `nickname`, `shortId` (first 8 chars of the Firebase UID), `spottingsCount`, `mediaCount`, `spottingTrends`, `withMostEntries`, `favouriteVehicles` |
+| Opt-in (`spotting_data_public=true`, or owner) | `spottings` — date, notes, vehicle details, media count, status                                                                   |
+| Never exposed                                  | email; full Firebase UID (`firebase_id` is `IsAdmin`-only)                                                                        |
 
-- **Purpose**: Fetch any user's public profile by ID
-- **Authentication**: None required (public query)
-- **Returns**: `UserScalar` or `null` if user not found
-- **Privacy**: Field-level enforcement in `UserScalar.spottings` resolver
+## Notes
 
-### Types
-
-#### `UserScalar` (common.schema.scalars)
-
-- **New Field**: `spotting_data_public: Boolean!`
-- **Privacy Logic**: `spottings` field returns `Optional[List[EventScalar]]`
-  - Owner (authenticated user viewing own profile): always returns full list
-  - Non-owner + `spotting_data_public=True`: returns full list
-  - Non-owner + `spotting_data_public=False`: returns `null`
-
-### Mutations
-
-#### `updateUser(input: UserInput!): UserScalar`
-
-- **New Input Field**: `spotting_data_public: Optional[bool]` (default: UNSET)
-- **Behavior**: Only updates when explicitly provided (not UNSET)
-- **Permission**: `IsLoggedIn` (can only update own profile)
-
-## Privacy Contract
-
-### Always Public (Unauthenticated Access Allowed)
-
-- Nickname
-- Total spottings count (`spottingsCount`)
-- Media uploaded count (`mediaCount`)
-- Activity heatmap data (`spottingTrends`)
-- Best month/day aggregates (`withMostEntries*`)
-- Favorite vehicles (`favouriteVehicles`)
-
-### Opt-In Only (Requires `spotting_data_public=true`)
-
-- Historical spottings list with full details (`spottings`)
-  - Includes: spotting date, notes, vehicle details, media count, status
-
-### Never Exposed
-
-- Email address
-- Firebase UID (admin-only via `firebase_id` field with `permission_classes=[IsAdmin]`)
-- Internal IDs beyond public identifiers
-
-## Testing
-
-See `common.tests.UserPrivacyTests` for comprehensive test coverage:
-
-- Default privacy (new users private by default)
-- Owner access (always sees own data)
-- Public access (non-owner sees data when public)
-- Private access (non-owner gets null when private)
-- Migration verification
-
-## Security Considerations
-
-- Privacy is enforced at the resolver level (field-level permissions)
-- `null` vs `[]` distinction: `null` = private, `[]` = no data exists
-- Authentication context available via `info.context.user`
-- DataLoader pattern preserved for performance
+- Privacy is field-level, in the resolver; the per-user DataLoader
+  (`spottings_from_user_loader`) is preserved. The caller comes from `info.context.user`.
+- Tests in `common/tests.py`: `UserPrivacyTests` (default private; owner / public /
+  private access), `SpottingDataPublicMigrationTests`, `TestUserInput` and
+  `TestUpdateUserMutation` (omitted / null / true).

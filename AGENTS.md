@@ -2,43 +2,41 @@
 
 Django 5.2 + Strawberry GraphQL backend for the MLPTF/LRT community platform.
 **This repo is backend-only.** The Angular SPA at `community.mlptf.org.my` lives in a
-separate repository and is only a consumer of `POST /graphql/` — never add frontend
-code here.
+separate repository (`../rosak_firebase`) and only consumes `POST /graphql/` — never add
+frontend code here. Stack inventory and versions: [techstack.md](techstack.md).
 
-This project has an OKF knowledge bundle at ./okf_bundle/.
-
-- Use `okf lookup <Name>` for full concept context.
-- Use `okf lookup --type <Type>` to filter by type.
-- Read `SUMMARY.md` for the full knowledge map.
+OKF knowledge bundle at `../okf_bundle/`: `okf lookup <Name>` for concept context,
+`okf lookup --type <Type>` to filter, `../okf_bundle/SUMMARY.md` for the knowledge map.
 
 ---
 
 ## ⚡ Quick Commands
 
-Everything runs through Docker Compose — it is the only path that provides PostGIS,
-Valkey and nginx together. Run `manage.py` inside the `app` service, never on the host.
+Everything runs through Docker Compose — the only path that provides PostGIS, Valkey and
+nginx together. Run `manage.py` inside the `app` service, never on the host.
 
 ```bash
-# Dev stack (nginx :8000 → granian :8001, db, valkey, celeryworker, celerybeat)
+# Dev stack (web/nginx :8000 → app/granian :8001; db, timescaledb, valkey, celeryworker, celerybeat)
 docker compose up --build          # add -d to detach
 docker compose logs -f app         # tail the API
 docker compose down                # stop
 
 # Django management (prefix everything)
 docker compose exec app python manage.py <cmd>
-docker compose exec app python manage.py check          # WSGI stack does NOT run checks
+docker compose exec app python manage.py check          # Granian does not run system checks
 docker compose exec app python manage.py shell_plus     # django-extensions
 docker compose exec app python manage.py createsuperuser
 
 # Database migrations
 docker compose exec app python manage.py makemigrations
 docker compose exec app python manage.py migrate
-docker compose exec app python manage.py makemigrations --check --dry-run  # CI-style gate
+docker compose exec app python manage.py makemigrations --check --dry-run  # CI gate
 ./dev_permissioner.sh              # ALWAYS after makemigrations — self-elevates into the container (works as non-root)
 
 # Tests — single-run, no watch mode
 docker compose exec app python manage.py test --keepdb   # serial; --parallel crashes with TypeError: cannot pickle 'traceback' object (see MISTAKES.md)
 docker compose exec app python manage.py test spotting.tests --keepdb   # one app
+docker compose exec app python -m pytest tests/incident -q              # pytest-style tree under tests/
 
 # Lint & format (ruff is the enforced gate; run before every handoff)
 ruff check . --fix
@@ -50,27 +48,27 @@ docker compose exec app celery -A rosak.celery_app worker -l INFO -c 2
 docker compose exec app celery -A rosak.celery_app beat -l INFO
 ```
 
-**Testing state (as of October 2026):** The full serial suite (`manage.py test --keepdb`)
-passes with **537 tests** (it was 180 when the Strawberry GraphQL migration landed in August).
-Async tests under `tests/` are pytest-style and commit rows outside the test transaction. **After
-any pytest run, run `manage.py test` WITHOUT `--keepdb`**: a kept test DB then fails with
-~47 errors. No tox/coverage yet. **`ruff check` + `manage.py check` +
-`makemigrations --check` + full test suite are the verification gate.** If you touch a
-module, add tests for new behavior in the same change.
+**Testing:** bare `manage.py test` does **not** collect the top-level `tests/` tree (see
+MISTAKES.md); run it with `pytest` (installed in the app container, not pinned in
+`requirements*.lock`) or by full dotted module label. Those async tests commit rows
+outside the test transaction, so **after any pytest run, run `manage.py test` WITHOUT
+`--keepdb`** — a kept test DB then fails with ~47 errors. No tox/coverage.
+**`ruff check` + `manage.py check` + `makemigrations --check` + full serial test suite
+are the verification gate.** Add tests for new behavior in the same change.
 
 ---
 
 ## 🏛️ Architecture & Component Pointer
 
-Django 5.2 on PostGIS (GeoDjango), exposing a **single async GraphQL endpoint** built
-with **Strawberry GraphQL 0.323.2** (strawberry-graphql-django 0.82.1, migrated from
-`UNSET` to `strawberry.Maybe[T]` pattern in August 2026) — the root `Query`/`Mutation`
-are assembled by _multiple inheritance_ in [rosak/schema.py](rosak/schema.py), so there
-is no routing layer. Auth is Firebase bearer-token → lazily `get_or_create`'d
-`common.User` in [rosak/context.py](rosak/context.py), with per-request DataLoaders and
-three Strawberry permission classes (`IsLoggedIn` / `IsAdmin` / `IsRecaptcha`). Async
-work is Celery + valkey with **all six periodic jobs declared centrally** in
-[rosak/celery.py](rosak/celery.py); served by Granian ASGI behind nginx.
+Django on PostGIS (GeoDjango), exposing a **single async GraphQL endpoint** built with
+Strawberry GraphQL / strawberry-graphql-django. The root `Query`/`Mutation` are assembled
+by _multiple inheritance_ in [rosak/schema.py](rosak/schema.py), so there is no routing
+layer. Auth is Firebase bearer-token → lazily `get_or_create`'d `common.User` in
+[rosak/context.py](rosak/context.py), with per-request DataLoaders and three Strawberry
+permission classes (`IsLoggedIn` / `IsAdmin` / `IsRecaptchaChallengePassed`,
+[rosak/permissions.py](rosak/permissions.py)). Async work is Celery + Valkey with **all
+periodic jobs declared centrally** in [rosak/celery.py](rosak/celery.py); served by
+Granian ASGI behind nginx.
 
 **Do not guess at component interfaces.** Read the docs first:
 
@@ -78,14 +76,15 @@ work is Celery + valkey with **all six periodic jobs declared centrally** in
   dependency graph, the beat-schedule table, and a **Known Defects & Traps** table.
   Read the traps table before debugging anything that looks broken; it probably is,
   and is already catalogued.
-- **[docs/components/](docs/components/)** — one doc per app
-  (`operation`, `common`, `spotting`, `incident`, `chartography`, `telegram_provider`,
-  `generic`, `reporting`, `mlptf`), each carrying its real interface, dependencies and
-  **designed extension points**.
+- **[docs/components/](docs/components/)** — one doc per app (`operation`, `common`,
+  `spotting`, `incident`, `chartography`, `telegram_provider`, `generic`, `reporting`,
+  `mlptf`): real interface, dependencies, **designed extension points**.
+- Also: [docs/privacy-implementation.md](docs/privacy-implementation.md) (public-profile
+  privacy contract).
 
 Orientation: `operation` is the reference-data hub everything FKs into; `common` is the
-substrate (identity, media pipeline, `get_trends()` analytics); `generic` is a
-table-less shared kernel that contributes zero migrations.
+substrate (identity, media pipeline, `get_trends()` analytics); `generic` is a table-less
+shared kernel with zero migrations.
 
 ---
 
@@ -93,8 +92,9 @@ table-less shared kernel that contributes zero migrations.
 
 **Module boundaries**
 
-- [tach.yml](tach.yml) declares the allowed cross-app import graph. Consult it before
-  adding any import between apps; `tach` is not installed by default (`uvx tach check`).
+- No tach config is checked in; the cross-app import graph is documented in
+  [docs/APPS.md](docs/APPS.md) (dependency graph shape). Consult it before adding any
+  import between apps.
 - The graph is already heavily cyclic. Break new cycles with **lazy string model
   references** (`"operation.Vehicle"`) or function-local imports — never a new
   module-level cross-app import.
@@ -102,10 +102,11 @@ table-less shared kernel that contributes zero migrations.
 
 **GraphQL / Strawberry**
 
-- **Migration status (August 2026):** Migrated to Strawberry GraphQL 0.323.2 with
-  `strawberry.Maybe[T]` pattern (replaces deprecated `UNSET`). See
-  [docs/STRAWBERRY_MIGRATION.md](docs/STRAWBERRY_MIGRATION.md) for tri-state semantics
-  and behavioral parity verification.
+- Optional input fields use `strawberry.Maybe[T | None]` (tri-state: omitted /
+  `Some(value)` / `Some(None)`); house default is `= strawberry.UNSET`. Check with
+  `if input.field:` (omitted is falsy, `Some` is always truthy), then read
+  `input.field.value`. Semantics and traps:
+  [docs/STRAWBERRY_MIGRATION.md](docs/STRAWBERRY_MIGRATION.md).
 - New root fields go on the per-app `*Scalars` / `*Mutations` mixin, not on `rosak/schema.py`.
 - New DataLoaders: add one key to the app's `*ContextLoaders` dict and register it in
   `rosak/context.py`. Resolvers that fan out to related rows **must** use a loader —
@@ -113,9 +114,6 @@ table-less shared kernel that contributes zero migrations.
 - Enum fields must use `TextChoicesField` (django-choices-field). A plain
   `TextField(choices=...)` renders as `String` in the schema, not an enum.
 - Resolvers are `async`; never call the sync ORM from one without `sync_to_async`.
-- Optional input fields: use `strawberry.Maybe[T | None] = None` for tri-state
-  (UNSET/Some(value)/Some(None)). Check with `if input.field:` then access
-  `input.field.value`.
 
 **Database & migrations**
 
@@ -129,21 +127,22 @@ table-less shared kernel that contributes zero migrations.
 - New periodic work goes in `rosak/celery.py`'s `beat_schedule` — **never** a local
   schedule. `autodiscover_tasks()` means a new `tasks.py` needs no registration.
 - Retries must be bounded. Unbounded retry-with-sleep loops pin a worker (see
-  `infinite_retry_on_error` in the traps table).
+  the unbounded media-task re-enqueue row in the `docs/APPS.md` traps table).
 
 **Error handling & typing**
 
 - **Never use bare `assert` for validation or request guarding.** It is stripped under
   `python -O` and surfaces as a 500, not a validation error. Raise an explicit
-  exception or a Strawberry error. Existing `assert`s in `incident` and `chartography`
-  are known defects, not precedent to copy.
+  exception or a Strawberry error. Existing `assert`s (`chartography/tasks.py`,
+  `rosak/asgi.py`) are known defects, not precedent to copy.
 - Type all new function signatures; `mypy` is configured with the Strawberry plugin
   ([mypi.ini](mypi.ini)).
 - Line length 88, `E501` ignored, max mccabe complexity 18 ([.ruff.toml](.ruff.toml)).
   Ruff is authoritative — the stale black/flake8 hints in `.vscode/settings.json` are not.
 
-**Local-vs-prod gotcha:** `DEBUG=True` swaps the Valkey cache for `DummyCache` and
-disables GraphQL introspection guarding. Cache-related bugs will not reproduce locally.
+**Local-vs-prod gotcha:** `DEBUG=True` swaps the Valkey cache for `DummyCache` and opens
+GraphQL introspection (it is blocked otherwise). Cache-related bugs will not reproduce
+locally.
 
 ---
 
@@ -153,9 +152,9 @@ disables GraphQL introspection guarding. Cache-related bugs will not reproduce l
 
 1. **Explore** — read [docs/APPS.md](docs/APPS.md) and the relevant
    `docs/components/*.md` before opening source. Check the traps table.
-2. **Plan** — state the file list, the migration impact, and any `tach.yml` boundary
-   the change crosses. Get agreement _before_ editing. Do not start multi-file edits
-   from an implicit plan.
+2. **Plan** — state the file list, the migration impact, and any cross-app import
+   boundary the change crosses. Get agreement _before_ editing. Do not start multi-file
+   edits from an implicit plan.
 3. **Code** — smallest change that satisfies the request. Prefer the documented
    extension point over new plumbing.
 4. **Verify** — never declare a task complete without running:
@@ -167,9 +166,9 @@ disables GraphQL introspection guarding. Cache-related bugs will not reproduce l
      automatically, with no user request needed. A task is not complete until
      its documentation update is committed.
 
-**Context hygiene** — run `/clear` between unrelated features. This codebase has nine
-apps with a cyclic import graph; stale context from a previous app is a reliable source
-of wrong cross-app assumptions.
+**Context hygiene** — run `/clear` between unrelated features. The first-party apps form
+a cyclic import graph; stale context from a previous app causes wrong cross-app
+assumptions.
 
 **Secrets** — `secrets.env` and `secrets.dev.env` are local-only. Never commit
 credentials, and never echo their contents into logs or output.
@@ -177,12 +176,13 @@ credentials, and never echo their contents into logs or output.
 **Git commits** — history is conventional-commits (`feat(incident): …`,
 `fix(ci): …`). Commit at logical checkpoints — one concern per commit — so the history
 reads chronologically and the working tree is never left full of uncommitted changes;
-push only when asked. Any AI-assisted commit must append a `Co-authored-by:` trailer naming the agent **and**
-the model used, e.g. `Co-authored-by: opencode (opencode-go/deepseek-v4-flash)
-<noreply@opencode.ai>` or `Co-authored-by: Claude Code (claude-sonnet-4-5)
-<noreply@anthropic.com>`. Never attribute AI work to a human co-author.
+push only when asked. Any AI-assisted commit must append a `Co-authored-by:` trailer
+naming the agent **and** the model, e.g. `Co-authored-by: opencode
+(opencode-go/deepseek-v4-flash) <noreply@opencode.ai>` or `Co-authored-by: Claude Code
+(claude-sonnet-4-5) <noreply@anthropic.com>`. Never attribute AI work to a human co-author.
 
-**Code Definitions** - Never attempt to open, grep, or search files inside `.venv` or `node_modules`. If you need library or framework documentation, use the LSP tools or ask/run python introspection directly.
+**Code Definitions** — Never open, grep, or search files inside `.venv` or `node_modules`.
+For library docs, use the LSP tools or run python introspection directly.
 
 ---
 

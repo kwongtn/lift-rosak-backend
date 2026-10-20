@@ -1,26 +1,41 @@
 # Feature 2: One Governed Egress Path for All Outbound Messaging
 
+> **Status (checked 2026-10-21): largely built.** Phases 1-2 and the data-model
+> changes are in code. Built: `send_message` in `telegram_provider/utils.py` (one
+> OUTBOUND `TelegramLogs` row per send, 3 attempts with exponential backoff, 30
+> msgs/s per chat, keyword-only `return_log`); `retry_count` / `last_error` /
+> `sent_at`; lazy PTB resolution; `error_handler` and admin pings via
+> `TELEGRAM_ADMIN_CHAT_ID`; `report_spotting_today` on the helper; and
+> `infinite_retry_on_error` removed.
+> Open: (1) no dead-letter queue; exhausted sends remain as `sent_at IS NULL` rows.
+> (2) The rate limiter is in-process, so it is per worker, not shared across workers.
+> (3) `telegram_provider/views.py` still binds `ptb_application` at import time.
+> (4) `error_handler` sends full update and user data to the admin chat, with no
+> redaction. (5) Phase 4 is partly done: `incident/tasks.py` announces official posts
+> via `send_message`. Phase 5 (badges) is not started.
+
 ## Feature Overview
 
-**Problem**: Outbound Telegram is ungoverned. There is no single owner for
-sending messages to users and channels — every caller that wants to talk to
-Telegram either reaches around `telegram_provider`'s PTB application or
-duplicates its plumbing:
+**Problem** (original; now largely resolved, see Status): Outbound Telegram was
+ungoverned. There was no single owner for sending messages to users and channels;
+every caller either reached around `telegram_provider`'s PTB application or
+duplicated its plumbing:
 
-- `spotting.tasks.report_spotting_today` sends digests outside the governed
-  path — historically it instantiated its **own** `telegram.Bot` instead of
-  reusing the PTB `Application` and its managed `httpx` client.
+- `spotting.tasks.report_spotting_today` sent digests outside the governed
+  path — it instantiated its **own** `telegram.Bot` instead of reusing the PTB
+  `Application` and its managed `httpx` client. *(Resolved: it now calls `send_message`.)*
 - `telegram_provider.models.TelegramLogs.direction` has an `OUTBOUND` member
-  (`MessageDirection.OUTBOUND = 1`) that is **never written** — the model's own
-  comment reads `# TODO: We only record inbound for now`. There is no delivery
-  audit trail for anything we send.
-- `telegram_provider.handlers.error_handler` only `print`s its error report; the
-  developer-DM `send_message` is commented out, so persistent failures are
-  silently dropped.
-- `settings.TELEGRAM_ADMIN_CHAT_ID` is declared and never consumed anywhere.
-- `telegram_provider.utils.infinite_retry_on_error` retries unbounded with 10s
-  sleeps — a single stuck message can pin a Celery worker indefinitely (already
-  catalogued in `docs/APPS.md` Known Defects & Traps).
+  (`MessageDirection.OUTBOUND = 1`) that was **never written** — the model's comment
+  read `# TODO: We only record inbound for now`. There was no delivery audit trail
+  for anything we sent. *(Resolved: `send_message` writes these rows.)*
+- `telegram_provider.handlers.error_handler` only `print`ed its error report; the
+  developer-DM `send_message` was commented out, so persistent failures were silently
+  dropped. *(Resolved: it also sends to `TELEGRAM_ADMIN_CHAT_ID`.)*
+- `settings.TELEGRAM_ADMIN_CHAT_ID` was declared and never consumed. *(Resolved:
+  consumed by `send_message` and `error_handler`.)*
+- `telegram_provider.utils.infinite_retry_on_error` retried unbounded with 10s
+  sleeps, so a single stuck message could pin a Celery worker indefinitely. *(Resolved:
+  removed. `docs/APPS.md` still lists it as a trap.)*
 
 **Value**: A single owner for outbound messaging — one helper that every caller
 goes through — with delivery logging, bounded retry, and shared rate limiting.
@@ -37,48 +52,48 @@ from this feature.
 
 - **`telegram_provider.apps`**: Owns the PTB `Application`. It is stored in a
   module-global `ptb_application`, built with `.updater(None)` (polling
-  disabled), and initialized/started only during ASGI lifespan
-  (`ASGILifespanSignalHandler.startup`). The managed `httpx.AsyncClient` is
-  created in `startup` and closed in `shutdown` but is currently consumed by
-  **no** handler — a prepared seam for outbound HTTP. `handlers_dict` registers
-  only `CommandHandler`s (inbound `/`-commands); there is no
-  `MessageHandler` or any outbound send path.
-- **`telegram_provider.handlers`**: All inbound command handlers
-  (`ping`, `help`, `dadjoke`, `verify`, `help_spotting`, `delete`, `spot`,
-  `spotting_today`, `favourite_vehicle`) plus `error_handler`, which builds an
-  HTML error report and only `print`s it.
+  disabled), and initialized/started during ASGI lifespan
+  (`ASGILifespanSignalHandler.startup`); `get_ptb_application()` builds one lazily
+  when none exists (Celery workers). The managed `httpx.AsyncClient` is created in
+  `startup` and closed in `shutdown`, but still no handler consumes it. `handlers_dict`
+  registers `CommandHandler`s (inbound `/`-commands), and a `MessageHandler` routes
+  media uploads to `media`.
+- **`telegram_provider.handlers`**: Inbound command handlers (`ping`, `help`,
+  `dadjoke`, `verify`, `help_spotting`, `delete`, `spot`/`s`, `spotting_today`,
+  `fav`, `link`, `deletelink`, `approve`) plus `media`. `error_handler` builds an
+  HTML error report, `print`s it, and sends it to `TELEGRAM_ADMIN_CHAT_ID` via
+  `send_message`.
 - **`telegram_provider.views`**: `TelegramInbound` webhook view — writes
   `TelegramLogs(direction=INBOUND)` then forwards the update to
   `ptb_application.process_update(...)`. It binds `ptb_application` at import
   time (known WSGI caveat, see Dependencies & Blockers).
-- **`telegram_provider.models.TelegramLogs`**: `direction` + `payload` only.
-  No retry/error/sent-at fields. `OUTBOUND` is never written.
+- **`telegram_provider.models.TelegramLogs`**: `direction`, `payload`,
+  `retry_count`, `last_error`, `sent_at` (migration `0004`). `send_message` writes
+  `OUTBOUND` rows.
 - **`telegram_provider.enums.MessageDirection`**: `INBOUND = 0`, `OUTBOUND = 1`.
-- **`telegram_provider.utils`**: `infinite_retry_on_error` (unbounded
-  `while True` + `asyncio.sleep(10)`) and `get_daily_updates` (renders the
-  digest HTML).
-- **`spotting.tasks.report_spotting_today`**: Nightly digest task. Currently
-  imports `ptb_application` from `telegram_provider.apps` and calls
-  `ptb_application.bot.send_message(...)` directly — bypassing any logging,
-  retry, or rate limiting, and reaching around the app's own abstraction. The
-  digest is scheduled in `rosak/celery.py`'s `beat_schedule`.
+- **`telegram_provider.utils`**: `send_message` (governed egress),
+  `retry_on_error` (bounded; re-raises on exhaustion), `PerChatRateLimiter`,
+  `get_ptb_application`, and `get_daily_updates` (renders the digest HTML).
+  `infinite_retry_on_error` is gone.
+- **`spotting.tasks.report_spotting_today`**: Nightly digest task. Now calls
+  `telegram_provider.utils.send_message` via `async_to_sync`. Scheduled in
+  `rosak/celery.py`'s `beat_schedule` at `crontab(hour="0", minute="0")`.
 - **`common.tasks`**: General Celery work (NSFW moderation, media conversion,
   verification-code cleanup). Does **not** contain `infinite_retry_on_error` —
   that lives in `telegram_provider.utils`.
 
-> **Note on drift**: `docs/APPS.md` describes `report_spotting_today` as
-> instantiating its own `telegram.Bot`. The current source already imports the
-> shared `ptb_application`; the remaining work is routing it through the
-> governed `send_message` helper so sends are logged, retried, and rate-limited.
+> **Note on drift (resolved)**: `docs/APPS.md` still describes `report_spotting_today`
+> as instantiating its own `telegram.Bot`. That text is stale: the task now routes
+> through `send_message`.
 
 ## Technical Requirements
 
 ### Backend Changes (rosak_backend)
 
-#### 1. `telegram_provider` app
+#### 1. `telegram_provider` app (done)
 
-- Add a `send_message(chat_id, text, **kwargs)` helper in
-  `telegram_provider/utils.py`.
+- Add a `send_message(chat_id, text, *, return_log=False, **kwargs)` helper in
+  `telegram_provider/utils.py` (done; `return_log` is an opt-in extra).
   - Uses the PTB `Application`'s bot instance and the managed `httpx` client
     (no new `Bot`, no new client).
   - Logs every attempt to `TelegramLogs` with `direction=OUTBOUND`.
@@ -86,7 +101,7 @@ from this feature.
   - Respects rate limits (30 messages/second per chat).
 - Keep all existing `CommandHandler`s intact.
 
-#### 2. `spotting` app
+#### 2. `spotting` app (done)
 
 - Refactor `report_spotting_today` to use
   `telegram_provider.utils.send_message`.
@@ -94,7 +109,7 @@ from this feature.
 - Import `send_message` from `telegram_provider` (the `spotting` ↔
   `telegram_provider` cycle already exists and permits this import).
 
-#### 3. `incident` app (future)
+#### 3. `incident` app (partly done; official-post announcements already use `send_message`)
 
 - Add incident alert sending via the same egress path.
 - Use the same `send_message` helper — no direct Telegram API calls.
@@ -104,19 +119,19 @@ from this feature.
 - Add badge announcement sending via the same egress path.
 - Use the same `send_message` helper.
 
-#### 5. `TelegramLogs` model
+#### 5. `TelegramLogs` model (done)
 
 - Ensure `OUTBOUND` direction is written for all sends.
 - Add `retry_count`, `last_error`, and `sent_at` fields for a complete audit
   trail (see Data Model Changes below).
 
-#### 6. Error handling
+#### 6. Error handling (mostly done)
 
-- Replace `infinite_retry_on_error` with bounded retry in `telegram_provider`.
-- Use `TELEGRAM_ADMIN_CHAT_ID` for error notifications (wire the currently
-  commented-out `error_handler` send to the setting instead of a hardcoded
-  string).
-- Route messages that exhaust retries to a dead letter queue.
+- Replace `infinite_retry_on_error` with bounded retry in `telegram_provider`. (Done.)
+- Use `TELEGRAM_ADMIN_CHAT_ID` for error notifications. (Done in `error_handler` and
+  `send_message`.)
+- Route messages that exhaust retries to a dead letter queue. *(Partly: exhausted
+  sends keep `sent_at` NULL in `TelegramLogs`; no separate queue exists.)*
 
 ### Data Model Changes
 
@@ -127,8 +142,8 @@ last_error = models.TextField(blank=True, default="")
 sent_at = models.DateTimeField(null=True, blank=True)
 ```
 
-Plus a migration for these fields. `direction` already supports `OUTBOUND`;
-no change needed there.
+Plus a migration for these fields (done: `0004_telegramlogs_last_error_telegramlogs_retry_count_and_more`).
+`direction` already supports `OUTBOUND`; no change needed there.
 
 ## Acceptance Criteria
 
@@ -145,27 +160,26 @@ no change needed there.
 
 - **`spotting` ↔ `telegram_provider` cycle** already exists and permits the
   import — no new cross-app edge to break.
-- **PTB `Application` lifecycle**: `ptb_application` is only initialized during
-  ASGI lifespan startup. `send_message` must be called from a context where the
-  application has been started (or guard against `None` and raise explicitly).
-- **WSGI compatibility**: `views.py` binds `ptb_application` at import time
-  (known issue). Under WSGI the lifespan signals never fire and the bot stays
-  `None`. The send helper must resolve the application lazily rather than
-  relying on an import-time binding.
+- **PTB `Application` lifecycle**: `ptb_application` is set during ASGI lifespan
+  startup. `get_ptb_application()` builds one lazily when none exists, and raises
+  `TelegramBotNotReady` if `TELEGRAM_BOT_TOKEN` is unset.
+- **WSGI compatibility**: `views.py` still binds `ptb_application` at import time
+  (known issue), so the webhook view is affected. The send helper resolves the
+  application lazily, so it does not rely on an import-time binding.
 - **Celery worker context**: Celery workers do not serve ASGI, so
-  `ptb_application` may be `None` inside a task. `report_spotting_today`
-  currently assumes a started bot; the refactor must address this (e.g. lazy
-  initialization or an explicit "bot not ready" error path).
+  `ptb_application` may be `None` inside a task. Handled by `get_ptb_application()`
+  (lazy build, explicit `TelegramBotNotReady`).
 
 ## Implementation Phases
 
 1. **Phase 1**: Add `send_message` helper in `telegram_provider` with logging +
-   bounded retry (backward compatible — nothing else changes).
+   bounded retry (backward compatible — nothing else changes). **Done (2026-08-25).**
 2. **Phase 2**: Refactor `spotting.tasks.report_spotting_today` to use the
-   helper.
+   helper. **Done.**
 3. **Phase 3**: Add dead letter queue + admin notifications via
-   `TELEGRAM_ADMIN_CHAT_ID`.
-4. **Phase 4**: Add incident alert sending (future).
+   `TELEGRAM_ADMIN_CHAT_ID`. **Partly done:** admin notifications yes; no dead-letter queue.
+4. **Phase 4**: Add incident alert sending (future). **Partly done:** official-post
+   announcements go through `send_message`.
 5. **Phase 5**: Add badge announcement sending (future).
 
 ## Testing Strategy
