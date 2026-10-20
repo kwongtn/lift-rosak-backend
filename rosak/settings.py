@@ -506,8 +506,8 @@ RAPID_API_NSFW_THRESHOLD = 0.5
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", None)
 TELEGRAM_TLD = os.environ.get("TELEGRAM_TLD", None)
 TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")
-TELEGRAM_CLEANUP_DAYS = os.environ.get("TELEGRAM_CLEANUP_DAYS", 30)
-TELEGRAM_HTTPX_TIMEOUT = os.environ.get("TELEGRAM_HTTPX_TIMEOUT", 30)
+TELEGRAM_CLEANUP_DAYS = int(os.environ.get("TELEGRAM_CLEANUP_DAYS", "30"))
+TELEGRAM_HTTPX_TIMEOUT = float(os.environ.get("TELEGRAM_HTTPX_TIMEOUT", "30"))
 
 # Base URL of the Angular SPA, for links we hand to a human (currently the
 # official-post approval notification's console deep link). There is no

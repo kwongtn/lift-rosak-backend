@@ -1,4 +1,7 @@
 import asyncio
+import os
+import subprocess
+import sys
 from contextlib import ExitStack, contextmanager
 from ctypes import ArgumentError
 from datetime import date, datetime, time, timedelta
@@ -7,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from telegram.constants import ReactionEmoji
 from telegram.error import BadRequest
 
@@ -100,6 +103,42 @@ class CleanupTelegramLogsTaskTests(TestCase):
         with override_settings(TELEGRAM_CLEANUP_DAYS="30"):
             with self.assertRaises(TypeError):
                 cleanup_telegram_logs.apply(throw=True)
+
+
+class TelegramSettingsEnvTests(SimpleTestCase):
+    """settings.py is the single coercion point for the numeric Telegram env vars."""
+
+    def _read(self, **env_overrides: str) -> str:
+        env = {
+            **{
+                k: v
+                for k, v in os.environ.items()
+                if k not in ("TELEGRAM_CLEANUP_DAYS", "TELEGRAM_HTTPX_TIMEOUT")
+            },
+            "DJANGO_SETTINGS_MODULE": "rosak.settings",
+            "SENTRY_DSN": "",
+            **env_overrides,
+        }
+        code = (
+            "from django.conf import settings as s; "
+            "print(repr((s.TELEGRAM_CLEANUP_DAYS, s.TELEGRAM_HTTPX_TIMEOUT)))"
+        )
+        # A fresh interpreter: settings.py reads the environment at import time.
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            cwd=settings.BASE_DIR,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    def test_env_strings_are_coerced_to_numbers(self):
+        out = self._read(TELEGRAM_CLEANUP_DAYS="7", TELEGRAM_HTTPX_TIMEOUT="2.5")
+        self.assertEqual(out, "(7, 2.5)")
+
+    def test_defaults_are_numbers(self):
+        self.assertEqual(self._read(), "(30, 30.0)")
 
 
 class EffectiveSpottingDateTests(TestCase):
