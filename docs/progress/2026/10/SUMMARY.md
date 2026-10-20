@@ -5,8 +5,8 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 ## Commit Type Distribution (logged entries)
 
 - feat: 6
-- fix: 4
-- docs: 1
+- fix: 8
+- docs: 4
 - no type given: 1
 
 ## Daily Logs
@@ -16,7 +16,7 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 - [08.md](08.md): official posts auto-publish as `LIVE`; console `hidden` filter.
 - [19.md](19.md): front-page pulse-link N+1 fix; pytest run leaves the kept test DB broken.
 - [20.md](20.md): `Vehicle.lastSpottedAt` tiebreaker.
-- [21.md](21.md): docs squash to current state; stale facts fixed against the code.
+- [21.md](21.md): docs squash to current state; `updateUser` null guard, Telegram settings coercion, `argparse.ArgumentError`, `report_spotting_today` date fix.
 
 ## By Module/Feature
 
@@ -43,9 +43,18 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 
 - (this commit) `[feat](telegram_provider)`: `/spot` matches vehicles on an exact key after space normalisation; `/spot 01` no longer matches `011` or `012`. ([01.md](01.md))
 
-### Docs (1 entry)
+### Fixes (Oct 21, 4 entries)
+
+- **d7890ba** `[fix](common)`: `updateUser` rejects explicit `null` for `spotting_data_public` instead of a NOT NULL IntegrityError. ([21.md](21.md))
+- **7ff07fa** `[fix](telegram_provider)`: `TELEGRAM_CLEANUP_DAYS` / `TELEGRAM_HTTPX_TIMEOUT` coerced from env. ([21.md](21.md))
+- **f408119** `[fix](spotting)`: `report_spotting_today` digests the day that just ended (`effective_spotting_date`); digest heading shows that date. ([21.md](21.md))
+- **ab9f248** `[fix](telegram_provider)`: `argparse.ArgumentError` replaces `ctypes.ArgumentError`. ([21.md](21.md))
+
+### Docs (3 entries)
 
 - **ffd0903** `[docs]`: docs squash to current state; `tach.yml` references removed (it never existed), beat schedule and `Asia/Kuala_Lumpur` timezone corrected, uncapped media-task re-enqueue and NSFW/convert race catalogued as traps. ([21.md](21.md))
+- **812d2ec** `[docs]`: obsolete upgrade record and doc-generation prompts dropped; **379aa4c** progress summaries condensed. ([21.md](21.md))
+- **59fef14** `[docs]`: four fixed traps marked resolved. ([21.md](21.md))
 
 ### Test gate and traps (2 entries)
 
