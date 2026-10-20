@@ -264,8 +264,9 @@ def get_daily_updates(
     spotting_date: date | None = None,
     include_not_in_service: bool = False,
 ) -> str:
+    spotting_date = spotting_date or date.today()
     spotted_today_vehicle_ids = (
-        Event.objects.filter(spotting_date=spotting_date or date.today())
+        Event.objects.filter(spotting_date=spotting_date)
         .distinct("vehicle")
         .values_list("vehicle_id", flat=True)
     )
@@ -298,7 +299,7 @@ def get_daily_updates(
     }
 
     output_str_arr = [
-        f"<b><u>{date.today().isoformat()}</u></b>",
+        f"<b><u>{spotting_date.isoformat()}</u></b>",
         "",
     ]
 

@@ -485,6 +485,14 @@ class GetDailyUpdatesTests(TestCase):
 
         self.assertIn("Set 40", output)
 
+    def test_heading_is_the_requested_spotting_date(self):
+        # The heading used to print date.today() whatever date was asked for.
+        output = get_daily_updates(
+            line_id=self.line.id, spotting_date=date(2026, 8, 17)
+        )
+
+        self.assertTrue(output.startswith("<b><u>2026-08-17</u></b>"))
+
 
 class PerChatRateLimiterTests(TestCase):
     """Sliding-window limiter: default budget, per-chat isolation, rollover."""

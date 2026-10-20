@@ -1,6 +1,8 @@
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.db import IntegrityError, transaction
 from django.test import TestCase
@@ -1247,3 +1249,47 @@ class ReportSpottingTodayTaskTests(TestCase):
 
         self.assertEqual(len(calls), 2)
         self.assertEqual({c["chat_id"] for c in calls}, {"123456", "234567"})
+
+    def _digest_for_kjl_run_at(self, moment: datetime) -> str:
+        # Pin only the task's own clock. Patching django.utils.timezone.now would
+        # not move auto_now_add (see MISTAKES.md), and the dates under test are
+        # explicit Event.spotting_date values, so nothing else depends on it.
+        calls = []
+        with (
+            patch("spotting.tasks.send_message", new=self._recording_send_stub(calls)),
+            patch("spotting.tasks.Line", new=self._ordered_line_proxy()),
+            patch("spotting.tasks.datetime", **{"now.return_value": moment}),
+        ):
+            report_spotting_today.apply()
+        return next(c["text"] for c in calls if c["chat_id"] == "123456")
+
+    def test_midnight_run_reports_the_day_that_just_ended(self):
+        # Regression: date.today() - timedelta(hours=12) is date.today(), so a
+        # 00:00 run used to digest the day that had only just begun.
+        vehicle = Vehicle.objects.create(
+            identification_no="Set 40",
+            vehicle_type=VehicleType.objects.create(display_name="Innovia Metro 300"),
+            status=VehicleStatus.IN_SERVICE,
+        )
+        VehicleLine.objects.create(vehicle=vehicle, line=self.line_kjl)
+        Event.objects.create(
+            reporter=User.objects.create(firebase_id="digest-spotter"),
+            vehicle=vehicle,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date(2026, 10, 20),
+        )
+        kl = ZoneInfo(settings.TIME_ZONE)
+
+        midnight = self._digest_for_kjl_run_at(
+            datetime(2026, 10, 21, 0, 0, 5, tzinfo=kl)
+        )
+        self.assertIn("2026-10-20", midnight)
+        self.assertIn("<u>Spotted Today</u>\nSet 40", midnight)
+
+        # From the 03:00 service-day cutoff on, the new day is the reported one.
+        after_cutoff = self._digest_for_kjl_run_at(
+            datetime(2026, 10, 21, 3, 0, 5, tzinfo=kl)
+        )
+        self.assertIn("2026-10-21", after_cutoff)
+        self.assertIn("<u>Spotted Today</u>\n<i>None</i>", after_cutoff)
