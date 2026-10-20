@@ -80,7 +80,7 @@
 ### Celery tasks (`tasks.py`)
 
 - `cleanup_telegram_logs` deletes `TelegramLogs` older than `TELEGRAM_CLEANUP_DAYS`. Beat: `crontab(hour="3", minute="0")` in `rosak/celery.py`. Both join tables CASCADE from `TelegramLogs`, so expiry removes the Event-to-message join rows. The `Event` survives (`spotting_event` is SET_NULL). `/delete` therefore only works within retention, and `auser_deletion` refuses after 3 days in any case.
-- The 00:00 daily digest is owned by `spotting`: `spotting.tasks.report_spotting_today` calls `utils.get_daily_updates` and sends through `utils.send_message`, once per distinct line channel. See the spotting doc.
+- The 00:00 daily digest is owned by `spotting`: `spotting.tasks.report_spotting_today` calls `utils.get_daily_updates` and sends through `utils.send_message`, once per line that has a `telegram_channel_id`. See the spotting doc.
 
 ### Settings consumed
 
@@ -94,7 +94,7 @@
 
 ## ⚙️ Internal State & Logic
 
-- **Process-global mutable state:** `apps.ptb_application` (set at lifespan startup), `apps.handlers_dict` (mutated at startup to attach `"handler"`), and `utils.rate_limiter`. All are per worker process and not shared.
+- **Process-global mutable state:** `apps.ptb_application` (set at lifespan startup), `utils._lazy_application` (per-event-loop lazy PTB app, as an `(Application, loop)` tuple), `apps.handlers_dict` (mutated at startup to attach `"handler"`), and `utils.rate_limiter`. All are per worker process and not shared.
 - **Persisted state (migrations 0001 to 0005):**
   - `TelegramLogs(TimeStampedModel)`: `direction` (`MessageDirection`: INBOUND=0, OUTBOUND=1), `payload` JSON, `retry_count`, `last_error`, `sent_at` (for OUTBOUND rows, NULL means dead-letter). It has no `Meta`, so `payload` has no index and JSONB lookups scan.
   - Inbound rows hold the whole update, so `payload["message"]` is present. Outbound rows hold the request. With `send_message(..., return_log=True)` they also get `payload["message"]` (`message_id` and `chat.id`), so a reply lookup treats them the same way. The default path leaves the payload untouched.
@@ -105,7 +105,7 @@
   - `retry_on_error(obj, fn_name, ...)`: bounded (default 3 attempts, backoff `base ** attempt`). Used for reactions. `BadRequest("Message to react not found")` counts as success.
   - `send_message(chat_id, text, *, return_log=False, **kwargs)`: the single chokepoint for bot sends. It writes the OUTBOUND row before the first attempt, then applies a per-chat sliding-window limiter (`PerChatRateLimiter`, 30 sends per second). It makes up to `MAX_RETRIES=3` attempts with `2 ** attempt` second backoff, honouring PTB `RetryAfter`. Success sets `sent_at`. Final failure leaves `sent_at=None`, sends a best-effort direct ping to the admin chat (no recursion), and returns `None`.
   - `return_log=True` (keyword-only) returns `(message, log)` and stamps the outbound payload. Use it when a human will act on the message by replying. The default returns the bare `Message`, so existing callers are unchanged.
-  - `get_ptb_application()`: returns the lifespan-started app, or lazily builds one (`initialize()` and `start()`, no webhook) so Celery workers can send. Raises `TelegramBotNotReady` when no token is set. It uses a function-local import so it reads the current global.
+  - `get_ptb_application()`: returns the lifespan-started app, else the lazy app for the current event loop, else builds one (`initialize()` and `start()`, no webhook) so Celery workers can send. The lazy app is cached per event loop because `async_to_sync` closes each loop it creates, and a reused app then fails with `Event loop is closed`. Raises `TelegramBotNotReady` when no token is set. It uses a function-local import so it reads the current global.
 - **Digest logic:** `utils.get_daily_updates(line_id, spotting_date=None, include_not_in_service=False)` is sync ORM code; callers wrap it. The spotted set is `Event.spotting_date == (spotting_date or today)`. The line's `VehicleLine` roster is bucketed into "Not Spotted", "Spotted Today" (status `IN_SERVICE`), and "Spotted Today, to review" (any other status). `MARRIED` and `DECOMMISSIONED` are always excluded; `OUT_OF_SERVICE` is excluded unless `include_not_in_service`.
   - **Trap:** the header is always `date.today()`, whatever the argument. The 00:00 digest, which asks for yesterday's date, is therefore labelled with today's date.
 - **Known defects:**

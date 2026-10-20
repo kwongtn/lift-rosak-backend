@@ -54,7 +54,7 @@ from this feature.
   module-global `ptb_application`, built with `.updater(None)` (polling
   disabled), and initialized/started during ASGI lifespan
   (`ASGILifespanSignalHandler.startup`); `get_ptb_application()` builds one lazily
-  when none exists (Celery workers). The managed `httpx.AsyncClient` is created in
+  when none exists (Celery workers), cached per event loop in `utils._lazy_application`. The managed `httpx.AsyncClient` is created in
   `startup` and closed in `shutdown`, but still no handler consumes it. `handlers_dict`
   registers `CommandHandler`s (inbound `/`-commands), and a `MessageHandler` routes
   media uploads to `media`.
@@ -161,7 +161,7 @@ Plus a migration for these fields (done: `0004_telegramlogs_last_error_telegraml
 - **`spotting` ↔ `telegram_provider` cycle** already exists and permits the
   import — no new cross-app edge to break.
 - **PTB `Application` lifecycle**: `ptb_application` is set during ASGI lifespan
-  startup. `get_ptb_application()` builds one lazily when none exists, and raises
+  startup. `get_ptb_application()` builds one lazily per event loop when none exists, and raises
   `TelegramBotNotReady` if `TELEGRAM_BOT_TOKEN` is unset.
 - **WSGI compatibility**: `views.py` still binds `ptb_application` at import time
   (known issue), so the webhook view is affected. The send helper resolves the

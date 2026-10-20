@@ -5,7 +5,7 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 ## Commit Type Distribution (logged entries)
 
 - feat: 6
-- fix: 8
+- fix: 10
 - docs: 4
 - no type given: 1
 
@@ -16,7 +16,7 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 - [08.md](08.md): official posts auto-publish as `LIVE`; console `hidden` filter.
 - [19.md](19.md): front-page pulse-link N+1 fix; pytest run leaves the kept test DB broken.
 - [20.md](20.md): `Vehicle.lastSpottedAt` tiebreaker.
-- [21.md](21.md): docs squash to current state; `updateUser` null guard, Telegram settings coercion, `argparse.ArgumentError`, `report_spotting_today` date fix.
+- [21.md](21.md): docs squash to current state; `updateUser` null guard, Telegram settings coercion, `argparse.ArgumentError`, `report_spotting_today` date fix; daily digest sends again (DISTINCT ON crash, per-loop PTB app).
 
 ## By Module/Feature
 
@@ -43,12 +43,14 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 
 - (this commit) `[feat](telegram_provider)`: `/spot` matches vehicles on an exact key after space normalisation; `/spot 01` no longer matches `011` or `012`. ([01.md](01.md))
 
-### Fixes (Oct 21, 4 entries)
+### Fixes (Oct 21, 6 entries)
 
 - **d7890ba** `[fix](common)`: `updateUser` rejects explicit `null` for `spotting_data_public` instead of a NOT NULL IntegrityError. ([21.md](21.md))
 - **7ff07fa** `[fix](telegram_provider)`: `TELEGRAM_CLEANUP_DAYS` / `TELEGRAM_HTTPX_TIMEOUT` coerced from env. ([21.md](21.md))
 - **f408119** `[fix](spotting)`: `report_spotting_today` digests the day that just ended (`effective_spotting_date`); digest heading shows that date. ([21.md](21.md))
 - **ab9f248** `[fix](telegram_provider)`: `argparse.ArgumentError` replaces `ctypes.ArgumentError`. ([21.md](21.md))
+- **4a0ae91** `[fix](telegram_provider)`: lazy PTB app cached per event loop; Celery sends no longer hit `Event loop is closed`. ([21.md](21.md))
+- **6238a77** `[fix](spotting)`: `report_spotting_today` no longer crashes on DISTINCT ON vs `Line.Meta.ordering`, so the daily digest sends; test shim removed. ([21.md](21.md))
 
 ### Docs (3 entries)
 
