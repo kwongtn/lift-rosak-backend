@@ -56,7 +56,7 @@
 ### Parsing strategy (`parsers.py`): argparse, not regex or NLP
 
 - Deliberately grammar-based: no regexes, keyword matching, or fuzzy intent. `spotting_parser()` is a real `argparse.ArgumentParser` (`prog="/spot"`, `add_help=False`). Handlers pass `update.message.text.split(" ")[1:]` as argv.
-- The subclass overrides `error()` to `raise ArgumentError` instead of `sys.exit()`. This is mandatory: argparse's default would kill the worker. `spot` replies with the message and reacts 👎.
+- The subclass overrides `error()` to `raise argparse.ArgumentError(None, message)` instead of `sys.exit()` (handlers catch `argparse.ArgumentError`; `str(e)` is the bare message). This is mandatory: argparse's default would kill the worker. `spot` replies with the message and reacts 👎.
 - The `Formatter` subclass wraps tokens in `<code>` and keeps declaration order, so `format_help()` emits Telegram HTML directly. Help text and grammar cannot drift.
 - `/spot` grammar: positional `vehicle_number`; `--anon`; `-w/--wheel-status` (int 1 to 5); `-s/--status` (int 1 to 4, default 1); `-r/--run-number`; `-n/--notes` (`nargs="+"`, joined with spaces).
 - Code maps are applied in `handlers.spot`. `wheel_status_map`: 1 FRESH, 2 NEAR_PERFECT, 3 FLAT, 4 WORN_OUT, 5 WORRYING (`SpottingWheelStatus`). `status_map`: 1 IN_SERVICE, 2 NOT_IN_SERVICE, 3 DECOMMISSIONED, 4 TESTING (`SpottingVehicleStatus`).
@@ -85,7 +85,7 @@
 ### Settings consumed
 
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_TLD`, `TELEGRAM_ADMIN_CHAT_ID` (`rosak/settings.py` ~L506-508). The admin chat is used by `error_handler`, by `send_message`'s dead-letter ping, and by `incident.tasks` official-post notifications. A blank value disables all three.
-- `TELEGRAM_CLEANUP_DAYS` (default 30) and `TELEGRAM_HTTPX_TIMEOUT` (default 30), `settings.py` ~L509-510. These use `os.environ.get(...)` with **no int or float coercion**, so an env value arrives as a string. `timedelta(days="7")` raises `TypeError`. Coerce them in settings.
+- `TELEGRAM_CLEANUP_DAYS` (default 30) and `TELEGRAM_HTTPX_TIMEOUT` (default 30), `settings.py` ~L509-510. Parsed with `int(...)` / `float(...)`, so an env override is a number; the consuming code (`cleanup_telegram_logs`, `apps.py`) does no coercion of its own.
 - `ENVIRONMENT` (via `env_url_dict` in `handlers.py`, whose hostnames duplicate config) and `TIME_ZONE`.
 
 ### Dependencies
