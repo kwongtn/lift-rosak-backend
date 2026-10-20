@@ -1,5 +1,4 @@
 import argparse
-from ctypes import ArgumentError
 from datetime import time
 
 
@@ -67,7 +66,8 @@ class Formatter(argparse.HelpFormatter):
 
 class ArgumentParser(argparse.ArgumentParser):
     def error(self, message):
-        raise ArgumentError(message)
+        # Raise instead of argparse's default sys.exit(), which would kill the worker.
+        raise argparse.ArgumentError(None, message)
 
 
 def spotting_parser():

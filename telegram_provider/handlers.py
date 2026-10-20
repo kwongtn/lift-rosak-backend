@@ -3,7 +3,7 @@ import html
 import json
 import logging
 import traceback
-from ctypes import ArgumentError
+from argparse import ArgumentError
 from datetime import datetime, time
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo

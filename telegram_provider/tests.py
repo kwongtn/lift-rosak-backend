@@ -1,9 +1,10 @@
+import argparse
 import asyncio
 import os
 import subprocess
 import sys
+from argparse import ArgumentError
 from contextlib import ExitStack, contextmanager
-from ctypes import ArgumentError
 from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -1263,6 +1264,32 @@ class LinkHandlerTests(TestCase):
         with self.assertRaises(ArgumentError):
             link_parser().parse_args([])
 
+    def test_parser_error_is_argparse_argument_error_with_plain_message(self):
+        # Regression: parsers raised ctypes.ArgumentError, a foreign-function
+        # exception that merely shared the name. The handlers show str(e) to users.
+        with self.assertRaises(argparse.ArgumentError) as ctx:
+            link_parser().parse_args([])
+
+        self.assertEqual(
+            str(ctx.exception), "the following arguments are required: url"
+        )
+
+    def test_submit_link_bad_syntax_replies_reacts_down_and_reraises(self):
+        update = self._make_update("/link")
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            with self.assertRaises(ArgumentError):
+                asyncio.run(submit_link(update, self._context()))
+
+        update.message.reply_text.assert_awaited_once_with(
+            text="the following arguments are required: url"
+        )
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
+        )
+        mocks["submit"].assert_not_awaited()
+
     def test_link_parser_invalid_incident_id_raises_argument_error(self):
         with self.assertRaises(ArgumentError):
             link_parser().parse_args(["https://example.com", "-id", "notanint"])
@@ -2007,6 +2034,22 @@ class SpotHandlerTests(TestCase):
         )
         mocks["event_log"].objects.acreate = AsyncMock()
         mocks["event"].return_value = self.event
+
+    def test_spot_bad_syntax_replies_reacts_down_and_reraises(self):
+        update = self._make_update("/spot")
+
+        with self._mock_handlers() as mocks:
+            self._stub_user(mocks, self.user)
+            with self.assertRaises(ArgumentError):
+                asyncio.run(spot(update, MagicMock()))
+
+        update.message.reply_text.assert_awaited_once_with(
+            text="the following arguments are required: vehicle_number"
+        )
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_DOWN
+        )
+        mocks["event"].assert_not_called()
 
     def test_spot_matches_spaced_number_after_normalisation(self):
         update = self._make_update("/spot EMU03")
