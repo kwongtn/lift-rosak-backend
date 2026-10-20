@@ -1064,6 +1064,11 @@ type Vehicle {
   vehicleType: VehicleType!
   wheelStatus: WheelStatus
   lastSpottingDate: Date
+
+  """
+  Creation time of the latest spotting; orders vehicles that share a lastSpottingDate.
+  """
+  lastSpottedAt: DateTime
   spottingCount(after: Date = null, before: Date = null): Int!
   incidents: [VehicleIncident!]!
   spottings: [EventScalar!]!

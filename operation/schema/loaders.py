@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional, Tuple
 
 from django.contrib.gis.db.models import Subquery
@@ -57,20 +57,40 @@ async def batch_load_vehicle_count_from_vehicle_type(keys):
     return [vehicle_object.get(str(key), None) for key in keys]
 
 
+# Event statuses that do not count as the vehicle having actually been seen.
+_NOT_SPOTTED_STATUSES = [
+    SpottingVehicleStatus.NOT_SPOTTED,
+    SpottingVehicleStatus.DECOMMISSIONED,
+    SpottingVehicleStatus.UNKNOWN,
+]
+
+
 async def batch_load_last_spotting_date_from_vehicle_id(keys):
     event_object = await Event.objects.filter(
-        ~Q(
-            status__in=[
-                SpottingVehicleStatus.NOT_SPOTTED,
-                SpottingVehicleStatus.DECOMMISSIONED,
-                SpottingVehicleStatus.UNKNOWN,
-            ]
-        )
+        ~Q(status__in=_NOT_SPOTTED_STATUSES)
     ).aaggregate(
         **{str(key): Max("spotting_date", filter=Q(vehicle_id=key)) for key in keys}
     )
 
     return [event_object.get(str(key), None) for key in keys]
+
+
+async def batch_load_last_spotted_at_from_vehicle_id(keys) -> List[Optional[datetime]]:
+    """Creation time of each vehicle's latest-spotting event.
+
+    ``spotting_date`` is date-only, so many vehicles share a "last spotting date";
+    this is the tiebreaker that orders them within the same day.
+    """
+    rows = (
+        Event.objects.filter(vehicle_id__in=keys)
+        .exclude(status__in=_NOT_SPOTTED_STATUSES)
+        .order_by("vehicle_id", "-spotting_date", "-created")
+        .distinct("vehicle_id")
+        .values_list("vehicle_id", "created")
+    )
+    created_by_vehicle = {vehicle_id: created async for vehicle_id, created in rows}
+
+    return [created_by_vehicle.get(key) for key in keys]
 
 
 async def batch_load_spotting_count_from_vehicle(keys):
@@ -223,6 +243,9 @@ OperationContextLoaders = {
     ),
     "last_spotting_date_from_vehicle_loader": DataLoader(
         load_fn=batch_load_last_spotting_date_from_vehicle_id
+    ),
+    "last_spotted_at_from_vehicle_loader": DataLoader(
+        load_fn=batch_load_last_spotted_at_from_vehicle_id
     ),
     "spotting_count_from_vehicle_loader": DataLoader(
         load_fn=batch_load_spotting_count_from_vehicle

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Annotated, List, Optional
 
 import strawberry
@@ -347,6 +347,14 @@ class Vehicle:
     async def last_spotting_date(self, info: Info) -> Optional[date]:
         return await info.context.loaders["operation"][
             "last_spotting_date_from_vehicle_loader"
+        ].load(self.id)
+
+    @strawberry_django.field(
+        description="Creation time of the latest spotting; orders vehicles that share a lastSpottingDate."
+    )
+    async def last_spotted_at(self, info: Info) -> Optional[datetime]:
+        return await info.context.loaders["operation"][
+            "last_spotted_at_from_vehicle_loader"
         ].load(self.id)
 
     @strawberry.field
