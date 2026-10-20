@@ -32,6 +32,12 @@ class TelegramBotNotReady(RuntimeError):
     """
 
 
+# The lazily built application and the event loop it was built on. Kept apart
+# from ``apps.ptb_application`` so a stale lazy app is never mistaken for the
+# ASGI lifespan's one.
+_lazy_application: "tuple[Application, asyncio.AbstractEventLoop] | None" = None
+
+
 async def get_ptb_application() -> "Application":
     """Return the PTB application, lazily building one when possible.
 
@@ -43,21 +49,35 @@ async def get_ptb_application() -> "Application":
        webhook — registering that remains the ASGI server's job) so
        Celery workers, which never run the lifespan, can still send.
 
+    The lazy application is cached per event loop. Celery tasks reach
+    governed egress through ``async_to_sync``, which runs every call on a
+    fresh loop and closes it afterwards; PTB's httpx pool stays bound to
+    the loop it was opened on, so reusing the app on a later loop failed
+    the first send attempt with ``RuntimeError('Event loop is closed')``.
+    The superseded app is dropped without ``shutdown()`` — its loop is
+    already closed, so there is nothing left to await on.
+
     The import is function-local on purpose: it reads the CURRENT value
     of the module global, which the ASGI startup signal rebinds. An
     import-time binding would capture the initial ``None`` forever (the
     documented import-time-binding bug).
 
-    Accepted benign race: two concurrent first-callers may each build an
-    app; last-writer-wins caches the global and the loser is
+    Accepted benign race: two concurrent first-callers on one loop may
+    each build an app; last-writer-wins caches it and the loser is
     garbage-collected — harmless at digest scale.
     """
     from telegram.ext import Application
 
     import telegram_provider.apps as apps_module
 
+    global _lazy_application
+
     if apps_module.ptb_application is not None:
         return apps_module.ptb_application
+
+    loop = asyncio.get_running_loop()
+    if _lazy_application is not None and _lazy_application[1] is loop:
+        return _lazy_application[0]
 
     if not settings.TELEGRAM_BOT_TOKEN:
         raise TelegramBotNotReady(
@@ -69,7 +89,7 @@ async def get_ptb_application() -> "Application":
     app = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).updater(None).build()
     await app.initialize()
     await app.start()
-    apps_module.ptb_application = app
+    _lazy_application = (app, loop)
     return app
 
 

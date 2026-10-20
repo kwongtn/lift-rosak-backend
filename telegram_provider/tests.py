@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 from zoneinfo import ZoneInfo
 
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
 from telegram.constants import ReactionEmoji
@@ -41,6 +42,7 @@ from telegram_provider.utils import (
     TelegramBotNotReady,
     effective_spotting_date,
     get_daily_updates,
+    get_ptb_application,
     retry_on_error,
     send_message,
 )
@@ -606,6 +608,61 @@ class RetryOnErrorTests(TestCase):
         result = asyncio.run(retry_on_error(None, "method"))
 
         self.assertIsNone(result)
+
+
+class GetPtbApplicationTests(SimpleTestCase):
+    """The lazily built PTB app is cached per event loop, not per process."""
+
+    @contextmanager
+    def _lazy_build(self):
+        # A fresh MagicMock per build() so separate builds are distinguishable.
+        def build_app():
+            app = MagicMock(name="ptb_application")
+            app.initialize = AsyncMock()
+            app.start = AsyncMock()
+            return app
+
+        builder = MagicMock(name="builder")
+        builder.token.return_value.updater.return_value.build.side_effect = build_app
+        with (
+            override_settings(TELEGRAM_BOT_TOKEN="123:fake"),
+            patch("telegram_provider.apps.ptb_application", None),
+            patch("telegram_provider.utils._lazy_application", None),
+            patch("telegram.ext.Application.builder", return_value=builder),
+        ):
+            yield builder.token.return_value.updater.return_value.build
+
+    def test_reuses_the_lazy_app_within_one_event_loop(self):
+        async def fetch_twice():
+            return await get_ptb_application(), await get_ptb_application()
+
+        with self._lazy_build() as build:
+            first, second = asyncio.run(fetch_twice())
+
+        self.assertIs(first, second)
+        self.assertEqual(build.call_count, 1)
+
+    def test_rebuilds_the_lazy_app_on_a_new_event_loop(self):
+        # Regression: async_to_sync gives every Celery send a fresh loop, and a
+        # process-wide cache handed later sends an app bound to a closed loop.
+        with self._lazy_build() as build:
+            first = async_to_sync(get_ptb_application)()
+            second = async_to_sync(get_ptb_application)()
+
+        self.assertIsNot(first, second)
+        self.assertEqual(build.call_count, 2)
+        second.start.assert_awaited_once()
+
+    def test_prefers_the_asgi_lifespan_app(self):
+        lifespan_app = MagicMock(name="lifespan_app")
+
+        with (
+            self._lazy_build() as build,
+            patch("telegram_provider.apps.ptb_application", lifespan_app),
+        ):
+            self.assertIs(asyncio.run(get_ptb_application()), lifespan_app)
+
+        build.assert_not_called()
 
 
 class SendMessageTests(TestCase):
