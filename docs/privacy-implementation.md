@@ -18,8 +18,9 @@
   - non-owner + `spotting_data_public=True`: full list
   - non-owner + `spotting_data_public=False`: `null` (`null` = private, `[]` = no data)
 - **`updateUser(input: UserInput!)`** — `IsLoggedIn`, updates only the caller.
-  `UserInput.spotting_data_public` is `Maybe[bool | None] = UNSET`; omitted leaves the
-  stored value unchanged (tri-state rules: [STRAWBERRY_MIGRATION.md](STRAWBERRY_MIGRATION.md)).
+  `UserInput.spotting_data_public` is `Maybe[bool] = UNSET` (the column is `NOT NULL`);
+  omitted leaves the stored value unchanged and an explicit `null` is a validation error
+  (tri-state rules: [STRAWBERRY_MIGRATION.md](STRAWBERRY_MIGRATION.md)).
 
 ## Contract
 
@@ -35,4 +36,4 @@
   (`spottings_from_user_loader`) is preserved. The caller comes from `info.context.user`.
 - Tests in `common/tests.py`: `UserPrivacyTests` (default private; owner / public /
   private access), `SpottingDataPublicMigrationTests`, `TestUserInput` and
-  `TestUpdateUserMutation` (omitted / null / true).
+  `TestUpdateUserMutation` (omitted / true / false; null is refused).

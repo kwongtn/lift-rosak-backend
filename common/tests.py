@@ -797,17 +797,6 @@ class TestUserInput(TestCase):
             ],
         )
 
-    def test_user_input_explicit_null_clears_field(self):
-        from rosak.tests.test_schema import assert_maybe_field_behavior
-
-        assert_maybe_field_behavior(
-            input_class=UserInput,
-            field_name="spotting_data_public",
-            test_cases=[
-                ({"nickname": "test", "spottingDataPublic": None}, Some(None)),
-            ],
-        )
-
     def test_user_input_explicit_true_updates_field(self):
         from rosak.tests.test_schema import assert_maybe_field_behavior
 
@@ -852,6 +841,26 @@ class TestUpdateUserMutation(TestCase):
 
         await user.arefresh_from_db()
         self.assertEqual(user.nickname, "UpdatedNick")
+        self.assertTrue(user.spotting_data_public)
+
+    async def test_explicit_null_spotting_data_public_is_rejected(self):
+        # NOT NULL column: null must fail validation, not reach the DB as a 500.
+        user = await User.objects.acreate(
+            firebase_id="test-user-null-uid",
+            nickname="OriginalNick",
+            spotting_data_public=True,
+        )
+
+        variables = {"input": {"nickname": "UpdatedNick", "spottingDataPublic": None}}
+        result = await execute_graphql_async(
+            self.mutation, variables=variables, user=user
+        )
+        self.assertIsNotNone(result.errors)
+        self.assertIn("cannot be explicitly set to null", str(result.errors[0]))
+        self.assertIsNone(result.data)
+
+        await user.arefresh_from_db()
+        self.assertEqual(user.nickname, "OriginalNick")
         self.assertTrue(user.spotting_data_public)
 
     async def test_explicit_true_updates_value(self):

@@ -14,4 +14,5 @@ from common import models
 @strawberry_django.input(models.User)
 class UserInput:
     nickname: str
-    spotting_data_public: strawberry.Maybe[bool | None] = strawberry.UNSET
+    # NOT NULL column: plain Maybe[bool] makes an explicit null a validation error.
+    spotting_data_public: strawberry.Maybe[bool] = strawberry.UNSET

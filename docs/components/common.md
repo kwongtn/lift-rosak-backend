@@ -18,7 +18,7 @@
   - `public_user(id)`.
   - `medias_group_by_period(type: DateGroupings)`: upload histogram.
 - **GraphQL mutations** (`CommonMutations`), both `IsLoggedIn`:
-  - `update_user(input: UserInput)`: `UserInput` exposes `nickname` only.
+  - `update_user(input: UserInput)`: `UserInput` exposes `nickname` and `spotting_data_public` (`Maybe[bool] = UNSET`: omitted keeps the stored value, explicit `null` is a validation error because the column is `NOT NULL`).
   - `request_verification_code()`: mints a `UserVerificationCode` for Telegram account linking.
 - **Orderings and filters:** `MediaOrder` (`uploader`, `created`, `modified`). `common/schema/filters.py` is fully commented out, so `medias` has no filter argument.
 - **REST upload (the real entry point):** `POST /upload/` → `common.views.GenericUpload` (`rosak/urls.py`). Multipart fields: `upload_type` (a `TemporaryMediaType` member), `image`, `related_id`. Authenticated by the `Firebase-Auth-Key` header, not GraphQL context. Responses: 400 (bad `upload_type`), 401, 403 (uploader is not the reporter of the spotting event), 201 (staged). Decorated with `@transaction.atomic` and `@async_to_sync`. **The view never consults `should_upload_media()`**, so uploads are accepted and staged even while the flag is off.

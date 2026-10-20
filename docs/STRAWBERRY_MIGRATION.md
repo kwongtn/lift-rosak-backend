@@ -15,7 +15,11 @@ checks. Versions are pinned in [techstack.md](../techstack.md). Rules for agents
 - **`Some.__bool__` is always `True`.** `if input.field:` separates *omitted* from
   *something was sent* and nothing else. Check truthiness first, then read `.value`.
 - Declare `Maybe[T | None]` to accept an explicit `null`. Plain `Maybe[T]` rejects it
-  (`Field of type 'Maybe[datetime]' cannot be explicitly set to null`).
+  (`Field of type 'Maybe[datetime]' cannot be explicitly set to null`). Use plain
+  `Maybe[T]` for a field backed by a `NOT NULL` column that has no "null means reset"
+  meaning (`UserInput.spotting_data_public`); `Maybe[bool | None]` there let `Some(None)`
+  reach the ORM as an `IntegrityError`. The printed SDL is `Boolean` either way, so the
+  rejection is a runtime coercion error, not a schema difference.
 - House style on input fields is `Maybe[T | None] = strawberry.UNSET` (`spotting`,
   `incident`, `common`); `jejak` arguments use `= None`.
 - Unwrap helper: `maybe_value(field, default=None)` in
@@ -83,8 +87,9 @@ the field's `null` is not already load-bearing elsewhere in the payload.
 - `rosak/tests/test_schema.py::assert_maybe_field_behavior(input_class, field_name,
   test_cases)` builds a throwaway schema and asserts the parsed value for each
   `(variables, expected)` pair, e.g. `({"nickname": "t"}, UNSET)` and
-  `({"nickname": "t", "spottingDataPublic": None}, Some(None))`. Examples in
-  `common/tests.py::UserPrivacyTests`.
+  `({"nickname": "t", "spottingDataPublic": True}, Some(True))`. Examples in
+  `common/tests.py::TestUserInput`; the refused-null case is
+  `TestUpdateUserMutation.test_explicit_null_spotting_data_public_is_rejected`.
 - `execute_graphql` / `execute_graphql_async` in the same module run full queries.
 - Always cover omitted, value, and explicit null (`from strawberry.types.maybe import Some`).
 
