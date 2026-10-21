@@ -4,7 +4,7 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 
 ## Commit Type Distribution (logged entries)
 
-- feat: 6
+- feat: 7
 - fix: 10
 - docs: 4
 - no type given: 1
@@ -16,7 +16,7 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 - [08.md](08.md): official posts auto-publish as `LIVE`; console `hidden` filter.
 - [19.md](19.md): front-page pulse-link N+1 fix; pytest run leaves the kept test DB broken.
 - [20.md](20.md): `Vehicle.lastSpottedAt` tiebreaker.
-- [21.md](21.md): docs squash to current state; `updateUser` null guard, Telegram settings coercion, `argparse.ArgumentError`, `report_spotting_today` date fix; daily digest sends again (DISTINCT ON crash, per-loop PTB app).
+- [21.md](21.md): docs squash to current state; `updateUser` null guard, Telegram settings coercion, `argparse.ArgumentError`, `report_spotting_today` date fix; daily digest sends again (DISTINCT ON crash, per-loop PTB app); lines may share a Telegram channel.
 
 ## By Module/Feature
 
@@ -31,9 +31,10 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 - (this commit) `[feat](incident)`: official posts ingest as `LIVE` (migration `0032` backfill); console `socialMediaLinks(hidden:)` filter. ([08.md](08.md))
 - (uncommitted) `[fix](incident)`: front-page `lines` query N+1 on pulse links fixed in `_links_by_id`, pinned by a query-count test. ([19.md](19.md))
 
-### Operation (1 entry)
+### Operation (2 entries)
 
 - (this commit) `[fix](operation)`: `Vehicle.lastSpottedAt` tiebreaker for same-day sightings; the date-only `lastSpottingDate` had left seven vehicles tied. ([20.md](20.md))
+- **d0a2dd9** `[feat](operation)`: `Line.telegram_channel_id` no longer unique (migration `0018`, drops by column); `report_spotting_today` sends one digest per channel, for its first line by code. ([21.md](21.md))
 
 ### Common (1 entry)
 

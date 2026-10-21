@@ -9,7 +9,7 @@ Total commits: 187 non-merge to Oct 20 (Aug 72, Sep 100, Oct 1–20 15; `git log
 - Social-link threads become an ordered nested tree (migration 0031 failed on staging and was fixed in the same change). `lastWeekOnly` closes at midnight.
 - Vote mutations return vote state; network and multi-line status history; official posts auto-publish.
 - Front-page pulse N+1 fixed; `lastSpottedAt` tiebreaker; `/spot` exact matching.
-- Docs squash to current state; `updateUser` null guard, Telegram settings coercion, `report_spotting_today` digest date fixed and the digest sends again after a nightly DISTINCT ON crash (Oct 21).
+- Docs squash to current state; `updateUser` null guard, Telegram settings coercion, `report_spotting_today` digest date fixed and the digest sends again after a nightly DISTINCT ON crash; lines may share a Telegram channel (Oct 21).
 - Logged days: [01](10/01.md), [03](10/03.md), [08](10/08.md), [19](10/19.md), [20](10/20.md), [21](10/21.md).
 
 ### 2026-09 - [September summary](09/SUMMARY.md) (100 commits)

@@ -51,7 +51,7 @@
 | (plain message) | `media` | Non-command photo, video, animation, or document messages. The sender must have a `/spot` entry on the channel's line; the media attaches to their latest one. Stages a `TemporaryMedia`: `TRUSTED_CLEARED` for `TRUSTED_MEDIA_UPLOADER`, `AWAITING_REVIEW` for untrusted video, `PENDING` otherwise. When `IMAGE_UPLOAD` is off it still records the row, with `metadata.uploads_disabled=True`, so publication is gated later. Not in `handlers_dict`. |
 | (error) | `error_handler` | Builds an HTML report (update, chat and user data, traceback). It `print`s the report and, when `TELEGRAM_ADMIN_CHAT_ID` is set, sends it with `send_message`. |
 
-**Channel to line binding:** handlers resolve context with `operation.Line.objects.filter(telegram_channel_id=update.effective_chat.id)`. A chat with no bound line cannot spot ("No line assigned for this channel").
+**Channel to line binding:** handlers resolve context with `operation.Line.objects.filter(telegram_channel_id=update.effective_chat.id)`. A channel may be bound to several lines (lines sharing a route and fleet). `/spot` searches vehicles across all of them; `/link` uses the first by `code`; `/spotting_today`, `/fav` and media uploads use the first only. A chat with no bound line cannot spot ("No line assigned for this channel").
 
 ### Parsing strategy (`parsers.py`): argparse, not regex or NLP
 
@@ -80,7 +80,7 @@
 ### Celery tasks (`tasks.py`)
 
 - `cleanup_telegram_logs` deletes `TelegramLogs` older than `TELEGRAM_CLEANUP_DAYS`. Beat: `crontab(hour="3", minute="0")` in `rosak/celery.py`. Both join tables CASCADE from `TelegramLogs`, so expiry removes the Event-to-message join rows. The `Event` survives (`spotting_event` is SET_NULL). `/delete` therefore only works within retention, and `auser_deletion` refuses after 3 days in any case.
-- The 00:00 daily digest is owned by `spotting`: `spotting.tasks.report_spotting_today` calls `utils.get_daily_updates` and sends through `utils.send_message`, once per line that has a `telegram_channel_id`. See the spotting doc.
+- The 00:00 daily digest is owned by `spotting`: `spotting.tasks.report_spotting_today` calls `utils.get_daily_updates` and sends through `utils.send_message`, once per distinct non-empty `telegram_channel_id`, rendered for the channel's first line by `code`. See the spotting doc.
 
 ### Settings consumed
 
@@ -137,7 +137,7 @@
    **Readiness:** `Ready`. One filter change and one migration, no new dependencies. Retention interaction: `cleanup_telegram_logs` CASCADEs provenance away after 30 days. `/delete` is not affected, because `auser_deletion` refuses after 3 days. Files: `handlers.py`, `models.py`, new migration.
 
 4. **Clearance-gated commands, self-serve channel binding, and `/status`.** Every handler is world-open. An unbound chat gets a flat "No line assigned" with no way to fix it. A privileged `/bind <line_code>` plus a read-only `/status` (binding present? caller verified? webhook URL matches `{TELEGRAM_TLD}/telegram_provider/`?) would let channel operators onboard a line without a Django admin login.
-   **Readiness:** `Not ready`. No authorization is reachable from a Telegram identity. `common.enums.ClearanceType` has only `TRUSTED_MEDIA_UPLOADER`, so a new member (for example `TELEGRAM_CHANNEL_ADMIN`) and a data migration come first. `handlers_dict` has no permission key, and `startup()` wraps every entry in a bare `CommandHandler`, so a `"clearance"` key enforced at that point is needed. `Line.telegram_channel_id` is `unique=True`, so `/bind` must handle rebinding explicitly instead of letting an `IntegrityError` reach `error_handler`. Files: `common/enums.py` plus a `common` migration, `apps.py`, `handlers.py`.
+   **Readiness:** `Not ready`. No authorization is reachable from a Telegram identity. `common.enums.ClearanceType` has only `TRUSTED_MEDIA_UPLOADER`, so a new member (for example `TELEGRAM_CHANNEL_ADMIN`) and a data migration come first. `handlers_dict` has no permission key, and `startup()` wraps every entry in a bare `CommandHandler`, so a `"clearance"` key enforced at that point is needed. `Line.telegram_channel_id` is not unique, so a `/bind` that moves a line to a channel already used by another line raises no `IntegrityError`; the handler must decide whether sharing is intended. Files: `common/enums.py` plus a `common` migration, `apps.py`, `handlers.py`.
 
 ## 💡 Potential AI Feature Opportunities
 
