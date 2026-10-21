@@ -983,6 +983,79 @@ class CalendarIncidentWindowAndTagFilterTests(TestCase):
             self.mid_window,
         )
 
+    def test_stations_filter_runs_station_only_inputs_on_the_station(self):
+        # `location` and `stationLine` exist on Station, not on the incident: both
+        # used to be looked up on the incident and errored.
+        first_line = Line.objects.create(
+            code="TL1", display_name="Located One", display_color="#666666"
+        )
+        second_line = Line.objects.create(
+            code="TL2", display_name="Located Two", display_color="#777777"
+        )
+        near = Station.objects.create(
+            display_name="Near Halt", location=Point(101.70, 3.10)
+        )
+        far = Station.objects.create(
+            display_name="Far Halt", location=Point(103.80, 1.30)
+        )
+        for index, (station, line) in enumerate(
+            ((near, first_line), (near, second_line), (far, first_line))
+        ):
+            StationLine.objects.create(
+                station=station,
+                line=line,
+                display_name=f"{station.display_name} {index}",
+                internal_representation=f"TL{index}",
+            )
+        self.open_since_yesterday.stations.set([near])
+        self.mid_window.stations.set([near, far])
+        self.starts_tomorrow.stations.set([far])
+
+        around_near = {"x": 101.7, "y": 3.1, "z": 0, "radius": 5}
+        self._expect(
+            {"stations": {"location": around_near}},
+            self.open_since_yesterday,
+            self.mid_window,
+        )
+        # `near` has two matching station lines: its incidents are still one row each.
+        self._expect(
+            {"stations": {"stationLine": {"displayName": {"iContains": "Near"}}}},
+            self.open_since_yesterday,
+            self.mid_window,
+        )
+        self._expect(
+            {"stations": {"stationLine": {"line": {"id": str(second_line.id)}}}},
+            self.open_since_yesterday,
+            self.mid_window,
+        )
+
+    def test_negation_null_and_empty_inputs(self):
+        everything = [
+            self.open_since_yesterday,
+            self.ended_an_hour_ago,
+            self.mid_window,
+            self.starts_tomorrow,
+            self.starts_in_ten_days,
+        ]
+        self._expect(
+            {"NOT": {"activeNow": True}},
+            self.ended_an_hour_ago,
+            self.starts_tomorrow,
+            self.starts_in_ten_days,
+        )
+        # Untagged incidents survive `NOT lines`: a NULL in the subquery would drop them.
+        line = Line.objects.create(
+            code="TN", display_name="Negated Line", display_color="#888888"
+        )
+        self.mid_window.lines.set([line])
+        self._expect(
+            {"NOT": {"lines": {"id": str(line.id)}}},
+            *(i for i in everything if i is not self.mid_window),
+        )
+        # null and an empty nested filter mean "no filter".
+        self._expect({"activeNow": None, "upcomingWithinDays": None}, *everything)
+        self._expect({"lines": {}, "stations": {}}, *everything)
+
     def test_soft_deleted_incidents_stay_hidden(self):
         line = Line.objects.create(
             code="TD", display_name="Deleted Line", display_color="#555555"

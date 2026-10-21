@@ -55,12 +55,18 @@ MAX_UPCOMING_DAYS = 60
 def _tagged_with(field: str, value: Any, info: Info) -> Q:
     """Incidents with at least one `field` row matching the nested filter.
 
-    A `pk IN (subquery)` rather than a join on the M2M: a join repeats an incident once
-    per matching row, so two matching lines would return it twice."""
-    queryset, q = process_filters(
-        value, models.CalendarIncident.objects.all(), info, f"{field}__"
+    The nested filter runs on the related model itself, so its own filter_fields (such
+    as StationFilter.location) see the model they expect. A `pk IN` over the M2M table
+    then keeps one row per incident: a join repeats an incident once per matching row.
+    The table's columns are never NULL, so `NOT` stays safe. No condition, no filter."""
+    m2m = models.CalendarIncident._meta.get_field(field)
+    related, q = process_filters(value, m2m.related_model.objects.all(), info)
+    if not q:
+        return Q()
+    matching = m2m.remote_field.through.objects.filter(
+        **{f"{m2m.m2m_reverse_field_name()}__in": related.filter(q).values("pk")}
     )
-    return Q(pk__in=queryset.filter(q).values("pk"))
+    return Q(pk__in=matching.values(f"{m2m.m2m_field_name()}_id"))
 
 
 @strawberry_django.filter(models.CalendarIncident)
