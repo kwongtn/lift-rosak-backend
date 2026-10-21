@@ -6,13 +6,14 @@
   - **Asset ledger:** `VehicleIncident` and `StationIncident`. Dated, ordered events per vehicle or station. `is_last` marks the current state.
   - **Calendar incident:** `CalendarIncident`, a service disruption over a datetime range, with lines, stations and vehicles, a chronology of `CalendarIncidentChronology` updates, markdown details, media and an `impact_factor`.
 - It also owns the crowd-sourced feed: `SocialMediaLink` (canonical-URL dedup, votes, reply trees), `LineStatusReport` passenger-load reports that consolidate into a per-line pulse for `operation.Line`, and automated ingestion of official X posts.
+- It owns web push too: `PushSubscription` stores one browser's FCM token and the lines it follows, and a MAJOR incident that goes LIVE through approval is pushed to those lines' subscribers (`services/push.py`).
 - **Domain/Layer:** Django persistence and business logic (GIS via `PointField`), exposed as a read/write Strawberry GraphQL API. The only HTTP route is the X Activity API webhook (`incident/views.py`, registered in `rosak/urls.py`). There is no `incident/urls.py` and no signals. Writes come from GraphQL mutations, the `/upload/` → `common` media pipeline, the webhook, and `incident/tasks.py`.
 
 ## 🔌 Interface & Data Flow
 
 ### Inputs: GraphQL queries
 
-Root fields come from `IncidentScalars` (`incident/schema/schema.py`): `vehicleIncidents`, `stationIncidents`, `calendarIncidents`, `calendarIncidentsBySeverityCount`, `pendingCalendarIncidents` (admin queue), `socialMediaLinks` (admin queue), `publicSocialMediaLinks` (cursor connection), `calendarIncidentCategories`, `calendarIncidentHistory` (logged in), `lineStatusHistory`, `networkStatusHistory`, `linesStatusHistory`, `lineStatusWeekProfile`, `lineStatusReports`.
+Root fields come from `IncidentScalars` (`incident/schema/schema.py`): `vehicleIncidents`, `stationIncidents`, `calendarIncidents`, `calendarIncidentsBySeverityCount`, `pendingCalendarIncidents` (admin queue), `socialMediaLinks` (admin queue), `publicSocialMediaLinks` (cursor connection), `calendarIncidentCategories`, `calendarIncidentHistory` (logged in), `lineStatusHistory`, `networkStatusHistory`, `linesStatusHistory`, `lineStatusWeekProfile`, `lineStatusReports`, `pushSubscription` (logged in).
 
 | Filter (`incident/schema/filters.py`) | Inputs |
 | --- | --- |
@@ -30,6 +31,7 @@ Root fields come from `IncidentScalars` (`incident/schema/schema.py`): `vehicleI
 - `CalendarIncidentOrder`: `id`, `order`, `impact_factor`, `start_datetime`, `end_datetime`. Asset-level lists have no ordering input.
 - `calendarIncidentsBySeverityCount(start_date, end_date, group_by: GroupByEnum = DAY)`. `GroupByEnum` is `DAY | MONTH`.
 - `calendarIncidentHistory(id, limit = 50)`: latest first, `IsLoggedIn`.
+- `pushSubscription(token: String!)`: `IsLoggedIn`. Returns the caller's own `PushSubscriptionScalar` for that token, so a device can restore its bell state. It returns null when the token is unknown **or registered by another account**, because holding a token does not prove you own someone else's subscription.
 
 **`publicSocialMediaLinks`** (`get_public_social_media_links`, `incident/schema/resolvers.py`). Ordered `occurred_at DESC, id DESC`. The keyset cursor is the `(occurred_at, id)` pair.
 
@@ -51,7 +53,7 @@ Root fields come from `IncidentScalars` (`incident/schema/schema.py`): `vehicleI
 
 ### Inputs: mutations
 
-`IncidentMutations` composes five mixins from `incident/schema/mutations/`:
+`IncidentMutations` composes six mixins from `incident/schema/mutations/`:
 
 | Mixin | Mutations | Permission |
 | --- | --- | --- |
@@ -65,10 +67,13 @@ Root fields come from `IncidentScalars` (`incident/schema/schema.py`): `vehicleI
 | | `submitFeedLink`, `submitLineStatusReport`, `upvoteSocialMediaLink`, `downvoteSocialMediaLink`, `removeSocialMediaLinkVote` | `IsLoggedIn` |
 | | `markSocialMediaLinkCompleted` | `IsAdmin` |
 | `ExtractionMutations` (`interactions.py`) | `extractDataFromUrl` | `IsLoggedIn` |
+| `PushMutations` (`push.py`) | `registerPushToken`, `unregisterPushToken` | `IsLoggedIn` |
 
 - 🔴 **The nine vote mutations return `VoteMutationPayload`, not `GenericMutationReturn`.** They return `ok`, `userVote`, `voteScore`, `upvotes` and `downvotes`, all from one aggregate round-trip (`services/votes.py::VoteOutcome`). `_vote_payload` in `interactions.py` is the only conversion point. Why: an `ok`-only response made clients project the new score themselves, and that projection raced the echo and other voters, so the indicator visibly snapped back. `ok` is kept, so `{ ok }` selections still work. The retype is still breaking by graphql-core's definition, so it is pinned in `EXPECTED_ACCEPTED_BREAKING_CHANGES` (`rosak/tests/test_schema_snapshot.py`).
 - `submitFeedLink(input: FeedLinkInput)` returns `FeedLinkPayload` (`ok`, `link`, `isDuplicate`, `duplicateOfId`, `userVote`). Any logged-in user gets `LIVE`. The canonical URL is deduped, and a duplicate auto-upvotes the existing row without touching its `occurred_at`.
 - `submitLineStatusReport(input)` returns `GenericMutationReturn` and creates one standalone `LineStatusReport`.
+- `registerPushToken(token: String!, lineIds: [ID!]!)` returns `GenericMutationReturn` (`ok` only). It **upserts by token and replaces the lines**: send the full set every time, and `[]` keeps the row with no lines. A token already registered by another account is **re-owned** by the caller, because the browser holding it now belongs to the caller. The token is trimmed and must be 1 to 2048 ASCII characters. The cap is not FCM's: the unique btree index on `token` refuses a row over 2704 bytes with a raw `OperationalError`. A non-numeric or unknown line id is a validation error, and nothing is written.
+- `unregisterPushToken(token: String!)` deletes the caller's own row for that token. Another account's row is untouched, and an absent token still returns `ok: true`.
 - **`updateSocialMediaLink` is replace-not-patch.** The service assigns `url` and `title` unconditionally and calls `.set()` on all four tag M2Ms. Every caller must resend the full payload, including `occurredAt`, where explicit `null` means "reset to the submission time". Admin edits land `LIVE`. A submitter's edit is forced back to `PENDING_APPROVAL`. Admins may set `HIDDEN`.
 - `groupSocialMediaLinks(linkIds, parentId: ID = null)`, `ungroupSocialMediaLinks(linkIds)` and `reorderSocialMediaLinks(linkIds, parentId: Maybe<ID>)` are id-only, so grouping never travels through `SocialMediaLinkInput`. `group` returns the root of the affected conversation in `id`. `parentId` is an un-aliased rename of the old `threadId`. A stale client gets "Unknown argument/field". Pinned by `EXPECTED_ACCEPTED_BREAKING_CHANGES`. See the link tree section.
 
@@ -103,6 +108,7 @@ Root fields come from `IncidentScalars` (`incident/schema/schema.py`): `vehicleI
 - **`SocialMediaLinkScalar`**: `id`, `url`, `normalizedUrl` (computed on save), `title`, `description`, `status`, `created` (submission time, the moderation provenance), `occurredAt: DateTime!` (non-null, naive local), `completed`, `completedAt`, `isAutomated: Boolean!` (the "Official" badge), `completedBy` (nickname, or `firebase_id[:8]`), `user`, `categories`, `lines`, `vehicles`, `stations`, the tree fields `parentId`, `isThreadRoot`, `position`, `sublinkCount`, `sublinks` (recursive), and `voteScore` / `userVote`. Ingestion columns (`posted_at`, `post_id`, `raw_payload`, `socmed_account`) are deliberately not exposed. `SocialMediaLinkConnection` adds `totalCount`. `FeedLinkPayload` is the `submitFeedLink` return type.
 - **`LineStatusReportScalar`**: `id`, `status` (`PassengerStatus`), `delayMinutes`, `notes`, `created`, `user`, `stations`. Served by `lineStatusReports(lineId, first, after)`.
 - **`LineStatusHourBucket`** (`hourStart`, `hourEnd`, `count`, `dominantStatus`, `statusCounts: [PassengerStatusCount!]!`) and **`LineStatusHistory`** (line id plus buckets). **`LineStatusWeekBucket`** (`weekday`, `hour`, `count`, `dominantStatus`, `statusCounts`) is one weekday-hour slot of a typical week. See the service-day and typical-week sections.
+- **`PushSubscriptionScalar`**: `token`, `lines` (operation `Line`). Served only by `pushSubscription`, only to the token's owner.
 - **`CalendarIncidentGroupByDateSeverityScalar`**: `severity`, `date`, `count`, `is_long_term` (null in `MONTH` mode). A flat row for calendar heat maps.
 
 ### Celery tasks (`incident/tasks.py`, schedule in `rosak/celery.py`)
@@ -113,6 +119,7 @@ Root fields come from `IncidentScalars` (`incident/schema/schema.py`): `vehicleI
 | `purge_rejected_incidents` | 03:30 daily | Hard-deletes `REJECTED` rows unchanged for `REJECTED_RETENTION` (30 days). |
 | `ingest_official_posts` | every 5 min, `expires=240`, `time_limit=180` | Polls enabled X `SocMedAccount` rows. Registered only when `OFFICIAL_POST_POLLING_ENABLED` is set. Ships inert: returns `{"skipped": "disabled" \| "polling_disabled" \| "no_token"}` unless the master switch, the polling flag and `X_API_BEARER_TOKEN` are all set. `expires` sits under the period so a wedged run is never re-dispatched on top of itself. Never retries or sleeps. A per-handle `OfficialPostFetchError` is logged and the other handles still run. |
 | `notify_official_post_links(link_ids)` | Off-beat | Dispatched by the webhook view, see Internal State. |
+| `notify_push_subscribers(incident_id)` | Off-beat | Enqueued on commit by `approve_incident`, see Web push. `autoretry_for=FirebaseError`, `max_retries=3`, `retry_backoff` capped at 600 s. Returns the number of messages FCM accepted. |
 
 Beat `crontab` times are Malaysian local time. `CELERY_TIMEZONE` is set only inside `if USE_TZ:` (`rosak/settings.py`) and `USE_TZ` is `False`, so Celery falls back to Django's `TIME_ZONE` (`Asia/Kuala_Lumpur`, verified in the running `app` container). The service-day cutoffs in this app (`DAY_START_HOUR`, `service_day_start`) are a separate, local-time concept.
 
@@ -126,12 +133,13 @@ Beat `crontab` times are Malaysian local time. `CELERY_TIMEZONE` is set only ins
 
 ### Dependencies
 
-- **Outbound.** `operation.Vehicle` and `operation.Station` (FK, CASCADE). `operation.Line`, `Station` and `Vehicle` (M2M from `CalendarIncident`). `operation.Line` (FK, PROTECT) and `Station` (M2M) from `LineStatusReport`. `common.Media` (M2M on the three incident models, through `CalendarIncidentMedia` for the calendar tier). `common.User` (`created_by`, and `user` on `SocialMediaLink` and `LineStatusReport`). `common.Vote` (generic, via ContentType, including `SocialMediaLink`). `generic.views.GeometricForm`. `operation.schema.filters` and `scalars` in GraphQL. `telegram_provider.utils.send_message` and `TelegramSocialMediaLinkLog` at module level in `incident/tasks.py`. That is the one-way `incident → telegram_provider` edge.
+- **Outbound.** `operation.Vehicle` and `operation.Station` (FK, CASCADE). `operation.Line`, `Station` and `Vehicle` (M2M from `CalendarIncident`). `operation.Line` (FK, PROTECT) and `Station` (M2M) from `LineStatusReport`. `operation.Line` (M2M) from `PushSubscription`. `common.Media` (M2M on the three incident models, through `CalendarIncidentMedia` for the calendar tier). `common.User` (`created_by`, and `user` on `SocialMediaLink`, `LineStatusReport` and `PushSubscription`). `common.Vote` (generic, via ContentType, including `SocialMediaLink`). `generic.views.GeometricForm`. `operation.schema.filters` and `scalars` in GraphQL. `telegram_provider.utils.send_message` and `TelegramSocialMediaLinkLog` at module level in `incident/tasks.py`. That is the one-way `incident → telegram_provider` edge.
 - **Inbound.**
   - `operation/admin.py` imports `VehicleIncidentInlineAdmin` and `StationIncidentInlineAdmin`. The asset ledger is edited from operation admin pages.
   - `operation/schema/loaders.py` imports `VehicleIncident` for `incident_from_vehicle_loader` and `incident_count_from_vehicle_loader`, which back `Vehicle.incidents`, `incidentCount` and `canExpand`. No station equivalent exists (Feature 5).
   - `common/views.py` (`GenericUpload` stashes `calendar_incident_id` in metadata), `common/tasks.py` (creates the `CalendarIncidentMedia` row after upload; `cleanup_temporary_media_task` targets this app), and `common/enums.py`.
   - `telegram_provider` references `incident` only through the `TelegramSocialMediaLinkLog` FK (migration `0005`) and the `/approve` handler.
+- **Firebase Cloud Messaging.** `services/push.py` sends through `firebase_admin.messaging`. The default app is initialised once in `spotting/apps.py` (`initialize_app()`), so the Celery worker needs the same `GOOGLE_APPLICATION_CREDENTIALS` as the API.
 - **Third-party.** `model_utils.TimeStampedModel`, `ordered_model`, `mdeditor` (`details`), `pendulum` (bucketing), `django.contrib.gis`, `django-safedelete==1.5.0`, `django-simple-history`, `django-choices-field` (`TextChoicesField`), and `django-tree-queries==0.26.1` (`OrderableTreeNode`, `TreeNodeForeignKey`). The last requires `"tree_queries"` in `INSTALLED_APPS`, or it raises `tree_queries.E001`. It was chosen over `django-treenode` because `tree_path` is a per-query CTE annotation. Nothing is stored, there is no in-process tree, and no signal runs on every `save()`. That matters on a high-write table served by granian, the celery worker and beat.
 
 ## ⚙️ Internal State & Logic
@@ -262,6 +270,15 @@ If `CrcValidationFailed` appears on registration, check in order: (1) the endpoi
 - **No new dependency, no leaked secret.** `datasets` is lazy-imported. `HF_TOKEN` comes from the environment and is never printed. `private=True` is unconditional, because redistributing tweet content on the Hub is outside X's terms.
 - **Timezone.** The exported `posted_at` is the stored column verbatim. With `USE_TZ = False` that is naive local time. The instant is correct and the offset is missing. The `--since` / `--until` bounds stay aware, so the window is a true UTC day.
 
+### Web push (`services/push.py`, `services/incidents.py::_enqueue_push`, `tasks.py`)
+
+- **Trigger.** `approve_incident` calls `_enqueue_push` when an incident becomes newly LIVE: a `PENDING_APPROVAL` row promoted to LIVE, or a revision merged into a parent that was **not** LIVE before (for example a `REJECTED` one). A revision merged into an already-LIVE parent is an edit and does not push. Every newly LIVE incident is enqueued whatever its severity, and the task decides. `transaction.on_commit(..., robust=True)` runs the `delay` after the merge's atomic block commits (at once in autocommit), and a broker outage is logged, never raised, because the approval already stands.
+- **Not a trigger.** An admin's `createCalendarIncident` (born LIVE, never approved), an admin edit that raises a LIVE incident to MAJOR, Django admin edits, and official-post ingestion do not push.
+- **Who gets it.** `notify_major_incident` sends nothing unless the incident exists, is not soft-deleted, is `LIVE` and is `MAJOR`. Recipients are the distinct tokens of subscriptions whose lines intersect `CalendarIncident.lines` (the admin-edited join). A device subscribed to several affected lines gets one message.
+- **Cooldown.** At most one push per line per 30 minutes (`COOLDOWN_SECONDS`). Each affected line is claimed with `cache.add("push:line:<id>:cooldown", 1, timeout=1800)`, which is atomic, so two concurrent approvals on one line send once. A line in its cooldown is skipped, and the other lines of the same incident still push. A claim made for a line with no subscribers still counts. ⚠️ Local `DEBUG=True` uses `DummyCache`, whose `add` always succeeds, so the cooldown never limits locally. Test it with a `LocMemCache` override, as `incident/tests_push.py` does.
+- **Message.** Title `"<line codes, by code>: <title>"` cut to 100 characters, body `brief` cut to 150, and `webpush.fcm_options.link` = `{FRONTEND_BASE_URL}/insiden/<start date YYYY-MM-DD>`. FCM rejects a link that is not `https://`, so `FRONTEND_BASE_URL` must be https wherever pushes are sent. Tokens go out in chunks of 500 through `messaging.send_each_for_multicast`.
+- **Failures.** A token answered with `UnregisteredError` or `SenderIdMismatchError` is deleted. Any other per-token failure is kept and logged once per incident as a count by error type. Tokens are never logged. A raised exception releases this run's cooldown claims before it propagates, so the task's retry can send again. A failure after an earlier chunk went out re-sends that chunk on retry (only above 500 recipients).
+
 ### Moderation gates (`schema/resolvers.py`, `services/social_link_visibility.py`)
 
 The public feed applies two exclusions after the `status` narrowing and before `totalCount`, so the count and the page always agree:
@@ -347,7 +364,7 @@ Open defects are catalogued in `docs/APPS.md` (Known Defects & Traps) and `MISTA
 
 ### Migrations with logic
 
-Latest is `0032`. The next free number is `0033`. Migrations that carry logic:
+Latest is `0033` (`PushSubscription`, schema only). The next free number is `0034`. Migrations that carry logic:
 
 - `0004` calendar tier; `0011` `CalendarIncidentMedia` through-model; `0013` `CalendarIncident.lines` gets `related_name="incidents"`.
 - `0014` `SocialMediaLink`; `0017` `TextChoicesField` conversion; `0021` `StationIncident` constraint gets `condition=Q(is_last=True)`.
@@ -367,6 +384,7 @@ Latest is `0032`. The next free number is `0033`. Migrations that carry logic:
 - **`services/social_link_visibility.py::is_publicly_visible`** is the one place the moderation rule changes. New gates call it.
 - **`CalendarIncidentCategory`** is a free-form tag table, so new taxonomies need data rows, not migrations. It also backs `SocialMediaLink.categories`.
 - **`IncidentContextLoaders`** takes one key per new batched field.
+- **`_enqueue_push(incident_id)`** (`services/incidents.py`) is the push seam. A new trigger, such as admin create or official-post ingestion, is one call from inside that write. The task re-checks status and severity, and the per-line cooldown deduplicates.
 - **Status enums** are lifecycle hooks. A new state is an enum addition plus the matching service gate. `PassengerStatus` is additive, and its rank is declaration order.
 - **`SIGNATURE_CANDIDATES`** is the signed-request seam. X's next signing scheme is one tuple and one env var. CRC uses `_preferred_signing_secret`, because X verifies CRC against exactly one secret.
 - **`_expansion_containers`** is the envelope seam. A future envelope nested one level deeper is a one-line change.
@@ -379,7 +397,7 @@ Latest is `0032`. The next free number is `0033`. Migrations that carry logic:
 ## 💡 Potential Feature Opportunities
 
 1. **"All incidents in this disruption": one FK to join the two tiers.** A reader viewing a network disruption cannot see which vehicles or stations it affected, and an editor cannot attach a vehicle fault to an open disruption. Add a nullable `calendar_incident` FK on `IncidentAbstractModel` (`on_delete=SET_NULL`). This gives `CalendarIncidentScalar` rollup lists and each asset scalar a parent link, and makes `impact_factor` attributable to specific rolling stock. Only `CalendarIncidentChronology` has a `calendar_incident` FK today.
-   **Readiness:** `Not ready`. Add the field to `IncidentAbstractModel` in `incident/models.py`. Generate migration `0033`. It is nullable, so no backfill. Add the fields to `VehicleIncident`, `StationIncident` and `CalendarIncidentScalar` in `incident/schema/scalars.py`, a nested filter in `incident/schema/filters.py`, and `autocomplete_fields` on the inlines in `incident/admin.py`. `CalendarIncidentAdmin` already has `search_fields`.
+   **Readiness:** `Not ready`. Add the field to `IncidentAbstractModel` in `incident/models.py`. Generate migration `0034`. It is nullable, so no backfill. Add the fields to `VehicleIncident`, `StationIncident` and `CalendarIncidentScalar` in `incident/schema/scalars.py`, a nested filter in `incident/schema/filters.py`, and `autocomplete_fields` on the inlines in `incident/admin.py`. `CalendarIncidentAdmin` already has `search_fields`.
 
 2. **Per-line reliability score from `impact_factor`.** Full spec in `docs/features/04-impact-factor-reliability.md`. The column, admin field, GraphQL field and ordering key are all wired, and nothing consumes them.
    **Readiness:** `Partially ready`. (a) The "prorated by usual service hours" half has no data source. `operation.Line` has no service-hours field, so either use whole-day denominators in v1 or add `service_start_time` / `service_end_time`. (b) The resolver must traverse `CalendarIncident.lines` (reverse accessor `Line.incidents`), not `operation.Line.calendar_incidents`, which admin never writes. Files: `incident/schema/resolvers.py`, `incident/schema/schema.py`, optionally `operation/schema/scalars.py`.
