@@ -2,7 +2,7 @@ import strawberry
 import strawberry_django
 from django.db.models import QuerySet
 from strawberry.types import Info
-from strawberry_django.ordering import process_order
+from strawberry_django.ordering import OrderSequence, process_order
 
 from common.models import Media
 
@@ -16,7 +16,11 @@ class MediaOrder:
 
     @strawberry_django.order_field
     def order(
-        self, info: Info, queryset: QuerySet, prefix: str, sequence
+        self,
+        info: Info,
+        queryset: QuerySet,
+        prefix: str,
+        sequence: dict[str, OrderSequence] | None,
     ) -> tuple[QuerySet, list]:
         """The requested keys, then the primary key last.
 
