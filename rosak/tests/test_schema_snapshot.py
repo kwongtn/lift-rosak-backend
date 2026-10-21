@@ -60,7 +60,7 @@ is never the cheap way to keep a client working:
   removed in favour of ``Asset.station: Station!``. The model has ONE foreign key
   (``Asset.station``), so selecting ``stations`` failed for every asset with
   ``'Asset' object has no attribute 'stations'``: the field never returned data,
-  and no client selected it (the Station Assets section reads
+  and the web app never selected it (the Station Assets section reads
   ``Line.stations[].assets``, i.e. ``Station.assets``). An alias would keep a
   plural field that can only ever fail, so it is a plain removal.
 
