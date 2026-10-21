@@ -182,6 +182,7 @@ The two severity vocabularies are not interchangeable, and there is no mapping b
 - `statusCounts` lists the per-status tally in enum order, zeros omitted. It sums to `count`, and it is `[]` for an empty hour.
 - `networkStatusHistory` is a **network aggregate**. An hour's tally covers every line, so it answers "how is the network doing". Drawing it as one line's series would attribute other lines' reports to that line.
 - `linesStatusHistory` returns one entry per requested id, in request order. The entry existing does not mean the line reported anything. Duplicate ids collapse to the first occurrence. `lineIds` is capped at `MAX_LINES_PER_HISTORY_REQUEST = 64` (`LineStatusValidationError`, surfaced as `GraphQLError`). The cap is not a query-count guard.
+- `lineId` (and every entry of `lineIds`) must be numeric. Anything else is a validation error (`GraphQLError`), not a raw `ValueError`.
 - All three are public (no permission classes).
 - ⚠️ The network read filters on `created` alone. The index is `(line, created)` (migration `0026`, `incident_li_line_id_828375_idx`), so the read is a sequential scan of the service day's rows (a past day, `daysAgo > 0`, costs the same). That is the right trade at current volume. If the report table grows by orders of magnitude, add a `created`-leading index first. Do not split the read.
 
@@ -193,7 +194,7 @@ The two severity vocabularies are not interchangeable, and there is no mapping b
 - **`weekday`** is 0 = Monday to 6 = Sunday of the **service** day the report belongs to, and **`hour`** is the local clock hour 0 to 23. Stored times are naive local time (`USE_TZ = False`, `Asia/Kuala_Lumpur`), so the stored clock is read as it is. The report is shifted back by `dayStartHour` before its weekday is read: with the default 03:00 start a 01:30 Tuesday report counts toward Monday at hour 1, exactly where the hourly chart files it, and `dayStartHour: 0` gives plain calendar weekdays.
 - **`count` is a raw total over the window's weeks**, not an average, so a client that wants a minimum-report threshold ("not enough reports") applies its own to `count`. The window is rolling and not aligned to service days, so it includes the current day so far.
 - **`dominantStatus` and `statusCounts`** follow the hourly-bucket rules by sharing their code: `_dominant_status` (most frequent, ties to the most severe) and `_status_count_rows` (enum order, zeros omitted, summing to `count`).
-- `weeks` must be 1 to 12 (`MAX_WEEK_PROFILE_WEEKS`; `null` reads as the default 6), `dayStartHour` 0 to 23, and `lineId` numeric: anything else is a `LineStatusValidationError` (surfaced as `GraphQLError`). The line is not checked for existence, so an unknown id answers `[]`. Public, like the other history queries.
+- `weeks` must be 1 to 12 (`MAX_WEEK_PROFILE_WEEKS`; `null` reads as the default 6) and `dayStartHour` 0 to 23, else `LineStatusValidationError` (surfaced as `GraphQLError`). A non-numeric `lineId` is a `GraphQLError` too. The line is not checked for existence, so an unknown id answers `[]`. Public, like the other history queries.
 
 ### X Activity API webhook (`incident/views.py`, `incident/services/x_webhooks.py`)
 

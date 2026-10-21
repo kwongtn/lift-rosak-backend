@@ -1053,6 +1053,14 @@ def _week_bucket(bucket: WeekBucket) -> LineStatusWeekBucket:
     )
 
 
+def _numeric_line_id(line_id: strawberry.ID) -> int:
+    """``int(line_id)``; a non-numeric id is a validation error, not a raw 500."""
+    try:
+        return int(line_id)
+    except (TypeError, ValueError) as exc:
+        raise GraphQLError("lineId must be a numeric line id.") from exc
+
+
 async def get_line_status_history(
     root,
     info: Info,
@@ -1076,7 +1084,9 @@ async def get_line_status_history(
         days_ago = 0
     try:
         buckets = await load_line_status_history(
-            int(line_id), day_start_hour=day_start_hour, days_ago=days_ago
+            _numeric_line_id(line_id),
+            day_start_hour=day_start_hour,
+            days_ago=days_ago,
         )
     except IncidentServiceError as exc:
         raise_service_error(exc)
@@ -1187,14 +1197,8 @@ async def get_line_status_week_profile(
     if day_start_hour is None:
         day_start_hour = DAY_START_HOUR
     try:
-        numeric_line_id = int(line_id)
-    except (TypeError, ValueError):
-        raise_service_error(
-            LineStatusValidationError("lineId must be a numeric line id.")
-        )
-    try:
         buckets = await load_line_status_week_profile(
-            numeric_line_id, weeks=weeks, day_start_hour=day_start_hour
+            _numeric_line_id(line_id), weeks=weeks, day_start_hour=day_start_hour
         )
     except IncidentServiceError as exc:
         raise_service_error(exc)

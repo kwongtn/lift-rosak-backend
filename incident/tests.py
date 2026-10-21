@@ -2069,6 +2069,27 @@ class StatusHistoryQueryTests(ServiceDayHistoryFixtureMixin, TestCase):
 
         self.assertIsNotNone(result.errors)
 
+    def test_graphql_history_queries_reject_a_non_numeric_line_id(self):
+        cases = {
+            "lineStatusHistory": (
+                "query($id: ID!) { lineStatusHistory(lineId: $id) { count } }",
+                {"id": "not-a-number"},
+                "lineId must be a numeric line id.",
+            ),
+            "linesStatusHistory": (
+                "query($ids: [ID!]!) { linesStatusHistory(lineIds: $ids) { lineId } }",
+                {"ids": [str(self.line.id), "not-a-number"]},
+                "lineIds must contain only numeric line ids.",
+            ),
+        }
+        for field, (query, variables, message) in cases.items():
+            with self.subTest(field=field):
+                result = execute_graphql(query, variables=variables)
+
+                self.assertIsNotNone(result.errors)
+                # A validation message, not the raw ``invalid literal for int()``.
+                self.assertEqual(result.errors[0].message, message)
+
     def test_graphql_history_queries_still_agree_with_the_single_line_query(self):
         hour = self._current_hour()
         self._report(self.line, PassengerStatus.CROWDED, hour)
