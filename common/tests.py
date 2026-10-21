@@ -538,13 +538,9 @@ class CommonGraphQLTests(TestCase):
         empty_result = await execute_graphql_async(
             empty_user_query, user=self.other_user
         )
-        self.assertIsNotNone(empty_result.errors)
-        self.assertTrue(
-            any(
-                "list index out of range" in str(err) or "IndexError" in str(err)
-                for err in empty_result.errors
-            )
-        )
+        # No spottings at all: null, not an IndexError that nulls the whole user.
+        self.assertIsNone(empty_result.errors)
+        self.assertIsNone(empty_result.data["user"]["withMostEntries"])
 
     async def test_update_user_nickname_mutation(self):
         mutation = """

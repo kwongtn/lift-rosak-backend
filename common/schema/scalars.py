@@ -161,7 +161,7 @@ class UserScalar:
     @strawberry_django.field
     async def with_most_entries(
         self, info: Info, type: DateGroupings
-    ) -> WithMostEntriesData:
+    ) -> Optional[WithMostEntriesData]:
         groupings = {"year": F("created__year")}
 
         if type in [DateGroupings.MONTH, DateGroupings.DAY]:
@@ -170,8 +170,6 @@ class UserScalar:
             if type == DateGroupings.DAY:
                 groupings["day"] = F("created__day")
 
-        # No visible events leaves `rows` empty and `[0]` raises IndexError (a known
-        # defect, pinned by a test).
         rows = [
             row
             async for row in spotting_models.Event.objects.filter(
@@ -182,6 +180,10 @@ class UserScalar:
             .annotate(count=Count("id"))
             .order_by("-count")[:1]
         ]
+        # Nothing visible to this viewer (no spottings, or only anonymous ones).
+        if not rows:
+            return None
+
         max = rows[0]
 
         return WithMostEntriesData(

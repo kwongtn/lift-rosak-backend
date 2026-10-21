@@ -1414,6 +1414,27 @@ class AnonymousSpottingsOnProfileTests(TestCase):
                 self.assertEqual(profile["withMostEntries"]["count"], 1)
                 self.assertEqual(sum(t["count"] for t in profile["spottingTrends"]), 1)
 
+    async def test_a_profile_with_only_anonymous_spottings_still_loads_for_strangers(
+        self,
+    ):
+        for _ in range(2):
+            await sync_to_async(self._event)(self.vehicle_b, anonymous=True)
+
+        for viewer in (None, self.other):
+            with self.subTest(viewer=getattr(viewer, "firebase_id", None)):
+                # `_profile` asserts there are no errors: withMostEntries used to
+                # raise IndexError here and null the whole profile.
+                profile, _ = await self._profile(viewer)
+
+                self.assertIsNone(profile["withMostEntries"])
+                self.assertEqual(profile["spottingsCount"], 0)
+                self.assertEqual(profile["spottings"], [])
+                # An empty free range used to subtract None from today.
+                self.assertEqual(sum(t["count"] for t in profile["spottingTrends"]), 0)
+
+        profile, _ = await self._profile(self.reporter)
+        self.assertEqual(profile["withMostEntries"]["count"], 2)
+
     async def test_owner_and_admin_still_see_every_spotting(self):
         await sync_to_async(self._spot)()
         everything = {str(self.public.id), *(str(e.id) for e in self.anonymous)}

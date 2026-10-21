@@ -269,8 +269,10 @@ def get_trends(
         .order_by(*[f"-{group_str}" for group_str in group_strs])
     )
 
+    # An empty free range has no earliest row: fall back to the default `start`.
+    first = qs.aggregate(min=Min(groupby_field))["min"] if free_range else None
     interval = pendulum.interval(
-        qs.aggregate(min=Min(groupby_field))["min"] if free_range else start,
+        first or start,
         date.today() if free_range else end,
     )
     range = interval.range(range_type)

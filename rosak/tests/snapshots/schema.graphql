@@ -1026,7 +1026,7 @@ type UserScalar {
   shortId: String!
   spottingDataPublic: Boolean!
   favouriteVehicles(count: Int = 1): [FavouriteVehicleData!]!
-  withMostEntries(type: DateGroupings!): WithMostEntriesData!
+  withMostEntries(type: DateGroupings!): WithMostEntriesData
   spottings: [EventScalar!]
   spottingsCount: Int!
   mediaCount: Int!
