@@ -27,9 +27,13 @@ class MediaOrder:
         `created` / `modified` can tie (several photos in one millisecond), and
         offset paging over tied rows skips some and repeats others, so the feed
         needs a unique final key.
+
+        `process_order(..., skip_object_order_method=True)` and `OrderSequence` are
+        strawberry-django internals (pinned to 0.82.x in pyproject.toml). An upgrade
+        that changes them fails `common.tests.MediasFeedPagingTests`: run it first.
         """
         queryset, args = process_order(
-            self,
+            self,  # type: ignore[arg-type]  # the decorator hides the definition
             info,
             queryset,
             sequence=sequence,

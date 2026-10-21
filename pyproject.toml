@@ -52,6 +52,8 @@ dependencies = [
     "requests>=2.32.3",
     "sentry-sdk>=2.66.1",
     "setuptools>=70.0.0",
+    # common/schema/orderings.py (MediaOrder.order) uses its ordering internals:
+    # run common.tests.MediasFeedPagingTests before moving this range.
     "strawberry-graphql-django>=0.82.1,<0.83.0",
     "strawberry-graphql>=0.310.1",
     "watchfiles>=1.0,<2",
