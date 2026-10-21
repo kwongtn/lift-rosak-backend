@@ -12,7 +12,7 @@
 
 ### Inputs: GraphQL queries
 
-Root fields come from `IncidentScalars` (`incident/schema/schema.py`): `vehicleIncidents`, `stationIncidents`, `calendarIncidents`, `calendarIncidentsBySeverityCount`, `pendingCalendarIncidents` (admin queue), `socialMediaLinks` (admin queue), `publicSocialMediaLinks` (cursor connection), `calendarIncidentCategories`, `calendarIncidentHistory` (logged in), `lineStatusHistory`, `networkStatusHistory`, `linesStatusHistory`, `lineStatusReports`.
+Root fields come from `IncidentScalars` (`incident/schema/schema.py`): `vehicleIncidents`, `stationIncidents`, `calendarIncidents`, `calendarIncidentsBySeverityCount`, `pendingCalendarIncidents` (admin queue), `socialMediaLinks` (admin queue), `publicSocialMediaLinks` (cursor connection), `calendarIncidentCategories`, `calendarIncidentHistory` (logged in), `lineStatusHistory`, `networkStatusHistory`, `linesStatusHistory`, `lineStatusWeekProfile`, `lineStatusReports`.
 
 | Filter (`incident/schema/filters.py`) | Inputs |
 | --- | --- |
@@ -102,7 +102,7 @@ Root fields come from `IncidentScalars` (`incident/schema/schema.py`): `vehicleI
 - **`CalendarIncidentHistoryEntryScalar`**: one diffed `django-simple-history` record. `timestamp` (UTC), `actor` (null for system), `change_type` (`created` / `updated` / `deleted`), `changed_fields` (from `diff_against`, internal history fields excluded).
 - **`SocialMediaLinkScalar`**: `id`, `url`, `normalizedUrl` (computed on save), `title`, `description`, `status`, `created` (submission time, the moderation provenance), `occurredAt: DateTime!` (non-null, naive local), `completed`, `completedAt`, `isAutomated: Boolean!` (the "Official" badge), `completedBy` (nickname, or `firebase_id[:8]`), `user`, `categories`, `lines`, `vehicles`, `stations`, the tree fields `parentId`, `isThreadRoot`, `position`, `sublinkCount`, `sublinks` (recursive), and `voteScore` / `userVote`. Ingestion columns (`posted_at`, `post_id`, `raw_payload`, `socmed_account`) are deliberately not exposed. `SocialMediaLinkConnection` adds `totalCount`. `FeedLinkPayload` is the `submitFeedLink` return type.
 - **`LineStatusReportScalar`**: `id`, `status` (`PassengerStatus`), `delayMinutes`, `notes`, `created`, `user`, `stations`. Served by `lineStatusReports(lineId, first, after)`.
-- **`LineStatusHourBucket`** (`hourStart`, `hourEnd`, `count`, `dominantStatus`, `statusCounts: [PassengerStatusCount!]!`) and **`LineStatusHistory`** (line id plus buckets). See the service-day section.
+- **`LineStatusHourBucket`** (`hourStart`, `hourEnd`, `count`, `dominantStatus`, `statusCounts: [PassengerStatusCount!]!`) and **`LineStatusHistory`** (line id plus buckets). **`LineStatusWeekBucket`** (`weekday`, `hour`, `count`, `dominantStatus`, `statusCounts`) is one weekday-hour slot of a typical week. See the service-day and typical-week sections.
 - **`CalendarIncidentGroupByDateSeverityScalar`**: `severity`, `date`, `count`, `is_long_term` (null in `MONTH` mode). A flat row for calendar heat maps.
 
 ### Celery tasks (`incident/tasks.py`, schedule in `rosak/celery.py`)
@@ -170,19 +170,30 @@ The two severity vocabularies are not interchangeable, and there is no mapping b
 
 ### Service-day history (`services/line_status.py`)
 
-`lineStatusHistory`, `networkStatusHistory` and `linesStatusHistory` are three views of one read. `_service_day_entries(line_ids, day_start_hour=, now=)` validates `dayStartHour`, computes `service_day_start` and issues **one** `LineStatusReport` query. `line_ids=None` means every line. An empty sequence returns before any query, so `linesStatusHistory(lineIds: [])` is zero-query. All three bucket through `bucket_hourly`, and `_hour_bucket()` in `schema/resolvers.py` is the single place that holds the status mapping and the `statusCounts` ordering.
+`lineStatusHistory`, `networkStatusHistory` and `linesStatusHistory` are three views of one read. `_service_day_entries(line_ids, day_start_hour=, days_ago=, now=)` validates `dayStartHour` and `daysAgo`, computes the service-day start (`service_day_start`, moved back `days_ago` days) and issues **one** `LineStatusReport` query. `line_ids=None` means every line. An empty sequence returns before any query, so `linesStatusHistory(lineIds: [])` is zero-query. All three bucket through `bucket_hourly`, and `_hour_bucket()` in `schema/resolvers.py` is the single place that holds the status mapping and the `statusCounts` ordering (through `_dominant_status_enum` and `_status_count_rows`, which the typical-week query shares).
 
 | Query | Scope | With data | Without data |
 | --- | --- | --- | --- |
-| `lineStatusHistory(lineId, dayStartHour = 3)` | One line | 24 buckets (03:00 → 02:00, empty hours zero-filled) | `[]`. The client's "No data" state. |
-| `networkStatusHistory(dayStartHour = 3)` | All lines, one grouped read | 24 buckets | `[]` |
-| `linesStatusHistory(lineIds, dayStartHour = 3)` | N lines, one query | One entry per requested id, each with 24 buckets | The same entries, each with `buckets: []` |
+| `lineStatusHistory(lineId, dayStartHour = 3, daysAgo = 0)` | One line | 24 buckets (03:00 → 02:00, empty hours zero-filled) | `[]`. The client's "No data" state. |
+| `networkStatusHistory(dayStartHour = 3, daysAgo = 0)` | All lines, one grouped read | 24 buckets | `[]` |
+| `linesStatusHistory(lineIds, dayStartHour = 3, daysAgo = 0)` | N lines, one query | One entry per requested id, each with 24 buckets | The same entries, each with `buckets: []` |
 
+- **`daysAgo`** (0 to 56, default 0, and `null` reads as 0) picks the service day: `N` is the one that started N service days before the current one, so it counts service days, not calendar days (at 01:00 the current service day is still yesterday's). A past day is read whole, `[day_start, day_start + 24h)`, never cut off at now, and bucketed exactly like today. Its end is exclusive: a report stamped at the next service day's first instant belongs to that day, and cannot turn an empty day into 24 empty buckets (`created__lt` in the read, and the same cap in `bucket_hourly`). An out-of-range value raises `LineStatusValidationError`, like `dayStartHour`, even for an empty `lineIds`. Clients send a literal integer and the backend does all the date arithmetic, so a client's query variables stay free of clock-derived values.
 - `statusCounts` lists the per-status tally in enum order, zeros omitted. It sums to `count`, and it is `[]` for an empty hour.
 - `networkStatusHistory` is a **network aggregate**. An hour's tally covers every line, so it answers "how is the network doing". Drawing it as one line's series would attribute other lines' reports to that line.
 - `linesStatusHistory` returns one entry per requested id, in request order. The entry existing does not mean the line reported anything. Duplicate ids collapse to the first occurrence. `lineIds` is capped at `MAX_LINES_PER_HISTORY_REQUEST = 64` (`LineStatusValidationError`, surfaced as `GraphQLError`). The cap is not a query-count guard.
 - All three are public (no permission classes).
-- ⚠️ The network read filters on `created` alone. The index is `(line, created)` (migration `0026`, `incident_li_line_id_828375_idx`), so the read is a sequential scan of the service day's rows. That is the right trade at current volume. If the report table grows by orders of magnitude, add a `created`-leading index first. Do not split the read.
+- ⚠️ The network read filters on `created` alone. The index is `(line, created)` (migration `0026`, `incident_li_line_id_828375_idx`), so the read is a sequential scan of the service day's rows (a past day, `daysAgo > 0`, costs the same). That is the right trade at current volume. If the report table grows by orders of magnitude, add a `created`-leading index first. Do not split the read.
+
+### Typical week (`services/line_status.py`)
+
+`lineStatusWeekProfile(lineId: ID!, weeks: Int = 6, dayStartHour: Int = 3): [LineStatusWeekBucket!]!` answers "is this line usually bad, and when?". `load_line_status_week_profile` issues **one** `LineStatusReport` query for the line over the rolling window `[now - weeks * 7 days, now]` (it hits the `(line, created)` index and reads only `status` and `created`), and the pure `bucket_week_profile(entries, now=, weeks=, day_start_hour=)` tallies the rows per (weekday, hour), the way `bucket_hourly` does per hour.
+
+- **Shape.** `[]` when the line has no report in the window (the "no data" state), otherwise **all 168 slots**: empty ones carry `count: 0`, `dominantStatus: null` and `statusCounts: []`. Slots run Monday first and, within a weekday, in service-day hour order (`dayStartHour` through 23, then 0 up to `dayStartHour - 1`), so a client can lay a weekday out with the same columns as the daily history chart.
+- **`weekday`** is 0 = Monday to 6 = Sunday of the **service** day the report belongs to, and **`hour`** is the local clock hour 0 to 23. Stored times are naive local time (`USE_TZ = False`, `Asia/Kuala_Lumpur`), so the stored clock is read as it is. The report is shifted back by `dayStartHour` before its weekday is read: with the default 03:00 start a 01:30 Tuesday report counts toward Monday at hour 1, exactly where the hourly chart files it, and `dayStartHour: 0` gives plain calendar weekdays.
+- **`count` is a raw total over the window's weeks**, not an average, so a client that wants a minimum-report threshold ("not enough reports") applies its own to `count`. The window is rolling and not aligned to service days, so it includes the current day so far.
+- **`dominantStatus` and `statusCounts`** follow the hourly-bucket rules by sharing their code: `_dominant_status` (most frequent, ties to the most severe) and `_status_count_rows` (enum order, zeros omitted, summing to `count`).
+- `weeks` must be 1 to 12 (`MAX_WEEK_PROFILE_WEEKS`; `null` reads as the default 6), `dayStartHour` 0 to 23, and `lineId` numeric: anything else is a `LineStatusValidationError` (surfaced as `GraphQLError`). The line is not checked for existence, so an unknown id answers `[]`. Public, like the other history queries.
 
 ### X Activity API webhook (`incident/views.py`, `incident/services/x_webhooks.py`)
 
@@ -357,7 +368,7 @@ Latest is `0032`. The next free number is `0033`. Migrations that carry logic:
 - **Status enums** are lifecycle hooks. A new state is an enum addition plus the matching service gate. `PassengerStatus` is additive, and its rank is declaration order.
 - **`SIGNATURE_CANDIDATES`** is the signed-request seam. X's next signing scheme is one tuple and one env var. CRC uses `_preferred_signing_secret`, because X verifies CRC against exactly one secret.
 - **`_expansion_containers`** is the envelope seam. A future envelope nested one level deeper is a one-line change.
-- **Pulse knobs** are module constants in `services/line_status.py`: `WINDOW_MINUTES`, `MIN_REPORTS`, `DAY_START_HOUR`, `HOURS_IN_SERVICE_DAY`, `_MAX_PULSE_LINKS`. New tracking parameters go in `TRACKING_PARAMS` (`services/urls.py`).
+- **Pulse knobs** are module constants in `services/line_status.py`: `WINDOW_MINUTES`, `MIN_REPORTS`, `DAY_START_HOUR`, `HOURS_IN_SERVICE_DAY`, `_MAX_PULSE_LINKS`, `MAX_LINES_PER_HISTORY_REQUEST`, `MAX_HISTORY_DAYS_AGO`, `DEFAULT_WEEK_PROFILE_WEEKS`, `MAX_WEEK_PROFILE_WEEKS`. New tracking parameters go in `TRACKING_PARAMS` (`services/urls.py`).
 - **`impact_factor`** is a reserved hook with zero consumers. Its `help_text` says scores are deducted from 100 per day, prorated by service hours. See Feature 2.
 - **Evidence channel.** `CalendarIncidentChronology.source_url` and the `/upload/` → `common.tasks` → `CalendarIncidentMedia` pipeline (with EXIF timestamp capture) are ready for any citation or verification workflow.
 - **Presentation flags.** `inaccurate` and `long_term` are honoured by the frontend. Automated writers can use them as provisional markers without new schema.
