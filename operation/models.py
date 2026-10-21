@@ -53,8 +53,8 @@ class Line(TimeStampedModel):
         choices_enum=LineStatus,
         default=LineStatus.ACTIVE,
     )
+    # Not unique: lines sharing a route and fleet may share one channel.
     telegram_channel_id = models.TextField(
-        unique=True,
         default=None,
         null=True,
         blank=True,

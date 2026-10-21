@@ -1230,6 +1230,30 @@ class ReportSpottingTodayTaskTests(TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual({c["chat_id"] for c in calls}, {"123456", "234567"})
 
+    def test_lines_sharing_a_channel_get_one_digest_for_the_first_line(self):
+        # BRT sorts before KJL by code, so it is the line digested for "123456".
+        line_brt = Line.objects.create(
+            code="BRT",
+            display_name="BRT Sunway Line",
+            display_color="#00A0E0",
+            telegram_channel_id="123456",
+        )
+        calls = []
+
+        with (
+            patch("spotting.tasks.send_message", new=self._recording_send_stub(calls)),
+            patch(
+                "spotting.tasks.get_daily_updates", return_value="digest"
+            ) as mock_updates,
+        ):
+            report_spotting_today.apply().get()
+
+        self.assertEqual(sorted(c["chat_id"] for c in calls), ["123456", "234567"])
+        self.assertEqual(
+            {c.kwargs["line_id"] for c in mock_updates.call_args_list},
+            {line_brt.id, self.line_agl.id},
+        )
+
     def _digest_for_kjl_run_at(self, moment: datetime) -> str:
         # Pin only the task's own clock. Patching django.utils.timezone.now would
         # not move auto_now_add (see MISTAKES.md), and the dates under test are
