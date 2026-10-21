@@ -261,7 +261,7 @@ class Asset:
     officialid: str
     short_description: str
     long_description: str
-    stations: List["Station"]
+    station: "Station"
 
 
 @strawberry_django.type(models.VehicleType)

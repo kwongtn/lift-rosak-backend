@@ -870,6 +870,46 @@ class AssetStatusGraphQLTests(TestCase):
 
         self.assertEqual(run(), queries_for_two_stations)
 
+    def test_an_asset_exposes_the_station_it_stands_in(self):
+        # `Asset.stations` (a list over the single FK) raised AttributeError for
+        # every asset, so the field is the singular `station`.
+        result = execute_graphql(
+            "query { assets { officialid station { id displayName } } }"
+        )
+
+        self.assertIsNone(result.errors)
+        self.assertEqual(
+            {
+                row["officialid"]: (row["station"]["id"], row["station"]["displayName"])
+                for row in result.data["assets"]
+            },
+            {
+                "LIFT-01": (str(self.kl_sentral.pk), "KL Sentral"),
+                "LIFT-02": (str(self.kl_sentral.pk), "KL Sentral"),
+                "ESC-01": (str(self.klcc.pk), "KLCC"),
+            },
+        )
+
+    def test_an_asset_station_does_not_fan_out_per_asset(self):
+        query = "query { assets { officialid station { id } } }"
+
+        def run() -> int:
+            with CaptureQueriesContext(connection) as captured:
+                result = execute_graphql(query)
+            self.assertIsNone(result.errors)
+            return len(captured)
+
+        queries_for_three_assets = run()
+        for i in range(3):
+            Asset.objects.create(
+                station=self.klcc,
+                officialid=f"EXTRA-{i}",
+                asset_type=AssetType.LIFT,
+                status=AssetStatus.IN_OPERATION,
+            )
+
+        self.assertEqual(run(), queries_for_three_assets)
+
     def test_assets_filter_by_status(self):
         query = """
             query ($filters: AssetFilter) {

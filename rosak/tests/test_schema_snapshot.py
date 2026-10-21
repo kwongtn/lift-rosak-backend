@@ -56,6 +56,13 @@ is never the cheap way to keep a client working:
   projection that made the vote indicator snap back — has to fail loudly and
   re-read the contract rather than keep computing a number the server already
   sent.
+* **2026-10-22 (``Asset.station``).** ``Asset.stations: [Station!]!`` was
+  removed in favour of ``Asset.station: Station!``. The model has ONE foreign key
+  (``Asset.station``), so selecting ``stations`` failed for every asset with
+  ``'Asset' object has no attribute 'stations'``: the field never returned data,
+  and no client selected it (the Station Assets section reads
+  ``Line.stations[].assets``, i.e. ``Station.assets``). An alias would keep a
+  plural field that can only ever fail, so it is a plain removal.
 
 They are accepted as a SUBSET check, not an equality check, because the
 allowlist has a shelf life: once this wave is committed, ``HEAD`` carries the
@@ -71,8 +78,8 @@ from decaying into a blanket suppression:
   has, so an entry left behind after its wave commits is flagged rather than
   quietly tolerated.
 
-and ``assertEqual(len(EXPECTED_ACCEPTED_BREAKING_CHANGES), 6)`` keeps the size
-pinned, so the set cannot grow to cover a delta nobody has looked at.
+and ``EXPECTED_ACCEPTED_BREAKING_CHANGE_COUNT`` keeps the size pinned, so the
+set cannot grow to cover a delta nobody has looked at.
 
 LIMITATION (stated rather than hidden)
 --------------------------------------
@@ -98,10 +105,11 @@ from rosak.schema import schema
 
 SNAPSHOT_PATH = Path(__file__).resolve().parent / "snapshots" / "schema.graphql"
 
-# The deliberate, documented breaking delta: FIFTEEN entries — six un-aliased
-# renames/removals from the two earlier waves, plus the nine vote mutations that
-# now acknowledge with the new vote state instead of a bare ``ok``. See the
-# module docstring for why each is right and why none may be re-aliased.
+# The deliberate, documented breaking delta: SIXTEEN entries — six un-aliased
+# renames/removals from the two earlier waves, the nine vote mutations that now
+# acknowledge with the new vote state instead of a bare ``ok``, and the plural
+# ``Asset.stations`` that gave way to ``Asset.station``. See the module
+# docstring for why each is right and why none may be re-aliased.
 EXPECTED_ACCEPTED_BREAKING_CHANGES = {
     # 2026-09-30, occurred_at: the queue's window filters.
     "Query.socialMediaLinks arg createdAfter was removed.",
@@ -121,13 +129,15 @@ EXPECTED_ACCEPTED_BREAKING_CHANGES = {
     "Mutation.upvoteSocialMediaLink changed type from GenericMutationReturn! to VoteMutationPayload!.",
     "Mutation.downvoteSocialMediaLink changed type from GenericMutationReturn! to VoteMutationPayload!.",
     "Mutation.removeSocialMediaLinkVote changed type from GenericMutationReturn! to VoteMutationPayload!.",
+    # 2026-10-22, Asset.station: the plural field failed for every asset (one FK).
+    "Asset.stations was removed.",
 }
 
 #: ``EXPECTED_ACCEPTED_BREAKING_CHANGES``'s exact size. Pinned so the allowlist
-#: cannot be widened to swallow a delta nobody has read: an unlisted seventh
+#: cannot be widened to swallow a delta nobody has read: an unlisted extra
 #: entry fails here first, with a legible reason, rather than quietly
 #: authorising whatever the next wave breaks.
-EXPECTED_ACCEPTED_BREAKING_CHANGE_COUNT = 15
+EXPECTED_ACCEPTED_BREAKING_CHANGE_COUNT = 16
 
 #: The nine vote mutations the vote-acknowledgement wave retyped, in the order
 #: the docstring lists them (incident, chronology, social-media link × up/down/
@@ -320,6 +330,21 @@ class TestSchemaSnapshot(TestCase):
             {str(mutation[name].type) for name in VOTE_ACK_MUTATION_FIELDS},
         )
 
+        # --- 2026-10-22: Asset.stations -> Asset.station ---
+        asset_fields = schema._schema.type_map["Asset"].fields
+        self.assertEqual(str(asset_fields["station"].type), "Station!")
+        self.assertNotIn(
+            "stations",
+            asset_fields,
+            msg=(
+                "Asset.stations is back. The model has a single station FK, so "
+                "the plural field fails for every asset ('Asset' object has no "
+                "attribute 'stations'). Update the module docstring, this test "
+                "and EXPECTED_ACCEPTED_BREAKING_CHANGES deliberately if the "
+                "model ever gains a many-to-many."
+            ),
+        )
+
         # Every entry in, every entry accounted for — so the allowlist cannot
         # quietly grow to cover a delta nobody has looked at.
         self.assertEqual(
@@ -465,8 +490,9 @@ class TestSchemaSnapshot(TestCase):
                 f"{sorted(unexpected)}. The only accepted delta is "
                 f"{sorted(EXPECTED_ACCEPTED_BREAKING_CHANGES)} "
                 "(the occurred_at window filters, the link-tree thread "
-                "fields/argument renames — all shipped un-aliased — and the nine "
-                "vote mutations retyped to acknowledge with the new vote state). "
+                "fields/argument renames — all shipped un-aliased — the nine "
+                "vote mutations retyped to acknowledge with the new vote state, "
+                "and Asset.stations replaced by Asset.station). "
                 "Either restore the removed surface, or accept the new delta "
                 "deliberately by naming it in "
                 "EXPECTED_ACCEPTED_BREAKING_CHANGES, bumping "

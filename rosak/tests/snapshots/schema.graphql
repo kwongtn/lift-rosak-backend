@@ -5,7 +5,7 @@ type Asset {
   officialid: String!
   shortDescription: String!
   longDescription: String!
-  stations: [Station!]!
+  station: Station!
 }
 
 input AssetFilter {
