@@ -65,6 +65,13 @@ class MediaType(strawberry.relay.Node):
     width: int
     height: int
 
+    @classmethod
+    def get_queryset(cls, queryset, info, **kwargs):
+        # `file` is non-null here, but legacy rows hold '' (or NULL), which fails the
+        # whole page that contains one. Hide them from `medias` and `media(id)`, like
+        # `mediasGroupByPeriod` does.
+        return queryset.exclude(Q(file="") | Q(file__isnull=True))
+
     @strawberry_django.field
     def created_date(self) -> str:
         return self.created.date()

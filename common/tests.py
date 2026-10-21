@@ -595,6 +595,7 @@ class CommonGraphQLTests(TestCase):
                     uploader=self.user,
                     width=1920,
                     height=1080,
+                    file=f"photo_{i}.jpg",
                     file_id=f"file_{i}",
                     file_name=f"photo_{i}.jpg",
                 )
@@ -1222,6 +1223,7 @@ class TestDjangoListConnection(TestCase):
                 uploader=self.user,
                 width=1920,
                 height=1080,
+                file=f"test_conn_photo_{i}.jpg",
                 file_id=f"test_conn_file_{i}",
                 file_name=f"test_conn_photo_{i}.jpg",
             )
@@ -1282,6 +1284,7 @@ class TestDjangoListConnection(TestCase):
                 uploader=self.user,
                 width=1920,
                 height=1080,
+                file=f"test_page_photo_{i}.jpg",
                 file_id=f"test_page_file_{i}",
                 file_name=f"test_page_photo_{i}.jpg",
             )
@@ -1405,10 +1408,14 @@ class MediaByIdQueryTests(TestCase):
     async def test_agrees_with_the_feed_about_which_rows_exist(self):
         for name in ("a", "b", "c"):
             await self._make_media(name)
-        # Legacy rows with no imgur file stay in the feed, so they stay here too.
-        await Media.objects.acreate(uploader=self.user, width=1, height=1)
+        # Legacy rows with no imgur file ('' or NULL) cannot be a non-null `file`, so
+        # they are in neither the feed nor here.
+        fileless = [
+            await Media.objects.acreate(uploader=self.user, width=1, height=1),
+            await Media.objects.acreate(uploader=self.user, file="", width=1, height=1),
+        ]
         feed_ids = await self._feed_ids()
-        self.assertEqual(len(feed_ids), 4)
+        self.assertEqual(len(feed_ids), 3)
 
         for feed_id in feed_ids:
             with self.subTest(feed_id):
@@ -1419,6 +1426,50 @@ class MediaByIdQueryTests(TestCase):
                 self.assertIsNone(result.errors)
                 self.assertEqual(result.data["media"], {"id": feed_id})
 
+        for media in fileless:
+            with self.subTest(file=media.file.name):
+                result = await execute_graphql_async(
+                    self.QUERY, {"id": str(GlobalID("MediaType", str(media.id)))}
+                )
+
+                self.assertIsNone(result.errors)
+                self.assertIsNone(result.data["media"])
+
+    async def test_the_feed_pages_past_a_row_with_no_file(self):
+        # One such row used to fail every page that contained it ("Cannot return null
+        # for non-nullable field MediaType.file"), so the gallery stopped there.
+        for name in ("a", "b"):
+            await self._make_media(name)
+        await Media.objects.acreate(uploader=self.user, file="", width=1, height=1)
+        for name in ("c", "d", "e"):
+            await self._make_media(name)
+
+        query = """
+            query ($after: String) {
+                medias(first: 2, after: $after, order: {created: DESC}) {
+                    totalCount
+                    pageInfo { hasNextPage endCursor }
+                    edges { node { id file { url } } }
+                }
+                mediasGroupByPeriod(type: YEAR) { count }
+            }
+        """
+        seen, after = [], None
+        while True:
+            result = await execute_graphql_async(query, {"after": after})
+            self.assertIsNone(result.errors)
+            page = result.data["medias"]
+            seen += [edge["node"]["id"] for edge in page["edges"]]
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            after = page["pageInfo"]["endCursor"]
+
+        self.assertEqual(len(seen), 5)
+        self.assertEqual(len(set(seen)), 5)
+        self.assertEqual(page["totalCount"], 5)
+        # The year slider counts the same rows the feed lists.
+        self.assertEqual(sum(g["count"] for g in result.data["mediasGroupByPeriod"]), 5)
+
     async def test_a_media_type_visibility_rule_hides_the_row_from_both(self):
         hidden = await self._make_media("hidden")
         shown = await self._make_media("shown")
@@ -1428,7 +1479,7 @@ class MediaByIdQueryTests(TestCase):
         def hide(cls, queryset, info, **kwargs):
             return queryset.exclude(pk=hidden.pk)
 
-        with patch.object(MediaType, "get_queryset", classmethod(hide), create=True):
+        with patch.object(MediaType, "get_queryset", classmethod(hide)):
             feed_ids = await self._feed_ids()
             hidden_result = await execute_graphql_async(self.QUERY, {"id": hidden_id})
             shown_result = await execute_graphql_async(self.QUERY, {"id": shown_id})
