@@ -1,11 +1,15 @@
+import logging
 from collections import defaultdict
 
 from django.db.models import Q
+from firebase_admin.exceptions import FirebaseError
 from strawberry.dataloader import DataLoader
 
 from common.models import Media
 from rosak.permissions import has_admin_claim
 from spotting.models import Event
+
+logger = logging.getLogger(__name__)
 
 # Legacy rows hold '' or NULL instead of a file. `~Q(file="")` alone keeps the NULL
 # ones (SQL: NOT (file = '' AND file IS NOT NULL)), so the feed and its counts must
@@ -54,7 +58,18 @@ async def batch_load_medias_from_period(keys):
 async def batch_load_is_admin_from_user(keys):
     # has_admin_claim is an uncached Firebase call; loading it keeps that to one
     # call per viewer per request, however many rows ask.
-    return [await has_admin_claim(user) for user in keys]
+    # Fail closed: a Firebase outage (quota, network, unavailable) must not fail the
+    # field. The viewer just gets the non-admin view; nothing hidden is ever shown.
+    is_admin = []
+    for user in keys:
+        try:
+            is_admin.append(await has_admin_claim(user))
+        except FirebaseError as exc:
+            logger.warning(
+                "Admin claim lookup failed; treating viewer as non-admin: %s", exc
+            )
+            is_admin.append(False)
+    return is_admin
 
 
 CommonContextLoaders = {

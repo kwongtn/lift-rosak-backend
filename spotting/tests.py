@@ -8,6 +8,7 @@ from django.contrib.gis.geos import Point
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
+from firebase_admin.exceptions import UnavailableError
 from strawberry import UNSET
 from strawberry.relay import GlobalID
 from strawberry.types.maybe import Some
@@ -1366,6 +1367,7 @@ class AnonymousSpottingsOnProfileTests(TestCase):
         self.vehicle_b = Vehicle.objects.create(
             identification_no="Set 92", vehicle_type=v_type
         )
+        self.claim_effect = lambda candidate: candidate.id == self.admin.id
 
     def _event(self, vehicle, *, anonymous: bool):
         return Event.objects.create(
@@ -1384,7 +1386,7 @@ class AnonymousSpottingsOnProfileTests(TestCase):
 
     async def _profile(self, viewer):
         """The reporter's public profile as `viewer`; `self.admin` is the only admin."""
-        claim = AsyncMock(side_effect=lambda candidate: candidate.id == self.admin.id)
+        claim = AsyncMock(side_effect=self.claim_effect)
         with patch("common.schema.loaders.has_admin_claim", new=claim):
             result = await execute_graphql_async(
                 self.PROFILE_QUERY, {"id": self.reporter.firebase_id}, user=viewer
@@ -1472,6 +1474,19 @@ class AnonymousSpottingsOnProfileTests(TestCase):
         self.assertIsNone(profile["spottings"])
         self.assertEqual(profile["spottingsCount"], 1)
 
+    async def test_a_firebase_error_on_the_admin_check_fails_closed(self):
+        await sync_to_async(self._spot)()
+        self.claim_effect = UnavailableError("Firebase is down")
+
+        with self.assertLogs("common.schema.loaders", "WARNING"):
+            # `_profile` asserts there are no errors.
+            profile, _ = await self._profile(self.other)
+
+        self.assertEqual(
+            [row["id"] for row in profile["spottings"]], [str(self.public.id)]
+        )
+        self.assertEqual(profile["spottingsCount"], 1)
+
     async def test_the_admin_claim_is_looked_up_once_per_request(self):
         await sync_to_async(self._spot)()
 
@@ -1512,6 +1527,7 @@ class AnonymousPhotoUploaderTests(TestCase):
         )
         self.anonymous_media = self._photo(vehicle, anonymous=True)
         self.public_media = self._photo(vehicle, anonymous=False)
+        self.claim_effect = lambda candidate: candidate.id == self.admin.id
 
     def _photo(self, vehicle, *, anonymous: bool) -> Media:
         event = Event.objects.create(
@@ -1530,7 +1546,7 @@ class AnonymousPhotoUploaderTests(TestCase):
 
     async def _run(self, query, variables, viewer):
         """`self.admin` is the only admin. Returns (data, admin-claim mock)."""
-        claim = AsyncMock(side_effect=lambda candidate: candidate.id == self.admin.id)
+        claim = AsyncMock(side_effect=self.claim_effect)
         with patch("common.schema.loaders.has_admin_claim", new=claim):
             result = await execute_graphql_async(query, variables, user=viewer)
         self.assertIsNone(result.errors)
@@ -1595,6 +1611,22 @@ class AnonymousPhotoUploaderTests(TestCase):
         for viewer in (None, self.reporter):
             _, claim = await self._uploaders("medias", viewer)
             claim.assert_not_called()
+
+    async def test_a_firebase_error_on_the_admin_check_fails_closed(self):
+        self.claim_effect = UnavailableError("Firebase is down")
+        anonymous, public = str(self.anonymous_media.id), str(self.public_media.id)
+
+        for path in ("events.medias", "medias", "media(id)"):
+            with (
+                self.subTest(path=path),
+                self.assertLogs("common.schema.loaders", "WARNING"),
+            ):
+                # `_run` asserts there are no GraphQL errors.
+                uploaders, _ = await self._uploaders(path, self.other)
+
+                self.assertEqual(set(uploaders), {anonymous, public})
+                self.assertIsNone(uploaders[anonymous])
+                self.assertEqual(uploaders[public]["nickname"], "Reporter")
 
     async def test_a_public_photo_costs_no_admin_lookup(self):
         data, claim = await self._run(
