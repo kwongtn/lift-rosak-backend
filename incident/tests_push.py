@@ -123,9 +123,12 @@ class PushRegistrationTests(TestCase):
 
     def test_register_rejects_unknown_or_non_numeric_line_ids(self):
         unknown = Line.objects.order_by("-pk").first().pk + 1000
+        too_many = range(1, push.MAX_LINE_IDS + 2)
         cases = [
             ([self.kjl.pk, unknown], f"Unknown line ids: {unknown}."),
+            ([2**63], f"Unknown line ids: {2**63}."),  # past bigint, no DataError
             (["KJL"], "lineIds must be numeric line ids."),
+            (too_many, f"lineIds must hold at most {push.MAX_LINE_IDS} distinct ids."),
         ]
         for line_ids, message in cases:
             with self.subTest(line_ids=line_ids):
@@ -157,6 +160,25 @@ class PushRegistrationTests(TestCase):
 
         self.assertIsNone(result.errors)
         self.assertTrue(PushSubscription.objects.filter(token=token).exists())
+
+    def test_registering_past_the_per_user_cap_evicts_the_stalest_token(self):
+        self.register(self.bob, "bob-1", [self.kjl.pk])
+        for i in range(push.MAX_TOKENS_PER_USER):
+            self.register(self.alice, f"tok-{i}", [self.kjl.pk])
+        self.register(self.alice, "tok-0", [self.agl.pk])  # tok-1 is stalest now
+
+        result = self.register(self.alice, "tok-new", [self.kjl.pk])
+
+        self.assertIsNone(result.errors)
+        tokens = set(
+            PushSubscription.objects.filter(user=self.alice).values_list(
+                "token", flat=True
+            )
+        )
+        self.assertEqual(len(tokens), push.MAX_TOKENS_PER_USER)
+        self.assertNotIn("tok-1", tokens)
+        self.assertLessEqual({"tok-0", "tok-new"}, tokens)
+        self.assertTrue(PushSubscription.objects.filter(token="bob-1").exists())
 
     def test_unregister_deletes_only_the_callers_row(self):
         _subscribe(self.alice, "tok-1", self.kjl)
@@ -192,7 +214,7 @@ class PushRegistrationTests(TestCase):
 class NotifyMajorIncidentTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        user = User.objects.create(firebase_id="push-subscriber")
+        cls.user = user = User.objects.create(firebase_id="push-subscriber")
         cls.kjl = _line("KJL")
         cls.agl = _line("AGL")
         cls.spl = _line("SPL")
@@ -265,11 +287,25 @@ class NotifyMajorIncidentTests(TestCase):
         self.assertEqual(send.call_count, 2)
         self.assertEqual(send.call_args.args[0].tokens, ["tok-spl"])
 
+    def test_only_lines_with_subscribers_are_put_in_cooldown(self):
+        quiet = _line("BRT")
+        self.incident.lines.add(quiet)
+
+        with self.send():
+            self.assertEqual(push.notify_major_incident(self.incident.pk), 3)
+
+        self.assertIsNone(cache.get(push._cooldown_key(quiet.pk)))
+        self.assertIsNotNone(cache.get(push._cooldown_key(self.kjl.pk)))
+
     def test_dead_tokens_are_pruned_and_other_failures_kept(self):
+        _subscribe(self.user, "tok-junk", self.kjl)
+        _subscribe(self.user, "tok-busy", self.agl)
         failures = {
             "tok-kjl": messaging.UnregisteredError("gone"),
             "tok-agl": messaging.SenderIdMismatchError("other sender"),
-            "tok-both": exceptions.UnavailableError("try later"),
+            # tok-both is delivered, so the payload is fine and the token is bad.
+            "tok-junk": exceptions.InvalidArgumentError("not a token"),
+            "tok-busy": exceptions.UnavailableError("try later"),
         }
 
         with (
@@ -278,23 +314,48 @@ class NotifyMajorIncidentTests(TestCase):
         ):
             sent = push.notify_major_incident(self.incident.pk)
 
-        self.assertEqual(sent, 0)
+        self.assertEqual(sent, 1)
         self.assertCountEqual(
             PushSubscription.objects.values_list("token", flat=True),
-            ["tok-both", "tok-spl"],
+            ["tok-both", "tok-busy", "tok-spl"],
         )
         self.assertIn("UnavailableError", logs.output[0])
+        # Something went out, so no retry and the claim stands.
+        self.assertIsNotNone(cache.get(push._cooldown_key(self.kjl.pk)))
 
-    def test_a_failed_send_is_retried_three_times_with_the_cooldown_released(self):
-        with self.send(side_effect=exceptions.UnknownError("FCM down")) as send:
-            result = notify_push_subscribers.apply(args=[self.incident.pk])
+    def test_invalid_argument_with_nothing_delivered_prunes_nothing(self):
+        failures = dict.fromkeys(
+            ["tok-kjl", "tok-agl", "tok-both"],
+            exceptions.InvalidArgumentError("bad payload"),
+        )
 
-        self.assertTrue(result.failed())
-        self.assertIsInstance(result.result, exceptions.UnknownError)
-        # 1 run + 3 retries; each retry could claim the cooldown again.
-        self.assertEqual(send.call_count, 4)
-        with self.send() as send:
-            self.assertEqual(push.notify_major_incident(self.incident.pk), 3)
+        with (
+            self.send(side_effect=lambda message: _batch(message, failures)),
+            self.assertLogs("incident.services.push", "WARNING"),
+        ):
+            self.assertEqual(push.notify_major_incident(self.incident.pk), 0)
+
+        self.assertEqual(PushSubscription.objects.count(), 4)
+
+    def test_an_fcm_outage_is_retried_three_times_with_the_cooldown_released(self):
+        outage = dict.fromkeys(
+            ["tok-kjl", "tok-agl", "tok-both"], exceptions.UnavailableError("503")
+        )
+        cases = [
+            # What firebase_admin really does: one UnavailableError per token.
+            ("per token", lambda message: _batch(message, outage)),
+            ("raised", exceptions.UnknownError("executor failed")),
+        ]
+        for label, side_effect in cases:
+            with self.subTest(label), self.send(side_effect=side_effect) as send:
+                result = notify_push_subscribers.apply(args=[self.incident.pk])
+
+                self.assertTrue(result.failed())
+                self.assertIsInstance(result.result, exceptions.FirebaseError)
+                # 1 run + 3 retries; each retry could claim the cooldown again.
+                self.assertEqual(send.call_count, 4)
+                self.assertIsNone(cache.get(push._cooldown_key(self.kjl.pk)))
+                self.assertIsNone(cache.get(push._cooldown_key(self.agl.pk)))
 
 
 class ApprovalEnqueuesPushTests(TestCase):
@@ -339,15 +400,23 @@ class ApprovalEnqueuesPushTests(TestCase):
             self.assertEqual(notify_push_subscribers(incident.pk), 0)
         send.assert_not_called()
 
-    def test_merging_a_revision_enqueues_only_for_a_parent_that_was_not_live(self):
-        for parent_status, enqueued in (
-            (CalendarIncidentStatus.LIVE, False),
-            (CalendarIncidentStatus.REJECTED, True),
+    def test_merging_a_revision_enqueues_only_when_the_parent_turns_live_major(self):
+        live, rejected = CalendarIncidentStatus.LIVE, CalendarIncidentStatus.REJECTED
+        major, minor = CalendarIncidentSeverity.MAJOR, CalendarIncidentSeverity.MINOR
+        for parent_status, parent_severity, revision_severity, enqueued in (
+            (live, major, major, False),  # an edit
+            (live, minor, major, True),  # escalated
+            (live, minor, minor, False),
+            (rejected, major, major, True),  # newly LIVE
         ):
-            with self.subTest(parent_status=parent_status):
-                parent = self.incident(parent_status)
+            with self.subTest(
+                parent=(parent_status, parent_severity), revision=revision_severity
+            ):
+                parent = self.incident(parent_status, severity=parent_severity)
                 revision = self.incident(
-                    CalendarIncidentStatus.DRAFT, parent_incident=parent
+                    CalendarIncidentStatus.DRAFT,
+                    parent_incident=parent,
+                    severity=revision_severity,
                 )
 
                 delay = self.approve(revision)

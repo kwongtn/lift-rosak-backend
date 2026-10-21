@@ -318,8 +318,10 @@ def notify_push_subscribers(self, incident_id: int) -> int:
 
     Enqueued by ``approve_incident`` once the approval commits. The service
     re-checks status and severity itself, so a MINOR approval is a no-op here.
-    A raised ``FirebaseError`` (the whole FCM call failed) is retried at most 3
-    times with backoff; per-token failures come back in the batch, not raised.
+    A ``FirebaseError`` is retried at most 3 times with backoff: one raised by
+    the FCM client (the whole call failed), or the ``UnavailableError`` the
+    service raises for a chunk that delivered nothing and saw a transient
+    error, since the client returns an outage per token instead of raising it.
     Returns how many messages FCM accepted.
     """
     return notify_major_incident(incident_id)

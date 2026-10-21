@@ -8,7 +8,7 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
-from firebase_admin import messaging
+from firebase_admin import exceptions, messaging
 
 from common.models import User
 from incident.enums import CalendarIncidentSeverity, CalendarIncidentStatus
@@ -23,12 +23,25 @@ logger = logging.getLogger(__name__)
 #: 2704 bytes with a raw OperationalError, so the cap sits safely below it.
 #: ASCII-only keeps characters equal to bytes (FCM tokens are ASCII).
 MAX_TOKEN_LENGTH = 2048
+#: Tokens one account may hold; ``register`` evicts the least recently
+#: registered beyond it, so a script cannot grow the table (or every fan-out).
+MAX_TOKENS_PER_USER = 20
+#: Distinct ``lineIds`` one registration may carry (the network has ~16 lines).
+MAX_LINE_IDS = 100
 #: At most one push per line per this many seconds (``notify_major_incident``).
 COOLDOWN_SECONDS = 30 * 60
 #: ``send_each_for_multicast`` refuses more tokens than this in one call.
 FCM_MULTICAST_LIMIT = 500
 #: FCM's verdicts that mean "this token will never work again".
 STALE_TOKEN_ERRORS = (messaging.UnregisteredError, messaging.SenderIdMismatchError)
+#: FCM's "try again later" verdicts (503 or no connection, 500, 429, timeout).
+#: ``QuotaExceededError`` is a ``ResourceExhaustedError``.
+TRANSIENT_ERRORS = (
+    exceptions.UnavailableError,
+    exceptions.InternalError,
+    exceptions.ResourceExhaustedError,
+    exceptions.DeadlineExceededError,
+)
 
 
 def _clean_token(token: str) -> str:
@@ -42,11 +55,16 @@ def _clean_token(token: str) -> str:
 
 def _clean_line_ids(line_ids: Iterable[int | str]) -> set[int]:
     try:
-        return {int(line_id) for line_id in line_ids}
+        ids = {int(line_id) for line_id in line_ids}
     except (TypeError, ValueError) as exc:
         raise PushSubscriptionValidationError(
             "lineIds must be numeric line ids."
         ) from exc
+    if len(ids) > MAX_LINE_IDS:
+        raise PushSubscriptionValidationError(
+            f"lineIds must hold at most {MAX_LINE_IDS} distinct ids."
+        )
+    return ids
 
 
 async def register(
@@ -56,7 +74,9 @@ async def register(
 
     A token already registered by another account is re-owned by the caller:
     the browser that holds it is the caller's now, and FCM would deliver
-    pushes for the old account's lines to it otherwise.
+    pushes for the old account's lines to it otherwise. Past
+    ``MAX_TOKENS_PER_USER`` the caller's least recently registered tokens are
+    deleted: browsers it no longer uses, since a live one re-registers.
     """
     token = _clean_token(token)
     ids = _clean_line_ids(line_ids)
@@ -72,6 +92,13 @@ async def register(
                 token=token, defaults={"user": user}
             )
             subscription.lines.set(ids)
+            evicted = (
+                PushSubscription.objects.filter(user=user)
+                .exclude(pk=subscription.pk)
+                .order_by("-modified", "-pk")
+                .values_list("pk", flat=True)[MAX_TOKENS_PER_USER - 1 :]
+            )
+            PushSubscription.objects.filter(pk__in=list(evicted)).delete()
             return subscription
 
     return await sync_to_async(_sync)()
@@ -100,14 +127,19 @@ def notify_major_incident(incident_id: int) -> int:
 
     Anything else (missing, soft-deleted, not LIVE, not MAJOR) sends nothing.
     Each line pushes at most once per ``COOLDOWN_SECONDS``: ``cache.add`` is an
-    atomic claim, so two concurrent approvals on one line send once. A line in
-    its cooldown is skipped, and a subscriber of several affected lines gets one
-    message. Local ``DEBUG=True`` swaps the cache for ``DummyCache``, whose
-    ``add`` always succeeds, so the cooldown never limits there.
+    atomic claim, so two concurrent approvals on one line send once. Only lines
+    with subscribers are claimed. A line in its cooldown is skipped, and a
+    subscriber of several affected lines gets one message. Local ``DEBUG=True``
+    swaps the cache for ``DummyCache``, whose ``add`` always succeeds, so the
+    cooldown never limits there.
 
-    Tokens FCM reports as unregistered or bound to another sender are deleted.
-    Other per-token failures are logged and kept. A raised error (the whole call
-    failed) releases this run's claims, so the task's retry can send again.
+    Tokens FCM reports as unregistered or bound to another sender are deleted,
+    and so is one it calls an invalid argument while another message in the
+    same chunk was delivered. Other per-token failures are logged and kept.
+    ``send_each_for_multicast`` returns an FCM outage per token instead of
+    raising it, so a chunk that delivered nothing and saw a transient error
+    raises ``UnavailableError``. Any raise releases this run's claims, so the
+    task's retry can send again.
     """
     incident = CalendarIncident.objects.filter(pk=incident_id).first()
     if (
@@ -118,10 +150,16 @@ def notify_major_incident(incident_id: int) -> int:
         return 0
 
     lines = list(incident.lines.all())
+    # A claim on a line nobody follows would mute it for a new subscriber.
+    subscribed = (
+        incident.lines.filter(push_subscriptions__isnull=False)
+        .values_list("pk", flat=True)
+        .distinct()
+    )
     claimed = [
-        line.pk
-        for line in lines
-        if cache.add(_cooldown_key(line.pk), 1, timeout=COOLDOWN_SECONDS)
+        line_id
+        for line_id in subscribed
+        if cache.add(_cooldown_key(line_id), 1, timeout=COOLDOWN_SECONDS)
     ]
     if not claimed:
         return 0
@@ -160,12 +198,26 @@ def notify_major_incident(incident_id: int) -> int:
             for token, response in zip(chunk, batch.responses):
                 if response.success:
                     continue
-                if isinstance(response.exception, STALE_TOKEN_ERRORS):
+                error = response.exception
+                # One payload per chunk: INVALID_ARGUMENT beside a delivered
+                # message blames the token; with none delivered it may be ours.
+                if isinstance(error, STALE_TOKEN_ERRORS) or (
+                    batch.success_count
+                    and isinstance(error, exceptions.InvalidArgumentError)
+                ):
                     stale.append(token)
                 else:
-                    failures[type(response.exception).__name__] += 1
+                    failures[type(error).__name__] += 1
             if stale:
                 PushSubscription.objects.filter(token__in=stale).delete()
+            # shortcut: transient failures beside a delivered message are only
+            # logged; retry just those tokens if the logs show partial throttling.
+            if not batch.success_count and any(
+                isinstance(r.exception, TRANSIENT_ERRORS) for r in batch.responses
+            ):
+                raise exceptions.UnavailableError(
+                    f"FCM delivered none of {len(chunk)} messages: {dict(failures)}"
+                )
     except Exception:
         cache.delete_many([_cooldown_key(line_id) for line_id in claimed])
         raise

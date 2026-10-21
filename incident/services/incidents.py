@@ -9,7 +9,7 @@ from django.db import transaction
 from safedelete.models import HARD_DELETE
 
 from common.models import User
-from incident.enums import CalendarIncidentStatus
+from incident.enums import CalendarIncidentSeverity, CalendarIncidentStatus
 from incident.models import (
     CalendarIncident,
     CalendarIncidentChronology,
@@ -337,7 +337,10 @@ async def _merge_revision_into_parent(
             parent = CalendarIncident.objects.select_for_update().get(
                 pk=revision.parent_incident_id
             )
-            was_live = parent.status == CalendarIncidentStatus.LIVE
+            was_alerting = (
+                parent.status == CalendarIncidentStatus.LIVE
+                and parent.severity == CalendarIncidentSeverity.MAJOR
+            )
 
             parent.title = revision.title or ""
             parent.brief = revision.brief or ""
@@ -375,7 +378,9 @@ async def _merge_revision_into_parent(
                 chronology.save()
 
             revision.delete(force_policy=HARD_DELETE)
-            if not was_live:
+            # Push on entering LIVE + MAJOR (newly LIVE, or escalated) only, so
+            # an edit to an incident already there never re-alerts.
+            if parent.severity == CalendarIncidentSeverity.MAJOR and not was_alerting:
                 _enqueue_push(parent.pk)
             return parent.pk
 
