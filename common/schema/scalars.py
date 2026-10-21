@@ -10,6 +10,7 @@ from strawberry.types import Info
 
 from common import models
 from common import models as common_models
+from common.schema.loaders import FILELESS_MEDIA
 from common.schema.orderings import MediaOrder
 from common.schema.types import (
     FavouriteVehicleData,
@@ -90,7 +91,7 @@ class MediaType(strawberry.relay.Node):
         # `file` is non-null here, but legacy rows hold '' (or NULL), which fails the
         # whole page that contains one. Hide them from `medias` and `media(id)`, like
         # `mediasGroupByPeriod` does.
-        return queryset.exclude(Q(file="") | Q(file__isnull=True))
+        return queryset.exclude(FILELESS_MEDIA)
 
     # `only=` keeps `created` out of the optimizer's deferred columns; a bare field
     # re-fetched it once per photo.

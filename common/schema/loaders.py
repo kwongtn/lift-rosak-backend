@@ -7,6 +7,11 @@ from common.models import Media
 from rosak.permissions import has_admin_claim
 from spotting.models import Event
 
+# Legacy rows hold '' or NULL instead of a file. `~Q(file="")` alone keeps the NULL
+# ones (SQL: NOT (file = '' AND file IS NOT NULL)), so the feed and its counts must
+# exclude both with this.
+FILELESS_MEDIA = Q(file="") | Q(file__isnull=True)
+
 
 async def batch_load_spottings_from_user(keys):
     events = Event.objects.filter(
@@ -28,9 +33,11 @@ async def batch_load_medias_from_period(keys):
     month and day key it matches.
     """
     buckets = {key: [] for key in keys}
-    medias = Media.objects.filter(
-        ~Q(file=""), created__year__in={year for year, _, _ in keys}
-    ).order_by("id")
+    medias = (
+        Media.objects.exclude(FILELESS_MEDIA)
+        .filter(created__year__in={year for year, _, _ in keys})
+        .order_by("id")
+    )
     async for media in medias:
         created = media.created
         for key in (

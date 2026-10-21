@@ -3,7 +3,7 @@ from uuid import UUID
 
 import strawberry
 import strawberry_django
-from django.db.models import Count, Q
+from django.db.models import Count
 from django.db.models.functions import ExtractDay, ExtractMonth, ExtractYear
 from strawberry.relay import GlobalID
 from strawberry.types import Info
@@ -11,6 +11,7 @@ from strawberry_django.relay import DjangoListConnection
 
 from common.models import Media, User, UserVerificationCode, Vote
 from common.schema.inputs import UserInput
+from common.schema.loaders import FILELESS_MEDIA
 from common.schema.scalars import (
     MediasGroupByPeriodScalar,
     MediaType,
@@ -96,7 +97,7 @@ class CommonScalars:
                 groupings["day"] = ExtractDay("created")
 
         periods = (
-            Media.objects.filter(~Q(file=""))
+            Media.objects.exclude(FILELESS_MEDIA)
             .values(**groupings)
             .annotate(count=Count("id"))
             .order_by(*groupings)

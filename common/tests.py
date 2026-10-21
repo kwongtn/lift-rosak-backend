@@ -1466,6 +1466,24 @@ class MediaByIdQueryTests(TestCase):
         # The year slider counts the same rows the feed lists.
         self.assertEqual(sum(g["count"] for g in result.data["mediasGroupByPeriod"]), 5)
 
+    async def test_the_year_slider_and_its_photos_skip_rows_with_a_null_file(self):
+        # `~Q(file="")` keeps NULL (NOT (file = '' AND file IS NOT NULL)), so the
+        # slider counted rows the feed hides.
+        shown = await self._make_media("shown")
+        # Saving through the ORM stores '' for an empty file, so NULL needs an update.
+        null_file = await Media.objects.acreate(uploader=self.user, width=1, height=1)
+        await Media.objects.filter(pk=null_file.pk).aupdate(file=None)
+        await Media.objects.acreate(uploader=self.user, file="", width=1, height=1)
+
+        result = await execute_graphql_async(
+            "{ mediasGroupByPeriod(type: YEAR) { count medias { id } } }"
+        )
+
+        self.assertIsNone(result.errors)
+        (period,) = result.data["mediasGroupByPeriod"]
+        self.assertEqual(period["count"], 1)
+        self.assertEqual([m["id"] for m in period["medias"]], [str(shown.id)])
+
     async def test_a_media_type_visibility_rule_hides_the_row_from_both(self):
         hidden = await self._make_media("hidden")
         shown = await self._make_media("shown")
