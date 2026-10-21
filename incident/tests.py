@@ -22,7 +22,7 @@ from django.contrib.gis.geos import Point
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, connection, transaction
-from django.test import TestCase, modify_settings, override_settings
+from django.test import SimpleTestCase, TestCase, modify_settings, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from dotmap import DotMap
@@ -56,9 +56,12 @@ from incident.services.errors import LineStatusValidationError, OfficialPostFetc
 from incident.services.line_status import (
     MAX_HISTORY_DAYS_AGO,
     MAX_LINES_PER_HISTORY_REQUEST,
+    MAX_WEEK_PROFILE_WEEKS,
     ReportEntry,
     bucket_hourly,
+    bucket_week_profile,
     load_line_status_history,
+    load_line_status_week_profile,
     load_lines_status_history,
     load_network_status_history,
 )
@@ -2457,6 +2460,384 @@ class DaysAgoQueryTests(ServiceDayHistoryFixtureMixin, TestCase):
                 result = execute_graphql(query, variables={"ago": MAX_HISTORY_DAYS_AGO})
 
                 self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+
+
+#: A Wednesday at noon: ``2026-01-05`` and ``2026-01-12`` are Mondays and
+#: ``2026-01-10`` is a Saturday. With ``weeks=2`` the window opens at
+#: 2025-12-31 12:00.
+_WEEK_NOW = datetime(2026, 1, 14, 12, 0)
+_WEEK_WINDOW_START = _WEEK_NOW - timedelta(weeks=2)
+
+
+def _week_slots(buckets):
+    """``{(weekday, hour): bucket}`` for a typical-week profile."""
+    return {(bucket.weekday, bucket.hour): bucket for bucket in buckets}
+
+
+class WeekProfileBucketingTests(SimpleTestCase):
+    """``bucket_week_profile`` is pure: ``SimpleTestCase`` forbids any query."""
+
+    @staticmethod
+    def _entry(status, at):
+        return ReportEntry(status=status, created=at)
+
+    def test_reports_land_in_their_weekday_and_hour_slot(self):
+        entries = [
+            self._entry(PassengerStatus.CROWDED, datetime(2026, 1, 5, 8, 15)),
+            self._entry(PassengerStatus.CROWDED, datetime(2026, 1, 12, 8, 45)),
+            self._entry(PassengerStatus.DELAYED, datetime(2026, 1, 12, 8, 50)),
+            self._entry(PassengerStatus.NORMAL, datetime(2026, 1, 10, 18, 5)),
+            # Exactly at the window start: inside (the window is inclusive).
+            self._entry(PassengerStatus.BUSY, _WEEK_WINDOW_START),
+            # A minute before it, and a second after ``now``: both outside.
+            self._entry(
+                PassengerStatus.DISRUPTED, _WEEK_WINDOW_START - timedelta(minutes=1)
+            ),
+            self._entry(PassengerStatus.DISRUPTED, _WEEK_NOW + timedelta(seconds=1)),
+        ]
+
+        buckets = bucket_week_profile(entries, now=_WEEK_NOW, weeks=2)
+        slots = _week_slots(buckets)
+
+        self.assertEqual(len(buckets), 168)
+        self.assertEqual(len(slots), 168)
+        # Two Mondays at 08:xx add up in ONE slot: a raw total, not an average.
+        monday = slots[(0, 8)]
+        self.assertEqual(monday.count, 3)
+        self.assertEqual(
+            monday.status_counts,
+            {PassengerStatus.CROWDED: 2, PassengerStatus.DELAYED: 1},
+        )
+        self.assertEqual(monday.dominant_status, PassengerStatus.CROWDED)
+        self.assertEqual(slots[(5, 18)].count, 1)
+        self.assertEqual(slots[(5, 18)].dominant_status, PassengerStatus.NORMAL)
+        self.assertEqual(slots[(2, 12)].status_counts, {PassengerStatus.BUSY: 1})
+        self.assertEqual(slots[(2, 11)].count, 0)
+        self.assertEqual(sum(bucket.count for bucket in buckets), 5)
+        for bucket in buckets:
+            self.assertEqual(sum(bucket.status_counts.values()), bucket.count)
+            if not bucket.count:
+                self.assertIsNone(bucket.dominant_status)
+                self.assertEqual(bucket.status_counts, {})
+
+    def test_slots_run_monday_first_in_service_day_hour_order(self):
+        entries = [self._entry(PassengerStatus.NORMAL, datetime(2026, 1, 12, 8, 0))]
+
+        default = bucket_week_profile(entries, now=_WEEK_NOW, weeks=1)
+        midnight = bucket_week_profile(
+            entries, now=_WEEK_NOW, weeks=1, day_start_hour=0
+        )
+
+        self.assertEqual(
+            [(b.weekday, b.hour) for b in default[:24]],
+            [(0, hour) for hour in [*range(3, 24), 0, 1, 2]],
+        )
+        self.assertEqual((default[-1].weekday, default[-1].hour), (6, 2))
+        self.assertEqual(
+            [(b.weekday, b.hour) for b in midnight[:24]],
+            [(0, hour) for hour in range(24)],
+        )
+        self.assertEqual((midnight[-1].weekday, midnight[-1].hour), (6, 23))
+
+    def test_the_weekday_is_that_of_the_service_day(self):
+        # Tuesday 2026-01-13 01:30 still belongs to Monday's service day.
+        late_night = [self._entry(PassengerStatus.BUSY, datetime(2026, 1, 13, 1, 30))]
+        # Tuesday 03:00 opens Tuesday's. Monday 02:00 closes Sunday's, so the
+        # weekday wraps from 0 back to 6.
+        day_start = [self._entry(PassengerStatus.BUSY, datetime(2026, 1, 13, 3, 0))]
+        wrap = [self._entry(PassengerStatus.BUSY, datetime(2026, 1, 12, 2, 0))]
+
+        def only_slot(entries, **kwargs):
+            buckets = bucket_week_profile(entries, now=_WEEK_NOW, weeks=1, **kwargs)
+            return [(b.weekday, b.hour) for b in buckets if b.count]
+
+        self.assertEqual(only_slot(late_night), [(0, 1)])
+        self.assertEqual(only_slot(day_start), [(1, 3)])
+        self.assertEqual(only_slot(wrap), [(6, 2)])
+        # ``day_start_hour=0`` is the plain calendar weekday.
+        self.assertEqual(only_slot(late_night, day_start_hour=0), [(1, 1)])
+
+    def test_no_report_in_the_window_is_an_empty_list(self):
+        self.assertEqual(bucket_week_profile([], now=_WEEK_NOW, weeks=2), [])
+        outside = [
+            self._entry(
+                PassengerStatus.NORMAL, _WEEK_WINDOW_START - timedelta(hours=1)
+            ),
+            self._entry(PassengerStatus.NORMAL, _WEEK_NOW + timedelta(hours=1)),
+        ]
+        self.assertEqual(bucket_week_profile(outside, now=_WEEK_NOW, weeks=2), [])
+
+    def test_status_and_dominant_status_follow_the_hourly_bucket_rules(self):
+        # CROWDED and DELAYED tie on count, so the more severe one must win, in
+        # the profile exactly as in ``bucket_hourly``.
+        monday = datetime(2026, 1, 12, 8, 0)
+        statuses = [
+            PassengerStatus.NORMAL,
+            PassengerStatus.CROWDED,
+            PassengerStatus.CROWDED,
+            PassengerStatus.DELAYED,
+            PassengerStatus.DELAYED,
+        ]
+        entries = [
+            self._entry(status, monday + timedelta(minutes=index))
+            for index, status in enumerate(statuses)
+        ]
+
+        slot = _week_slots(bucket_week_profile(entries, now=_WEEK_NOW, weeks=1))[(0, 8)]
+        hour = next(
+            bucket
+            for bucket in bucket_hourly(
+                entries,
+                day_start=datetime(2026, 1, 12, 3, 0),
+                now=datetime(2026, 1, 12, 20, 0),
+            )
+            if bucket.hour_start == monday
+        )
+
+        self.assertEqual(slot.dominant_status, PassengerStatus.DELAYED)
+        self.assertEqual(slot.dominant_status, hour.dominant_status)
+        self.assertEqual(slot.status_counts, hour.status_counts)
+        self.assertEqual(slot.count, hour.count)
+
+
+class LineStatusWeekProfileTests(ServiceDayHistoryFixtureMixin, TestCase):
+    """``load_line_status_week_profile``: one query over a line's recent weeks."""
+
+    def _profile(self, **kwargs):
+        return async_to_sync(load_line_status_week_profile)(
+            self.line.id, now=_WEEK_NOW, **kwargs
+        )
+
+    def test_week_profile_tallies_this_lines_reports_per_weekday_and_hour(self):
+        self._report(self.line, PassengerStatus.CROWDED, datetime(2026, 1, 5, 8, 15))
+        self._report(self.line, PassengerStatus.CROWDED, datetime(2026, 1, 12, 8, 45))
+        self._report(self.line, PassengerStatus.NORMAL, datetime(2026, 1, 10, 18, 5))
+        # Another line's report, and this line's before the window: both ignored.
+        self._report(
+            self.other_line, PassengerStatus.DISRUPTED, datetime(2026, 1, 12, 8, 10)
+        )
+        self._report(
+            self.line, PassengerStatus.DISRUPTED, _WEEK_WINDOW_START - timedelta(days=1)
+        )
+
+        with CaptureQueriesContext(connection) as captured:
+            buckets = self._profile(weeks=2)
+        slots = _week_slots(buckets)
+
+        self.assertEqual(len(captured.captured_queries), 1)
+        self.assertEqual(len(buckets), 168)
+        self.assertEqual(slots[(0, 8)].count, 2)
+        self.assertEqual(slots[(0, 8)].status_counts, {PassengerStatus.CROWDED: 2})
+        self.assertEqual(slots[(5, 18)].dominant_status, PassengerStatus.NORMAL)
+        self.assertEqual(sum(bucket.count for bucket in buckets), 3)
+
+    def test_week_profile_defaults_to_six_weeks(self):
+        self._report(self.line, PassengerStatus.NORMAL, _WEEK_NOW - timedelta(days=35))
+        self._report(self.line, PassengerStatus.NORMAL, _WEEK_NOW - timedelta(days=49))
+
+        self.assertEqual(sum(b.count for b in self._profile()), 1)
+        self.assertEqual(sum(b.count for b in self._profile(weeks=12)), 2)
+        self.assertEqual(self._profile(weeks=1), [])
+
+    def test_week_profile_is_empty_when_the_line_has_no_report_in_the_window(self):
+        self.assertEqual(self._profile(weeks=2), [])
+
+        self._report(
+            self.other_line, PassengerStatus.NORMAL, _WEEK_NOW - timedelta(hours=1)
+        )
+        self._report(
+            self.line, PassengerStatus.NORMAL, _WEEK_WINDOW_START - timedelta(hours=1)
+        )
+
+        self.assertEqual(self._profile(weeks=2), [])
+
+    def test_week_profile_range_checks_weeks_and_day_start_hour(self):
+        for bad in (0, MAX_WEEK_PROFILE_WEEKS + 1):
+            with self.subTest(weeks=bad):
+                with self.assertRaises(LineStatusValidationError) as raised:
+                    self._profile(weeks=bad)
+                self.assertIn("weeks", str(raised.exception))
+        for good in (1, MAX_WEEK_PROFILE_WEEKS):
+            with self.subTest(weeks=good):
+                self.assertEqual(self._profile(weeks=good), [])
+        for bad in (-1, 24):
+            with self.subTest(day_start_hour=bad):
+                with self.assertRaises(LineStatusValidationError):
+                    self._profile(day_start_hour=bad)
+
+
+class LineStatusWeekProfileQueryTests(ServiceDayHistoryFixtureMixin, TestCase):
+    """``lineStatusWeekProfile`` through the real schema.
+
+    The resolver reads the clock, so the fixtures are placed relative to it and
+    the expected slot is derived from the stored ``created`` with the documented
+    rule (shift back by ``dayStartHour``, then ``weekday()``).
+    """
+
+    PROFILE = """
+        query($id: ID!, $weeks: Int, $hour: Int) {
+          lineStatusWeekProfile(lineId: $id, weeks: $weeks, dayStartHour: $hour) {
+            weekday
+            hour
+            count
+            dominantStatus
+            statusCounts { status count }
+          }
+        }
+    """
+
+    def _profile(self, line_id=None, weeks=2, hour=3):
+        return execute_graphql(
+            self.PROFILE,
+            variables={
+                "id": str(line_id or self.line.id),
+                "weeks": weeks,
+                "hour": hour,
+            },
+        )
+
+    @staticmethod
+    def _slot_of(created, day_start_hour=3):
+        return (created - timedelta(hours=day_start_hour)).weekday(), created.hour
+
+    def test_graphql_week_profile_returns_all_168_slots(self):
+        now = timezone.now().replace(second=0, microsecond=0)
+        a_week_apart = [now - timedelta(days=2), now - timedelta(days=9)]
+        self._report(self.line, PassengerStatus.CROWDED, a_week_apart[0])
+        self._report(self.line, PassengerStatus.DELAYED, a_week_apart[0])
+        self._report(self.line, PassengerStatus.CROWDED, a_week_apart[1])
+        lone = now - timedelta(days=3)
+        self._report(self.line, PassengerStatus.NORMAL, lone)
+
+        result = self._profile()
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        slots = result.data["lineStatusWeekProfile"]
+        self.assertEqual(len(slots), 168)
+        # Monday first, service-day hours (03 .. 23, 00 .. 02) within a weekday.
+        self.assertEqual((slots[0]["weekday"], slots[0]["hour"]), (0, 3))
+        self.assertEqual((slots[-1]["weekday"], slots[-1]["hour"]), (6, 2))
+        by_slot = {(slot["weekday"], slot["hour"]): slot for slot in slots}
+        self.assertEqual(len(by_slot), 168)
+        busy = by_slot[self._slot_of(a_week_apart[0])]
+        self.assertEqual(busy["count"], 3)
+        self.assertEqual(busy["dominantStatus"], "CROWDED")
+        # Enum declaration order, zeros omitted, summing to ``count``.
+        self.assertEqual(
+            busy["statusCounts"],
+            [{"status": "CROWDED", "count": 2}, {"status": "DELAYED", "count": 1}],
+        )
+        quiet = by_slot[self._slot_of(lone)]
+        self.assertEqual(quiet["dominantStatus"], "NORMAL")
+        self.assertEqual(sum(slot["count"] for slot in slots), 4)
+        empty = next(slot for slot in slots if slot["count"] == 0)
+        self.assertIsNone(empty["dominantStatus"])
+        self.assertEqual(empty["statusCounts"], [])
+
+    def test_graphql_week_profile_is_an_empty_list_without_reports(self):
+        self._report(
+            self.other_line, PassengerStatus.NORMAL, timezone.now() - timedelta(days=1)
+        )
+
+        result = self._profile()
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        self.assertEqual(result.data["lineStatusWeekProfile"], [])
+
+    def test_graphql_week_profile_defaults_to_six_weeks_and_accepts_null(self):
+        now = timezone.now()
+        self._report(self.line, PassengerStatus.NORMAL, now - timedelta(days=35))
+        self._report(self.line, PassengerStatus.NORMAL, now - timedelta(days=49))
+
+        omitted = execute_graphql(
+            "query($id: ID!) { lineStatusWeekProfile(lineId: $id) { count } }",
+            variables={"id": str(self.line.id)},
+        )
+
+        self.assertIsNone(omitted.errors, msg=f"errors: {omitted.errors}")
+        self.assertEqual(
+            sum(slot["count"] for slot in omitted.data["lineStatusWeekProfile"]), 1
+        )
+        for weeks, expected in ((None, 1), (12, 2)):
+            with self.subTest(weeks=weeks):
+                result = self._profile(weeks=weeks)
+                self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+                self.assertEqual(
+                    sum(s["count"] for s in result.data["lineStatusWeekProfile"]),
+                    expected,
+                )
+        self.assertEqual(self._profile(weeks=1).data["lineStatusWeekProfile"], [])
+
+    def test_graphql_week_profile_rejects_bad_arguments(self):
+        for weeks in (0, MAX_WEEK_PROFILE_WEEKS + 1):
+            with self.subTest(weeks=weeks):
+                result = self._profile(weeks=weeks)
+
+                self.assertIsNotNone(result.errors)
+                self.assertIn(
+                    f"weeks must be between 1 and {MAX_WEEK_PROFILE_WEEKS}",
+                    result.errors[0].message,
+                )
+        with self.subTest(arg="dayStartHour"):
+            self.assertIsNotNone(self._profile(hour=24).errors)
+        with self.subTest(arg="lineId"):
+            result = self._profile(line_id="not-a-number")
+
+            self.assertIsNotNone(result.errors)
+            self.assertIn("numeric line id", result.errors[0].message)
+
+    def test_graphql_week_profile_agrees_with_the_hourly_history_semantics(self):
+        hour = timezone.now().replace(minute=0, second=0, microsecond=0)
+        statuses = [
+            PassengerStatus.NORMAL,
+            PassengerStatus.CROWDED,
+            PassengerStatus.CROWDED,
+            PassengerStatus.DELAYED,
+            PassengerStatus.DELAYED,
+        ]
+        for status in statuses:
+            self._report(self.line, status, hour)
+        fields = "count dominantStatus statusCounts { status count }"
+
+        result = execute_graphql(
+            f"""
+            query($id: ID!, $hour: Int!) {{
+              lineStatusHistory(lineId: $id, dayStartHour: $hour) {{ {fields} }}
+              lineStatusWeekProfile(lineId: $id, weeks: 1, dayStartHour: $hour) {{
+                weekday
+                hour
+                {fields}
+              }}
+            }}
+            """,
+            variables={"id": str(self.line.id), "hour": hour.hour},
+        )
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        history_bucket = result.data["lineStatusHistory"][0]
+        # ``dayStartHour`` is the report's own hour here, so the service-day
+        # weekday is simply the calendar weekday.
+        slot = next(
+            slot
+            for slot in result.data["lineStatusWeekProfile"]
+            if (slot["weekday"], slot["hour"]) == (hour.weekday(), hour.hour)
+        )
+        self.assertEqual(slot["dominantStatus"], "DELAYED")
+        self.assertEqual(
+            [slot[key] for key in ("count", "dominantStatus", "statusCounts")],
+            [
+                history_bucket[key]
+                for key in ("count", "dominantStatus", "statusCounts")
+            ],
+        )
+        self.assertEqual(
+            slot["statusCounts"],
+            [
+                {"status": "NORMAL", "count": 1},
+                {"status": "CROWDED", "count": 2},
+                {"status": "DELAYED", "count": 2},
+            ],
+        )
 
 
 class PublicFeedContractTests(TestCase):

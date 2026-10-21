@@ -541,6 +541,14 @@ type LineStatusReportScalar {
   stations: [Station!]!
 }
 
+type LineStatusWeekBucket {
+  weekday: Int!
+  hour: Int!
+  count: Int!
+  dominantStatus: PassengerStatus
+  statusCounts: [PassengerStatusCount!]!
+}
+
 type LineVehicleSpottingTrend {
   dateKey: String!
   year: Int!
@@ -797,6 +805,7 @@ type Query {
   lineStatusHistory(lineId: ID!, dayStartHour: Int = 3, daysAgo: Int = 0): [LineStatusHourBucket!]!
   networkStatusHistory(dayStartHour: Int = 3, daysAgo: Int = 0): [LineStatusHourBucket!]!
   linesStatusHistory(lineIds: [ID!]!, dayStartHour: Int = 3, daysAgo: Int = 0): [LineStatusHistory!]!
+  lineStatusWeekProfile(lineId: ID!, weeks: Int = 6, dayStartHour: Int = 3): [LineStatusWeekBucket!]!
   lineStatusReports(lineId: ID!, first: Int! = 20, after: String = null): LineStatusReportConnection!
   locations(filters: LocationFilter, order: LocationOrder, pagination: OffsetPaginationInput): [Location!]!
   buses(order: BusOrder, pagination: OffsetPaginationInput): [Bus!]!

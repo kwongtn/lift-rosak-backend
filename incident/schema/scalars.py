@@ -75,6 +75,24 @@ class LineStatusHistory:
     buckets: List[LineStatusHourBucket]
 
 
+@strawberry.type
+class LineStatusWeekBucket:
+    """One weekday-hour slot of a line's typical week (``lineStatusWeekProfile``).
+
+    ``weekday`` is 0 = Monday .. 6 = Sunday of the SERVICE day the reports belong
+    to (a 01:30 Tuesday report is Monday's, with the default 03:00 day start) and
+    ``hour`` the local clock hour 0-23. ``count`` / ``dominant_status`` /
+    ``status_counts`` carry exactly what ``LineStatusHourBucket`` carries, summed
+    over every week in the window: ``count`` is a raw total, not an average.
+    """
+
+    weekday: int
+    hour: int
+    count: int
+    dominant_status: Optional[PassengerStatus]
+    status_counts: List[PassengerStatusCount]
+
+
 @strawberry_django.type(models.LineStatusReport)
 class LineStatusReportScalar:
     id: strawberry.auto

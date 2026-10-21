@@ -12,6 +12,11 @@ single query (``load_lines_status_history``). All three bucket through
 ``bucket_hourly`` and all three cost ONE query however many rows or lines they
 cover. Each reads the current service day by default, or the one that started
 ``days_ago`` service days earlier.
+
+The **typical-week** side is ``load_line_status_week_profile``: one query over a
+rolling window of weeks, tallied by ``bucket_week_profile`` into 7 x 24
+weekday-hour slots with the same tally and dominant-status rules as the hourly
+buckets.
 """
 
 from collections.abc import Iterable, Mapping, Sequence
@@ -51,6 +56,10 @@ MAX_LINES_PER_HISTORY_REQUEST = 64
 # line up "the same weekday, N weeks ago" while each read stays one day's slice
 # of the table.
 MAX_HISTORY_DAYS_AGO = 56
+# Look-back of the typical-week profile, in whole weeks. The cap bounds the rows
+# the single read pulls (a quarter of a year of one line's reports).
+DEFAULT_WEEK_PROFILE_WEEKS = 6
+MAX_WEEK_PROFILE_WEEKS = 12
 
 # Ordinal = enum declaration order.
 SEVERITY_RANK: dict[str, int] = {
@@ -98,6 +107,23 @@ class HourBucket:
     count: int
     dominant_status: str | None
     # Per-status report counts; ``count`` is the sum of these values.
+    status_counts: dict[str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class WeekBucket:
+    """One weekday-hour slot of the typical-week profile.
+
+    ``weekday`` is Monday = 0 .. Sunday = 6 of the SERVICE day the reports belong
+    to, ``hour`` the local clock hour 0-23. ``count`` / ``dominant_status`` /
+    ``status_counts`` mean what they mean on ``HourBucket``, summed over every
+    week in the window.
+    """
+
+    weekday: int
+    hour: int
+    count: int
+    dominant_status: str | None
     status_counts: dict[str, int]
 
 
@@ -292,6 +318,20 @@ def service_day_start(now: datetime, day_start_hour: int = DAY_START_HOUR) -> da
     return candidate
 
 
+def _dominant_status(statuses: Mapping[str, int]) -> str | None:
+    """The most frequent status of one tally, or ``None`` for an empty tally.
+
+    Ties go to the most severe per ``SEVERITY_RANK``. The single home of that
+    rule, shared by every bucketing function so an hourly bucket and its
+    typical-week sibling can never disagree about which status wins.
+    """
+    return (
+        max(statuses, key=lambda status: (statuses[status], SEVERITY_RANK[status]))
+        if statuses
+        else None
+    )
+
+
 def bucket_hourly(
     entries: Iterable[ReportEntry], *, day_start: datetime, now: datetime
 ) -> list[HourBucket]:
@@ -304,11 +344,11 @@ def bucket_hourly(
     ``dominant_status=None`` so a chart always gets its full set of labels.
     Entries outside ``[day_start, now]`` are ignored, and so is one at or after
     ``day_start`` + 24h: that instant opens the NEXT service day, which matters
-    for a past day, where ``now`` lies beyond the day's end. ``dominant_status``
-    is the most frequent status in the hour; ties go to the most severe per
-    ``SEVERITY_RANK``. ``status_counts`` carries the hour's per-status tallies
-    (raw status values) so callers can render a segmented bar; it is ``{}`` for
-    an empty hour and always sums to ``count``.
+    for a past day, where ``now`` lies beyond the day's end.
+    ``dominant_status`` is the most frequent status in the hour, ties going to
+    the most severe (``_dominant_status``). ``status_counts`` carries the hour's
+    per-status tallies (raw status values) so callers can render a segmented bar;
+    it is ``{}`` for an empty hour and always sums to ``count``.
     """
     day_end = day_start + timedelta(hours=HOURS_IN_SERVICE_DAY)
     per_hour: dict[datetime, dict[str, int]] = {}
@@ -326,21 +366,78 @@ def bucket_hourly(
     for offset in range(HOURS_IN_SERVICE_DAY):
         hour = day_start + timedelta(hours=offset)
         statuses = per_hour.get(hour, {})
-        dominant = (
-            max(statuses, key=lambda status: (statuses[status], SEVERITY_RANK[status]))
-            if statuses
-            else None
-        )
         buckets.append(
             HourBucket(
                 hour_start=hour,
                 hour_end=hour + timedelta(hours=1),
                 count=sum(statuses.values()),
-                dominant_status=dominant,
+                dominant_status=_dominant_status(statuses),
                 status_counts=dict(statuses),
             )
         )
     return buckets
+
+
+def bucket_week_profile(
+    entries: Iterable[ReportEntry],
+    *,
+    now: datetime,
+    weeks: int,
+    day_start_hour: int = DAY_START_HOUR,
+) -> list[WeekBucket]:
+    """Tally the last ``weeks`` weeks of entries into 7 x 24 weekday-hour slots.
+
+    Pure (no DB). The window is ``[now - weeks * 7 days, now]``; entries outside
+    it are ignored. An entry lands in the slot of its local clock hour and of the
+    weekday of its SERVICE day: it is shifted back by ``day_start_hour`` before
+    the weekday is read, so with the default 03:00 start a 01:30 Tuesday report
+    counts toward Monday's late night, exactly where ``bucket_hourly`` files it
+    (``day_start_hour=0`` gives plain calendar weekdays). ``created`` is naive
+    local time (``USE_TZ = False``, ``Asia/Kuala_Lumpur``), so no zone conversion
+    is involved.
+
+    No entry in the window yields ``[]`` (the client's "no data" state);
+    otherwise ALL 168 slots are emitted, Monday first and, within a weekday, in
+    service-day order (``day_start_hour`` .. 23, then 0 ..), empty slots with
+    ``count=0`` and ``dominant_status=None``. ``dominant_status`` and
+    ``status_counts`` follow ``bucket_hourly`` (``_dominant_status``; the counts
+    sum to ``count``). ``count`` is the raw total over the window's weeks, not an
+    average, so a client can apply its own minimum-report threshold.
+    """
+    window_start = now - timedelta(weeks=weeks)
+    per_slot: dict[tuple[int, int], dict[str, int]] = {}
+    for entry in entries:
+        if not window_start <= entry.created <= now:
+            continue
+        weekday = (entry.created - timedelta(hours=day_start_hour)).weekday()
+        statuses = per_slot.setdefault((weekday, entry.created.hour), {})
+        statuses[entry.status] = statuses.get(entry.status, 0) + 1
+
+    if not per_slot:
+        return []
+
+    buckets: list[WeekBucket] = []
+    for weekday in range(7):
+        for offset in range(HOURS_IN_SERVICE_DAY):
+            hour = (day_start_hour + offset) % HOURS_IN_SERVICE_DAY
+            statuses = per_slot.get((weekday, hour), {})
+            buckets.append(
+                WeekBucket(
+                    weekday=weekday,
+                    hour=hour,
+                    count=sum(statuses.values()),
+                    dominant_status=_dominant_status(statuses),
+                    status_counts=dict(statuses),
+                )
+            )
+    return buckets
+
+
+def _check_day_start_hour(day_start_hour: int) -> None:
+    if not 0 <= day_start_hour <= 23:
+        raise LineStatusValidationError(
+            f"dayStartHour must be between 0 and 23, got {day_start_hour}."
+        )
 
 
 async def _service_day_entries(
@@ -377,10 +474,7 @@ async def _service_day_entries(
     ``line_id``, in ``created`` order, for the caller to bucket (``bucket_hourly``
     caps a past day at its own end, so ``now`` is passed on unchanged).
     """
-    if not 0 <= day_start_hour <= 23:
-        raise LineStatusValidationError(
-            f"dayStartHour must be between 0 and 23, got {day_start_hour}."
-        )
+    _check_day_start_hour(day_start_hour)
     if not 0 <= days_ago <= MAX_HISTORY_DAYS_AGO:
         raise LineStatusValidationError(
             f"daysAgo must be between 0 and {MAX_HISTORY_DAYS_AGO}, got {days_ago}."
@@ -510,3 +604,43 @@ async def load_lines_status_history(
         )
         for line_id in unique_ids
     ]
+
+
+async def load_line_status_week_profile(
+    line_id: int,
+    *,
+    weeks: int = DEFAULT_WEEK_PROFILE_WEEKS,
+    day_start_hour: int = DAY_START_HOUR,
+    now: datetime | None = None,
+) -> list[WeekBucket]:
+    """Typical-week profile of one line over the last ``weeks`` weeks (ONE query).
+
+    Reads the line's reports in ``[now - weeks * 7 days, now]`` and tallies them
+    per weekday-hour slot (see ``bucket_week_profile``): ``[]`` when the line has
+    no report in the window, otherwise all 168 slots. ``weeks`` must be in
+    ``1..MAX_WEEK_PROFILE_WEEKS`` and ``day_start_hour`` in ``0..23``
+    (``LineStatusValidationError``).
+    """
+    if not 1 <= weeks <= MAX_WEEK_PROFILE_WEEKS:
+        raise LineStatusValidationError(
+            f"weeks must be between 1 and {MAX_WEEK_PROFILE_WEEKS}, got {weeks}."
+        )
+    _check_day_start_hour(day_start_hour)
+    resolved_now = now or timezone.now()
+    # ``.order_by()`` clears the model's ``-created`` default: a tally ignores
+    # order. ``values_list`` skips hydrating each row's notes text.
+    rows = (
+        LineStatusReport.objects.filter(
+            line_id=line_id,
+            created__gte=resolved_now - timedelta(weeks=weeks),
+            created__lte=resolved_now,
+        )
+        .order_by()
+        .values_list("status", "created")
+    )
+    return bucket_week_profile(
+        [ReportEntry(status=status, created=created) async for status, created in rows],
+        now=resolved_now,
+        weeks=weeks,
+        day_start_hour=day_start_hour,
+    )

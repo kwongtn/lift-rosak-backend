@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
 from enum import Enum
 from typing import List, Optional
@@ -35,6 +36,7 @@ from incident.schema.scalars import (
     LineStatusReportConnection,
     LineStatusReportEdge,
     LineStatusReportPageInfo,
+    LineStatusWeekBucket,
     SocialMediaLinkConnection,
     SocialMediaLinkEdge,
     SocialMediaLinkPageInfo,
@@ -42,8 +44,12 @@ from incident.schema.scalars import (
 from incident.services.access import get_incident
 from incident.services.errors import IncidentServiceError, LineStatusValidationError
 from incident.services.line_status import (
+    DAY_START_HOUR,
+    DEFAULT_WEEK_PROFILE_WEEKS,
     HourBucket,
+    WeekBucket,
     load_line_status_history,
+    load_line_status_week_profile,
     load_lines_status_history,
     load_network_status_history,
     service_day_start,
@@ -1004,29 +1010,46 @@ async def get_calendar_incident_history(
     return entries
 
 
+def _dominant_status_enum(value: str | None) -> PassengerStatus | None:
+    return PassengerStatus(value) if value else None
+
+
+def _status_count_rows(counts: Mapping[str, int]) -> List[PassengerStatusCount]:
+    """The ``statusCounts`` breakdown: ``PassengerStatus`` declaration order
+    (least → most severe), zero counts omitted, summing to the bucket's ``count``."""
+    return [
+        PassengerStatusCount(status=status, count=counts[status.value])
+        for status in PassengerStatus
+        if counts.get(status.value, 0) >= 1
+    ]
+
+
 def _hour_bucket(bucket: HourBucket) -> LineStatusHourBucket:
     """Map one service bucket to its GraphQL shape.
 
     The one place ``HourBucket`` becomes a ``LineStatusHourBucket``, shared by
     all three history queries so they cannot disagree about the enum mapping or
-    about ``statusCounts`` ordering: ``PassengerStatus`` declaration order
-    (least → most severe), zero counts omitted, and the breakdown always sums to
-    ``count``.
+    about ``statusCounts`` ordering (``_dominant_status_enum`` and
+    ``_status_count_rows``, which ``_week_bucket`` uses too).
     """
     return LineStatusHourBucket(
         hour_start=bucket.hour_start,
         hour_end=bucket.hour_end,
         count=bucket.count,
-        dominant_status=PassengerStatus(bucket.dominant_status)
-        if bucket.dominant_status
-        else None,
-        status_counts=[
-            PassengerStatusCount(
-                status=status, count=bucket.status_counts[status.value]
-            )
-            for status in PassengerStatus
-            if bucket.status_counts.get(status.value, 0) >= 1
-        ],
+        dominant_status=_dominant_status_enum(bucket.dominant_status),
+        status_counts=_status_count_rows(bucket.status_counts),
+    )
+
+
+def _week_bucket(bucket: WeekBucket) -> LineStatusWeekBucket:
+    """Map one typical-week slot to its GraphQL shape, with the same status
+    mapping and ``statusCounts`` ordering as ``_hour_bucket``."""
+    return LineStatusWeekBucket(
+        weekday=bucket.weekday,
+        hour=bucket.hour,
+        count=bucket.count,
+        dominant_status=_dominant_status_enum(bucket.dominant_status),
+        status_counts=_status_count_rows(bucket.status_counts),
     )
 
 
@@ -1138,6 +1161,45 @@ async def get_lines_status_history(
         )
         for history in histories
     ]
+
+
+async def get_line_status_week_profile(
+    root,
+    info: Info,
+    line_id: strawberry.ID,
+    weeks: Optional[int] = DEFAULT_WEEK_PROFILE_WEEKS,
+    day_start_hour: Optional[int] = DAY_START_HOUR,
+) -> List[LineStatusWeekBucket]:
+    """Typical-week profile of one line: "is it usually bad, and when?".
+
+    ONE query over the line's reports in the last ``weeks`` weeks (1..12,
+    default 6), tallied per (weekday, hour). Once the line has any report in the
+    window the answer is ALL 168 slots, empty ones with ``count: 0``; otherwise
+    ``[]`` (the "no data" state). ``weekday`` is 0 = Monday .. 6 = Sunday of the
+    SERVICE day (``dayStartHour``, default 03:00: a 01:30 Tuesday report counts
+    toward Monday), ``hour`` the local clock hour 0-23. Slots run Monday first
+    and, within a weekday, in service-day hour order. ``count`` is the raw total
+    over the window, so the client decides what is too sparse to show.
+    ``dominantStatus`` / ``statusCounts`` follow the hourly-history semantics.
+    """
+    if weeks is None:
+        weeks = DEFAULT_WEEK_PROFILE_WEEKS
+    if day_start_hour is None:
+        day_start_hour = DAY_START_HOUR
+    try:
+        numeric_line_id = int(line_id)
+    except (TypeError, ValueError):
+        raise_service_error(
+            LineStatusValidationError("lineId must be a numeric line id.")
+        )
+    try:
+        buckets = await load_line_status_week_profile(
+            numeric_line_id, weeks=weeks, day_start_hour=day_start_hour
+        )
+    except IncidentServiceError as exc:
+        raise_service_error(exc)
+
+    return [_week_bucket(bucket) for bucket in buckets]
 
 
 async def get_line_status_reports(

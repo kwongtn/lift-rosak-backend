@@ -22,6 +22,7 @@ from incident.schema.resolvers import (
     get_calendar_incidents_by_severity_count,
     get_line_status_history,
     get_line_status_reports,
+    get_line_status_week_profile,
     get_lines_status_history,
     get_network_status_history,
     get_pending_calendar_incidents,
@@ -36,6 +37,7 @@ from incident.schema.scalars import (
     LineStatusHistory,
     LineStatusHourBucket,
     LineStatusReportConnection,
+    LineStatusWeekBucket,
     SocialMediaLinkConnection,
     SocialMediaLinkScalar,
     StationIncident,
@@ -97,6 +99,10 @@ class IncidentScalars:
 
     lines_status_history: List[LineStatusHistory] = strawberry.field(
         resolver=get_lines_status_history,
+    )
+
+    line_status_week_profile: List[LineStatusWeekBucket] = strawberry.field(
+        resolver=get_line_status_week_profile,
     )
 
     line_status_reports: LineStatusReportConnection = strawberry.field(
