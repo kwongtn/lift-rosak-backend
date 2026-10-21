@@ -20,6 +20,7 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path, re_path
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.vary import vary_on_headers
 
 if apps.is_installed("common"):
     from common import views as common_views
@@ -38,9 +39,14 @@ urlpatterns = (
         path(
             "graphql/",
             csrf_exempt(
-                CustomGraphQLView.as_view(
-                    graphql_ide="graphiql" if settings.DEBUG else None,
-                    schema=schema,
+                # The per-site cache keys a GET on its URL, so it would hand one
+                # viewer's answer (owner / admin views) to anyone sending the same
+                # URL. Varying on the token header gives each viewer their own entry.
+                vary_on_headers("Firebase-Auth-Key")(
+                    CustomGraphQLView.as_view(
+                        graphql_ide="graphiql" if settings.DEBUG else None,
+                        schema=schema,
+                    )
                 )
             ),
         ),
