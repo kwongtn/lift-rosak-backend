@@ -14,7 +14,7 @@ Root query fields are contributed by `OperationScalars` (mixed into `rosak.schem
 | Filter (`operation/schema/filters.py`) | Notable inputs |
 | --- | --- |
 | `LineFilter` | `id`, `code`, `display_name`/`display_color` via `FilterLookup[str]` |
-| `StationFilter` | `display_name`, nested `line` / `station_line`, plus a custom **geospatial** `location` filter taking JSON `{x, y, z, radius}` → `location__distance_lt` with `Distance(km=…)` |
+| `StationFilter` | `display_name`, nested `line`, plus two custom `filter_field`s. `station_line` takes a nested `StationLineFilter` and prefixes it with the reverse relation `stationline__` (a declarative `station_line` field cannot work: Django has no `station_line` lookup on `Station`). `location` is a **geospatial** filter taking JSON `{x, y, z, radius}` → `location__distance_lt` with `Distance(km=…)`. Nested filters are joins, so a station repeats once per matching `StationLine`; send `DISTINCT: true` to collapse it. |
 | `StationLineFilter` | `display_name`, `internal_representation`, nested `station`/`line` |
 | `VehicleFilter` | `id`, `status` (reused by `spotting` and `incident` filters) |
 | `VehicleTypeFilter` | custom `line_id` resolver → `Q(vehicles__vehicle_lines__id=value)` |

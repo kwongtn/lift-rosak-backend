@@ -5,7 +5,10 @@ import strawberry_django
 from django.contrib.gis.db.models import Q
 from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import Distance
+from django.db.models import QuerySet
+from strawberry.types import Info
 from strawberry_django import StrFilterLookup
+from strawberry_django.filters import process_filters
 
 from operation import models
 
@@ -46,7 +49,14 @@ class StationFilter:
     display_name: Optional[StrFilterLookup]
 
     line: Optional["LineFilter"]
-    station_line: Optional["StationLineFilter"]
+
+    @strawberry_django.filter_field
+    def station_line(
+        self, info: Info, queryset: QuerySet, value: "StationLineFilter", prefix
+    ) -> tuple[QuerySet, Q]:
+        # A declarative `station_line` field looks up `station_line`, which is not a
+        # relation; Django names the reverse one `stationline` and the field errored.
+        return process_filters(value, queryset, info, f"{prefix}stationline__")
 
     @strawberry_django.filter_field
     def location(self, value: strawberry.scalars.JSON, prefix) -> Q:

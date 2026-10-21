@@ -904,11 +904,11 @@ input StationFilter {
   id: ID
   displayName: StrFilterLookup
   line: LineFilter
-  stationLine: StationLineFilter
   AND: StationFilter
   OR: StationFilter
   NOT: StationFilter
   DISTINCT: Boolean
+  stationLine: StationLineFilter
   location: JSON
 }
 

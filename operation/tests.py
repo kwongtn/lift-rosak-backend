@@ -492,6 +492,27 @@ class OperationGraphQLTests(TestCase):
         names = {sl["displayName"] for sl in station_lines}
         self.assertEqual(names, {"KL Sentral KJ", "KLCC KJ"})
 
+    def test_stations_filter_by_nested_station_line(self):
+        # `stationLine` used to look up the non-existent `station_line` and always errored.
+        query = """
+            query ($filters: StationFilter) {
+                stations(filters: $filters) { displayName }
+            }
+        """
+        for filters, expected in (
+            ({"stationLine": {"internalRepresentation": {"exact": "KJ10"}}}, ["KLCC"]),
+            (
+                {"stationLine": {"line": {"id": str(self.line_agl.id)}}},
+                ["Sentul Timur"],
+            ),
+        ):
+            with self.subTest(filters=filters):
+                result = execute_graphql(query, variables={"filters": filters})
+                self.assertIsNone(result.errors)
+                self.assertEqual(
+                    [row["displayName"] for row in result.data["stations"]], expected
+                )
+
     def test_line_vehicle_spotting_trends_with_zero_filling(self):
         query = """
             query GetLineTrends($lineId: ID!, $start: Date!, $end: Date!) {
