@@ -16,7 +16,7 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 - [08.md](08.md): official posts auto-publish as `LIVE`; console `hidden` filter.
 - [19.md](19.md): front-page pulse-link N+1 fix; pytest run leaves the kept test DB broken.
 - [20.md](20.md): `Vehicle.lastSpottedAt` tiebreaker.
-- [21.md](21.md): docs squash to current state; `updateUser` null guard, Telegram settings coercion, `argparse.ArgumentError`, `report_spotting_today` date fix; daily digest sends again (DISTINCT ON crash, per-loop PTB app); lines may share a Telegram channel. Frontend audit fix pass, backend side: `media(id)`, anonymous-spotting privacy, GPS strip, GROUP BY year counts, review follow-ups.
+- [21.md](21.md): docs squash to current state; `updateUser` null guard, Telegram settings coercion, `argparse.ArgumentError`, `report_spotting_today` date fix; daily digest sends again (DISTINCT ON crash, per-loop PTB app); lines may share a Telegram channel. Frontend audit fix pass, backend side: `media(id)`, anonymous-spotting privacy, GPS strip, GROUP BY year counts, review follow-ups; every image accepted again, HEIC included.
 
 ## By Module/Feature
 
@@ -24,7 +24,7 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 
 - **0ed9baf** `[feat](common)`: `media(id: ID!)` root query for single-photo deep links (F049).
 - **0a830bf**, **d94380f**, **73b1006** `[fix](spotting, common)`: an anonymous spotting hides its location, its public-profile rows and counts, and its photos' uploader (now nullable) from everyone but the reporter and admins (F043). **0ebb6c7**: `withMostEntries` is nullable instead of erroring. **3bd4bbf**: a Firebase error in the admin check fails closed.
-- **32835a3**, **45a3075**, **6d8ad08** `[fix](common)`: lossless EXIF GPS strip at upload, in the Telegram handler and before the Discord send, with a bounded loop; HEIC uploads refused (F044). **1eab6e7**: the EXIF DateTime is parsed before it reaches `CalendarIncidentMedia.timestamp`.
+- **32835a3**, **45a3075**, **6d8ad08** `[fix](common)`: lossless EXIF GPS strip at upload, in the Telegram handler and before the Discord send, with a bounded loop; HEIC uploads refused (F044). **ae696dd** reverts the refusal at the owner's request: HEIC and every other non-JPEG upload is stored as received, GPS included. **ec2dc9a**: Telegram stages an image document by its extension when its mime type is generic. **1eab6e7**: the EXIF DateTime is parsed before it reaches `CalendarIncidentMedia.timestamp`.
 - **9f326fd**, **69ecc4e** `[perf](common)`: `mediasGroupByPeriod` uses one GROUP BY (42-59 s locally before, 0.2-0.5 s after) and skips fileless rows (F012). **3936a07**: fileless media are hidden from `medias` and `media(id)`. **64b7435**: `createdDate` no longer costs one query per photo.
 - **d9e429b** `[fix](rosak)`: GraphQL GET responses vary on `Firebase-Auth-Key`, so the per-site cache never serves one viewer's data to another.
 - Full serial suite 553 → 601 tests, OK. ([21.md](21.md))
