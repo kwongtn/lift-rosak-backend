@@ -18,7 +18,7 @@ from telegram import Update
 from telegram.constants import ReactionEmoji
 
 from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
-from common.exif import strip_gps
+from common.exif import is_heif, strip_gps
 from common.models import TemporaryMedia, User, UserVerificationCode
 from common.tasks import convert_temporary_media_to_media_task
 from common.utils import should_upload_media
@@ -675,6 +675,31 @@ def _media_extension(file_name: str | None, mime_type: str | None) -> str:
     }.get(mime_type, "bin")
 
 
+async def _download_without_gps(message, context, file_id, file_size) -> bytes | None:
+    """The attachment's bytes with their EXIF GPS removed.
+
+    None, after replying to the user, for a file over 20 MB or a HEIC image.
+    """
+    if file_size and file_size > 20 * 1024 * 1024:
+        await message.reply_html(text="File is too large (max 20 MB).")
+        return None
+
+    tg_file = await context.bot.get_file(file_id)
+    downloaded = bytes(await tg_file.download_as_bytearray())
+    # An iPhone's original ("send as file") is HEIC, whose GPS strip_gps cannot remove.
+    if is_heif(downloaded):
+        await message.reply_html(
+            text=(
+                "HEIC photos are not supported. Send it as a photo, "
+                "or export it as JPEG first."
+            )
+        )
+        return None
+
+    # Telegram strips EXIF from photos, but not from images sent as a file.
+    return strip_gps(downloaded)
+
+
 async def media(update: Update, context) -> None:
     message = update.message
     if message is None:
@@ -761,13 +786,9 @@ async def media(update: Update, context) -> None:
         )
         return
 
-    if file_size and file_size > 20 * 1024 * 1024:
-        await message.reply_html(text="File is too large (max 20 MB).")
+    content = await _download_without_gps(message, context, file_id, file_size)
+    if content is None:
         return
-
-    tg_file = await context.bot.get_file(file_id)
-    # Telegram strips EXIF from photos, but not from images sent as a file.
-    content = strip_gps(bytes(await tg_file.download_as_bytearray()))
 
     ext = _media_extension(file_name, mime_type)
     file_obj = File(ContentFile(content), name=f"telegram_{file_id}.{ext}")

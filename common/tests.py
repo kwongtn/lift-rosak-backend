@@ -29,7 +29,7 @@ from common.enums import (
     TemporaryMediaStatus,
     TemporaryMediaType,
 )
-from common.exif import strip_gps
+from common.exif import is_heif, strip_gps
 from common.models import (
     Clearance,
     FeatureFlag,
@@ -75,6 +75,8 @@ TASK_APPLY_ASYNC = "common.tasks.convert_temporary_media_to_media_task.apply_asy
 SIGNAL_NSFW_APPLY_ASYNC = "common.signals.check_temporary_media_nsfw.apply_async"
 
 PRINT_IM = b"PrintIM\x000300"
+# The start of a HEIC file: an ISO base media "ftyp" box with the "heic" major brand.
+HEIC_STUB = b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic"
 
 
 def _jpeg(exif: Image.Exif | None = None) -> bytes:
@@ -2003,6 +2005,20 @@ class StripGpsTests(SimpleTestCase):
             with self.subTest(label):
                 self.assertIs(strip_gps(data), data)
 
+    def test_is_heif_recognises_heic_by_its_ftyp_brand(self):
+        for brand in (b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"heif"):
+            with self.subTest(brand):
+                self.assertTrue(is_heif(HEIC_STUB.replace(b"heic", brand)))
+
+        for label, data in {
+            "mp4": b"\x00\x00\x00\x18ftypmp42 not a real video",
+            "jpeg": jpeg_with_gps(),
+            "short": b"\x00\x00\x00\x18ftyp",
+            "empty": b"",
+        }.items():
+            with self.subTest(label):
+                self.assertFalse(is_heif(data))
+
     def test_drops_an_exif_segment_it_cannot_read(self):
         # With no way to show it holds no position, the whole segment goes.
         plain = _jpeg()
@@ -2072,8 +2088,8 @@ class GenericUploadStripsGpsTests(TestCase):
             spotting_date=date.today(),
         )
 
-    def _upload(self, content: bytes, name: str = "IMG_0001.jpg") -> bytes:
-        """POST `content` as the reporter and return the bytes handed to storage."""
+    def _post(self, content: bytes, name: str = "IMG_0001.jpg"):
+        """POST `content` as the reporter: the response and what reached storage."""
         stored = []
 
         def save(storage, name, file):
@@ -2105,6 +2121,12 @@ class GenericUploadStripsGpsTests(TestCase):
             )
             response = GenericUpload.as_view()(request)
 
+        return response, stored
+
+    def _upload(self, content: bytes, name: str = "IMG_0001.jpg") -> bytes:
+        """POST `content` as the reporter and return the bytes handed to storage."""
+        response, stored = self._post(content, name)
+
         self.assertEqual(response.status_code, 201)
         (content_stored,) = stored
         return content_stored
@@ -2132,3 +2154,11 @@ class GenericUploadStripsGpsTests(TestCase):
         }.items():
             with self.subTest(name):
                 self.assertEqual(self._upload(content, name=name), content)
+
+    def test_heic_is_refused_and_nothing_is_stored(self):
+        # strip_gps cannot edit HEIC, so it would keep its GPS all the way to Discord.
+        response, stored = self._post(HEIC_STUB, name="IMG_0001.heic")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(stored, [])
+        self.assertFalse(TemporaryMedia.objects.filter(uploader=self.user).exists())

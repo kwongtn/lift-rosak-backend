@@ -19,7 +19,7 @@ from telegram.constants import ReactionEmoji
 from telegram.error import BadRequest
 
 from common.enums import TemporaryMediaStatus, TemporaryMediaType
-from common.tests import jpeg_with_gps
+from common.tests import HEIC_STUB, jpeg_with_gps
 from incident.enums import SocialMediaLinkStatus
 from incident.services import IncidentServiceError, SocialMediaLinkWrite
 from operation.enums import VehicleStatus
@@ -1637,6 +1637,31 @@ class MediaHandlerTests(TestCase):
         self.assertNotIn(ExifTags.Base.GPSInfo, exif)
         self.assertEqual(exif[ExifTags.Base.Make], "TestMake")
         self.assertEqual(exif[ExifTags.Base.DateTime], "2026:10:21 08:30:00")
+
+    def test_heic_sent_as_a_file_is_refused_and_not_staged(self):
+        # strip_gps cannot edit HEIC, so it would stage the original with its GPS.
+        self.tg_file.download_as_bytearray = AsyncMock(
+            return_value=bytearray(HEIC_STUB)
+        )
+        document = MagicMock(name="document")
+        document.mime_type = "image/heic"
+        document.file_id = "doc-file-id"
+        document.file_name = "IMG_0001.HEIC"
+        document.file_size = 1234
+        update = self._make_update(document=document)
+
+        with self._mock_handlers() as mocks:
+            self._stub_ready(mocks)
+            asyncio.run(media(update, self._context()))
+
+        update.message.reply_html.assert_awaited_once_with(
+            text=(
+                "HEIC photos are not supported. Send it as a photo, "
+                "or export it as JPEG first."
+            )
+        )
+        mocks["temp_media"].objects.acreate.assert_not_awaited()
+        mocks["retry"].assert_not_awaited()
 
     def test_untrusted_video_awaits_review_and_persists_review_message_id(self):
         update = self._make_update(video=True)

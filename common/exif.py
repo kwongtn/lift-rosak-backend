@@ -14,6 +14,8 @@ import struct
 logger = logging.getLogger(__name__)
 
 JPEG_MAGIC = b"\xff\xd8\xff"
+# Major brands of the ISO base media "ftyp" box that mark a HEIF/HEIC image.
+_HEIF_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"heif"}
 _EXIF_HEADER = b"Exif\x00\x00"
 _APP1 = 0xE1
 _GPS_INFO = 0x8825
@@ -91,10 +93,20 @@ def _remove_gps_entry(tiff: bytearray) -> bool:
     return True
 
 
+def is_heif(data: bytes) -> bool:
+    """True for a HEIF/HEIC image (an iPhone's original), judged by its first 12 bytes.
+
+    `strip_gps` cannot edit one, and it would pass its GPS through, so the upload
+    boundaries refuse HEIF instead.
+    """
+    return data[4:8] == b"ftyp" and data[8:12] in _HEIF_BRANDS
+
+
 def strip_gps(data: bytes) -> bytes:
     """Return `data` without the EXIF GPS block; anything else comes back unchanged.
 
-    - Not a JPEG (video, PNG, WebP, HEIC, ...): returned as is.
+    - Not a JPEG (video, PNG, WebP, TIFF, ...): returned as is. HEIC is refused by the
+      callers (`is_heif`) before it gets here.
     - A JPEG with no EXIF, or EXIF without GPS: returned as is (the same object).
     - A JPEG with GPS: same length, same bytes, except the GPS IFD is gone.
     - An EXIF segment we cannot parse, or with more than a few GPS pointers (a photo
@@ -103,8 +115,9 @@ def strip_gps(data: bytes) -> bytes:
 
     shortcut: JPEG only, and the EXIF IFD0 pointer only. The EXIF thumbnail, XMP
     (``exif:GPS*``), MakerNote and the extra images of a multi-picture file are left
-    alone. PNG, WebP and HEIC are not touched either: Pillow can only re-encode those
-    (lossy for WebP and HEIC). Upgrade when such uploads carry GPS in practice.
+    alone. PNG, WebP and TIFF are not touched either: Pillow can only re-encode those
+    (lossy for WebP), and the web client strips the files it accepts before upload.
+    Upgrade when other clients' uploads carry GPS in practice.
     """
     if not data.startswith(JPEG_MAGIC):
         return data

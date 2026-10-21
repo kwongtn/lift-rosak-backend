@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.enums import TemporaryMediaStatus, TemporaryMediaType
-from common.exif import JPEG_MAGIC, strip_gps
+from common.exif import JPEG_MAGIC, is_heif, strip_gps
 from common.models import TemporaryMedia
 from common.utils import FirebaseUser
 from spotting.models import Event
@@ -33,16 +33,21 @@ def get_s3_resource():
     return boto3.resource("s3", **kwargs)
 
 
+def _head(file) -> bytes:
+    """The first bytes of the upload, so a large video is not read into memory to sniff it."""
+    file.seek(0)
+    head = file.read(12)
+    file.seek(0)
+
+    return head
+
+
 def _without_gps(file):
-    """The upload with its EXIF GPS removed; anything but a JPEG passes through.
+    """The upload with its EXIF GPS removed; anything but a JPEG passes through."""
+    if not _head(file).startswith(JPEG_MAGIC):
+        return file
 
-    Peeks at the first bytes so a large video is not read into memory to be skipped.
-    """
-    file.seek(0)
-    is_jpeg = file.read(len(JPEG_MAGIC)) == JPEG_MAGIC
-    file.seek(0)
-
-    return ContentFile(strip_gps(file.read())) if is_jpeg else file
+    return ContentFile(strip_gps(file.read()))
 
 
 class GenericUpload(APIView):
@@ -66,6 +71,14 @@ class GenericUpload(APIView):
         user = await FirebaseUser(request).get_current_user()
         if user is None:
             return Response(status=status.HTTP_401_UNAUTHORIZED)
+
+        # HEIC keeps its GPS (strip_gps edits JPEG only), so it is neither stored nor
+        # forwarded to Discord.
+        if is_heif(_head(file)):
+            return Response(
+                {"detail": "HEIC images are not supported. Upload a JPEG."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Create metadata & some checks
         metadata = {}
