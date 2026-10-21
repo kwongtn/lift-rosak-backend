@@ -33,6 +33,7 @@ from common.models import Media, User
 from incident.enums import (
     CalendarIncidentChronologyIndicator,
     CalendarIncidentSeverity,
+    CalendarIncidentStatus,
     IncidentSeverity,
     IngestPlatform,
     PassengerStatus,
@@ -1055,6 +1056,34 @@ class CalendarIncidentWindowAndTagFilterTests(TestCase):
         # null and an empty nested filter mean "no filter".
         self._expect({"activeNow": None, "upcomingWithinDays": None}, *everything)
         self._expect({"lines": {}, "stations": {}}, *everything)
+
+    def test_status_filter_narrows_to_one_status(self):
+        # Rows are created as DRAFT; the Rider board asks for moderator-approved ones.
+        for incident, status in (
+            (self.mid_window, CalendarIncidentStatus.LIVE),
+            (self.starts_tomorrow, CalendarIncidentStatus.LIVE),
+            (self.ended_an_hour_ago, CalendarIncidentStatus.REJECTED),
+            (self.starts_in_ten_days, CalendarIncidentStatus.PENDING_APPROVAL),
+        ):
+            CalendarIncident.objects.filter(pk=incident.pk).update(status=status)
+
+        self._expect({"status": "LIVE"}, self.mid_window, self.starts_tomorrow)
+        self._expect({"status": "DRAFT"}, self.open_since_yesterday)
+        self._expect({"status": "LIVE", "activeNow": True}, self.mid_window)
+        self._expect(
+            {"NOT": {"status": "LIVE"}},
+            self.open_since_yesterday,
+            self.ended_an_hour_ago,
+            self.starts_in_ten_days,
+        )
+        # Several statuses are an OR of single ones.
+        self._expect(
+            {"status": "LIVE", "OR": {"status": "DRAFT"}},
+            self.open_since_yesterday,
+            self.mid_window,
+            self.starts_tomorrow,
+        )
+        self._expect({"status": None}, *CalendarIncident.objects.all())
 
     def test_soft_deleted_incidents_stay_hidden(self):
         line = Line.objects.create(

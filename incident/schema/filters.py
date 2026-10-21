@@ -73,6 +73,7 @@ def _tagged_with(field: str, value: Any, info: Info) -> Q:
 class CalendarIncidentFilter:
     id: Optional[strawberry.ID]
     severity: Optional[str]
+    status: strawberry.auto
 
     @strawberry_django.filter_field
     def ongoing(self, value: bool, prefix) -> Q:

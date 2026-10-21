@@ -79,6 +79,7 @@ input CalendarIncidentDateFilter {
 input CalendarIncidentFilter {
   id: ID
   severity: String
+  status: CalendarIncidentStatus
   AND: CalendarIncidentFilter
   OR: CalendarIncidentFilter
   NOT: CalendarIncidentFilter
