@@ -17,6 +17,7 @@ JPEG_MAGIC = b"\xff\xd8\xff"
 _EXIF_HEADER = b"Exif\x00\x00"
 _APP1 = 0xE1
 _GPS_INFO = 0x8825
+MAX_GPS_ENTRIES = 4
 # TIFF field type -> bytes per value: BYTE, ASCII, SHORT, LONG, RATIONAL, SBYTE,
 # UNDEFINED, SSHORT, SLONG, SRATIONAL, FLOAT, DOUBLE.
 _TYPE_SIZES = {
@@ -96,8 +97,9 @@ def strip_gps(data: bytes) -> bytes:
     - Not a JPEG (video, PNG, WebP, HEIC, ...): returned as is.
     - A JPEG with no EXIF, or EXIF without GPS: returned as is (the same object).
     - A JPEG with GPS: same length, same bytes, except the GPS IFD is gone.
-    - An EXIF segment we cannot parse: dropped whole, because we cannot show it holds
-      no position. That also drops its capture time.
+    - An EXIF segment we cannot parse, or with more than a few GPS pointers (a photo
+      has one; a crafted block makes each removal rescan IFD0): dropped whole, because
+      we cannot show it holds no position. That also drops its capture time.
 
     shortcut: JPEG only, and the EXIF IFD0 pointer only. The EXIF thumbnail, XMP
     (``exif:GPS*``), MakerNote and the extra images of a multi-picture file are left
@@ -131,8 +133,14 @@ def strip_gps(data: bytes) -> bytes:
             tiff = bytearray(data[pos + 10 : end])
             try:
                 removed = False
-                while _remove_gps_entry(tiff):
+                # A photo has one GPS pointer. Each removal rescans IFD0, so a crafted
+                # block with thousands would cost seconds of CPU: drop it instead.
+                for _ in range(MAX_GPS_ENTRIES):
+                    if not _remove_gps_entry(tiff):
+                        break
                     removed = True
+                else:
+                    raise ValueError("too many GPS entries")
             except (ValueError, struct.error):
                 logger.warning("Dropping an unreadable EXIF segment from an upload")
                 cuts.append((pos, end))

@@ -1,5 +1,6 @@
 import io
 import struct
+import time
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -2012,6 +2013,42 @@ class StripGpsTests(SimpleTestCase):
         }.items():
             with self.subTest(label), self.assertLogs("common.exif", "WARNING"):
                 self.assertEqual(strip_gps(_with_exif_segment(plain, tiff)), plain)
+
+    @staticmethod
+    def _crafted_ifd0(n_other: int, n_gps: int) -> bytes:
+        """A TIFF block whose IFD0 holds `n_other` plain tags, then `n_gps` GPS pointers."""
+        count = n_other + n_gps
+        tail = 8 + 2 + 12 * count + 4  # an empty IFD for every pointer to land on
+        entries = (
+            b"".join(
+                struct.pack("<HHII", 0x0100 + i % 200, 3, 1, 1) for i in range(n_other)
+            )
+            + struct.pack("<HHII", 0x8825, 4, 1, tail) * n_gps
+        )
+        header = b"II" + struct.pack("<HI", 42, 8) + struct.pack("<H", count)
+        return header + entries + bytes(4 + 16)
+
+    def test_drops_an_exif_segment_with_many_gps_pointers_without_scanning_it_forever(
+        self,
+    ):
+        # Each removal used to rescan IFD0 (6 s of CPU for 2,500 + 2,500 entries,
+        # on the event loop), so the loop is capped and the segment fails closed.
+        plain = _jpeg()
+        crafted = _with_exif_segment(plain, self._crafted_ifd0(2000, 2000))
+
+        started = time.monotonic()
+        with self.assertLogs("common.exif", "WARNING"):
+            out = strip_gps(crafted)
+
+        self.assertEqual(out, plain)
+        self.assertLess(time.monotonic() - started, 1)
+
+    def test_strips_a_few_repeated_gps_pointers(self):
+        out = strip_gps(_with_exif_segment(_jpeg(), self._crafted_ifd0(3, 3)))
+
+        self.assertEqual(
+            sorted(Image.open(io.BytesIO(out)).getexif()), [0x100, 0x101, 0x102]
+        )
 
 
 class GenericUploadStripsGpsTests(TestCase):
