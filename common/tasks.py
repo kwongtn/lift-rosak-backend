@@ -210,6 +210,16 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
             # If there is no attachment, there is a big issue
             discord_attachment: dict = discord_res["attachments"][0]
 
+            # EXIF DateTime is a "YYYY:MM:DD HH:MM:SS" string; parse it before the Media
+            # row exists so a bad value can never orphan one. Naive: USE_TZ is off.
+            try:
+                taken = datetime.datetime.strptime(
+                    image_get_exif.get(ExifTags.Base.DateTime) or "",
+                    "%Y:%m:%d %H:%M:%S",
+                )
+            except (ValueError, TypeError):
+                taken = None
+
             media = Media.objects.create(
                 created=temp_media.created,
                 file=ContentFile(temp_media.file.url, name=temp_media.file.name),
@@ -249,7 +259,7 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
                 CalendarIncidentMedia.objects.create(
                     media_id=media.id,
                     calendar_incident_id=temp_media.metadata["calendar_incident_id"],
-                    timestamp=image_get_exif.get(ExifTags.Base.DateTime, None),
+                    timestamp=taken,
                 )
 
             else:

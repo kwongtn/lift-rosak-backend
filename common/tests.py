@@ -49,7 +49,12 @@ from common.utils import get_date_key, get_default_start_time
 from common.views import GenericUpload
 from generic.schema.enums import DateGroupings
 from incident.enums import PassengerStatus
-from incident.models import LineStatusReport, SocialMediaLink
+from incident.models import (
+    CalendarIncident,
+    CalendarIncidentMedia,
+    LineStatusReport,
+    SocialMediaLink,
+)
 from operation.enums import VehicleStatus
 from operation.models import (
     Line,
@@ -1462,14 +1467,19 @@ class TemporaryMediaConversionTaskTests(TestCase):
             spotting_date=date.today(),
         )
 
-    def _create_temporary_media(self, metadata, filename):
+    def _create_temporary_media(
+        self,
+        metadata,
+        filename,
+        upload_type=TemporaryMediaType.SPOTTING_EVENT,
+    ):
         # Creating a TemporaryMedia fires the post_save receiver, which would
         # hit the real broker — patch out both dispatch calls.
         with patch(SIGNAL_APPLY_ASYNC), patch(SIGNAL_NSFW_APPLY_ASYNC):
             return TemporaryMedia.objects.create(
                 uploader=self.user,
                 file=f"temporary_media/{filename}",
-                upload_type=TemporaryMediaType.SPOTTING_EVENT,
+                upload_type=upload_type,
                 status=TemporaryMediaStatus.PENDING,
                 metadata=metadata,
             )
@@ -1609,6 +1619,53 @@ class TemporaryMediaConversionTaskTests(TestCase):
         self.assertNotIn(ExifTags.Base.GPSInfo, exif)
         self.assertEqual(exif[ExifTags.Base.Make], "TestMake")
         self.assertEqual(exif[ExifTags.Base.DateTime], "2026:10:21 08:30:00")
+
+    def test_calendar_incident_photo_gets_the_parsed_exif_capture_time(self):
+        incident = CalendarIncident.objects.create(
+            title="Photo incident",
+            brief="brief",
+            severity="MINOR",
+            start_datetime=now(),
+        )
+        # The raw EXIF "2026:10:21 08:30:00" is not a valid DateTimeField value, and
+        # a bad one used to fail after the Media row was already created.
+        for label, exif_date, expected in (
+            ("valid", "2026:10:21 08:30:00", datetime(2026, 10, 21, 8, 30)),
+            ("garbage", "not a date", None),
+            ("missing", None, None),
+        ):
+            with self.subTest(label):
+                CalendarIncidentMedia.objects.all().delete()
+                Media.objects.filter(uploader=self.user).delete()
+                exif = Image.Exif()
+                if exif_date:
+                    exif[ExifTags.Base.DateTime] = exif_date
+                    exif[ExifTags.Base.Make] = "TestMake"  # a non-empty EXIF block
+                temp_media = self._create_temporary_media(
+                    metadata={
+                        "mime_type": "image/jpeg",
+                        "calendar_incident_id": incident.id,
+                        "file_name": "photo.jpg",
+                    },
+                    filename="photo.jpg",
+                    upload_type=TemporaryMediaType.INCIDENT_CALENDAR_INCIDENT,
+                )
+
+                self._run_convert_task(
+                    temp_media,
+                    content=_jpeg(exif),
+                    attachment={"id": "discord-attachment-4", "filename": "photo.jpg"},
+                )
+
+                media = Media.objects.get(uploader=self.user)
+                incident_media = CalendarIncidentMedia.objects.get(
+                    calendar_incident=incident
+                )
+                self.assertEqual(incident_media.media_id, media.id)
+                self.assertEqual(incident_media.timestamp, expected)
+                temp_media.refresh_from_db()
+                self.assertEqual(temp_media.status, TemporaryMediaStatus.TO_DELETE)
+                self.assertEqual(temp_media.fail_count, 0)
 
 
 class TemporaryMediaReviewHoldAndCleanupTests(TestCase):
