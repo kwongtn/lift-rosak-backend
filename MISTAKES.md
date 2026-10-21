@@ -10,6 +10,13 @@
 
 ## Traps
 
+### [2026-10-21] spotting: anonymous spottings are listed under a public profile
+
+**Problem**: With `spotting_data_public = true`, `publicUser(id: <firebase uid>) { spottings { id notes vehicle { identification_no } } }` returns the user's anonymous spottings too, so anyone who knows the profile's Firebase UID can link those events to that user (`reporter` is still `null` on them). Seen while testing the GPS gate: `AnonymousLocationVisibilityTests.test_other_paths_to_an_event_are_gated_too` finds the anonymous event under `publicUser.spottings` for a logged-out viewer. The UID is not public (`firebaseId` is admin-only, `shortId` is its first 8 characters), which limits who can ask.
+**Root Cause**: `common.schema.loaders.batch_load_spottings_from_user` filters on `reporter_id` only. Anonymity is enforced per field (`reporter`, and now `location`), not on the event list.
+**Fix**: _Not fixed._ Needs a product decision. For a non-owner viewer, drop `is_anonymous` events in `UserScalar.spottings` (admins may keep them), and keep the owner's own list as it is.
+**Prevention**: When a field exposes a collection keyed by a person, decide per viewer whether anonymous members belong in it, and test the logged-out and other-user cases.
+
 ### [2026-10-21] common: `CalendarIncidentMedia.timestamp` is fed the raw EXIF `DateTime` string, which Django rejects
 
 **Problem**: For an `INCIDENT_CALENDAR_INCIDENT` photo, `convert_temporary_media_to_media_task` creates the join row with `timestamp=image_get_exif.get(ExifTags.Base.DateTime)`. EXIF writes that tag as `"2026:10:21 08:30:00"` (colons in the date), and `DateTimeField` accepts only ISO dates: `CalendarIncidentMedia._meta.get_field("timestamp").get_prep_value("2026:10:21 08:30:00")` raises `ValidationError: value has an invalid format`. The task's broad `except Exception` turns it into `fail_count += 1`, so a phone photo with a capture time would never be linked, and each retry creates another `Media` row (`uploaded_discord` only skips the webhook). Reproduced at field level only; the dev DB holds no incident photos (0 `CalendarIncidentMedia` rows), so production impact is unconfirmed. The frontend does queue these uploads (`incident-card.component.ts`).

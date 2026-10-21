@@ -40,6 +40,11 @@ payload. Non-anonymous events show their position to everyone. See
 `spotting.schema.resolvers.viewer_can_see_location` and
 [components/spotting.md](components/spotting.md).
 
+**Known gap:** `UserScalar.spottings` (`spottings_from_user_loader`) selects by reporter
+only, so a public profile still lists that user's anonymous spottings, which links them to
+the reporter. Their `location` stays hidden from everyone but the reporter and admins.
+See the `MISTAKES.md` entry "anonymous spottings are listed under a public profile".
+
 ## Notes
 
 - Privacy is field-level, in the resolver; the per-user DataLoader
