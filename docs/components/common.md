@@ -36,7 +36,7 @@
 ### Outputs / Events / API Responses
 
 - **GraphQL types** (`common/schema/scalars.py`):
-  - `MediaType`: Relay `Node` over `Media` (`created`, `created_date`, `uploader`, `file`, `width`, `height`).
+  - `MediaType`: Relay `Node` over `Media` (`created`, `created_date`, `uploader`, `file`, `width`, `height`). `created_date` declares `only=["created"]`, so the optimizer loads `created` with the page instead of refetching it per photo; a resolver-backed field that reads a model column must declare it the same way.
   - `MediaScalar`: non-Relay variant that adds `url`, `discord_suffix`, `caption`, `duration`, `content_type`, `file_name`. `spotting` and `incident` reuse it for their media edges.
   - `UserScalar`: `firebase_id` (gated by `IsAdmin`), `short_id`, `spotting_data_public`, `favourite_vehicles` (→ `operation.Vehicle`), `with_most_entries`, `spottings` (DataLoader), `spottings_count`, `media_count`, `spotting_trends`. `spottings` and the four spotting figures (`spottings_count`, `favourite_vehicles`, `with_most_entries`, `spotting_trends`) leave out the user's **anonymous** spottings unless the viewer is that user or an admin (`_events_shown_to_viewer`, built on `spotting.schema.resolvers.viewer_is_owner_or_admin`); `favourite_vehicles`, `with_most_entries`, `spotting_trends` and `spottings_count` are async for that check. `with_most_entries` still raises `IndexError` when the viewer can see no events.
   - `UserVerificationCodeScalar`, `MediasGroupByPeriodScalar`.
@@ -96,7 +96,6 @@
 4. **Permanent failures are invisible.** `RETRY_ELAPSED` is assigned nowhere, so a conversion that gives up stays `PENDING`, indistinguishable from a fresh row.
 5. **`MediaScalar` and `MediaType` declare `width` and `height` as non-null,** but the model fields are nullable. Legacy rows raise resolution errors when exposed. `MediaType.file` had the same problem: 417 of the 2,856 dev rows (dated 2023-10 to 2024-03) have an empty legacy Imgur `file`, so any `medias` page containing one returned `data: null` (`Cannot return null for non-nullable field MediaType.file.`). Resolved by hiding those rows in `MediaType.get_queryset` (the feed lists 2,439 photos, as `mediasGroupByPeriod` counts); the photos themselves stay unreachable on that type, which has no `url` (Discord CDN).
 6. **Feature flag bypasses.** `GenericUpload` ignores `IMAGE_UPLOAD`, and the same flag gates the GC (see Feature 4).
-7. **`MediaType.createdDate` is one query per photo.** The resolver reads `self.created`, which the optimizer's `.only(...)` defers, so `medias(first: 100)` runs 101 queries. `@strawberry_django.field(only=["created"])` on `created_date` brings it to 1.
 
 ## 🧩 Extension Points & Hooks
 

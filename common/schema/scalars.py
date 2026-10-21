@@ -72,7 +72,9 @@ class MediaType(strawberry.relay.Node):
         # `mediasGroupByPeriod` does.
         return queryset.exclude(Q(file="") | Q(file__isnull=True))
 
-    @strawberry_django.field
+    # `only=` keeps `created` out of the optimizer's deferred columns; a bare field
+    # re-fetched it once per photo.
+    @strawberry_django.field(only=["created"])
     def created_date(self) -> str:
         return self.created.date()
 

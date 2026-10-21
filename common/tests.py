@@ -1490,6 +1490,53 @@ class MediaByIdQueryTests(TestCase):
         self.assertEqual(shown_result.data["media"]["id"], shown_id)
 
 
+class MediaCreatedDateQueryTests(TestCase):
+    """`createdDate` reads `created`, which the optimizer must load with the page."""
+
+    def setUp(self):
+        self.user = User.objects.create(
+            firebase_id="created-date-uid", nickname="DateNick"
+        )
+
+    def _page_queries(self, photos: int, fields: str) -> int:
+        Media.objects.all().delete()
+        for i in range(photos):
+            Media.objects.create(
+                uploader=self.user, file=f"date_{i}.jpeg", width=1, height=1
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            result = execute_graphql(
+                f"{{ medias(first: 24, order: {{created: DESC}}) {{"
+                f" edges {{ node {{ {fields} }} }} }} }}"
+            )
+
+        self.assertIsNone(result.errors)
+        self.assertEqual(len(result.data["medias"]["edges"]), photos)
+        return len(queries)
+
+    def test_a_page_costs_the_same_with_or_without_created_date(self):
+        # It used to cost one more query per photo (25 for a page of 24).
+        without = self._page_queries(3, "id width")
+        self.assertEqual(self._page_queries(3, "id width createdDate"), without)
+        self.assertEqual(self._page_queries(6, "id width createdDate"), without)
+
+    def test_created_date_is_still_the_day_the_photo_was_created(self):
+        media = Media.objects.create(
+            uploader=self.user, file="day.jpeg", width=1, height=1
+        )
+
+        result = execute_graphql(
+            "{ medias(first: 1) { edges { node { createdDate } } } }"
+        )
+
+        self.assertIsNone(result.errors)
+        self.assertEqual(
+            result.data["medias"]["edges"],
+            [{"node": {"createdDate": media.created.date().isoformat()}}],
+        )
+
+
 class TemporaryMediaConversionTaskTests(TestCase):
     """Video skips PIL; image path still verifies + links EventMedia."""
 
