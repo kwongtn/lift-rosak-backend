@@ -91,7 +91,9 @@ class MediaType(strawberry.relay.Node):
         # `file` is non-null here, but legacy rows hold '' (or NULL), which fails the
         # whole page that contains one. Hide them from `medias` and `media(id)`, like
         # `mediasGroupByPeriod` does.
-        return queryset.exclude(FILELESS_MEDIA)
+        # The pk is the order of a feed asked for no `order`. An `order` replaces it,
+        # and `MediaOrder` puts the pk back as its last key.
+        return queryset.exclude(FILELESS_MEDIA).order_by("pk")
 
     # `only=` keeps `created` out of the optimizer's deferred columns; a bare field
     # re-fetched it once per photo.

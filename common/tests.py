@@ -1551,6 +1551,101 @@ class MediaCreatedDateQueryTests(TestCase):
         )
 
 
+class MediasFeedPagingTests(TestCase):
+    """Photos that tie on the sort key still page completely, in a fixed order.
+
+    `created` ties are real (26 pairs of dev photos share a millisecond). Postgres may
+    order tied rows differently for every LIMIT/OFFSET, so a page boundary inside a tie
+    skipped one photo and repeated another until the primary key became the last key.
+    """
+
+    TIED = 6
+
+    @classmethod
+    def setUpTestData(cls):
+        user = User.objects.create(firebase_id="paging-uid", nickname="PagingNick")
+
+        def make(name: str) -> Media:
+            return Media.objects.create(
+                uploader=user, file=f"{name}.jpeg", width=1, height=1
+            )
+
+        cls.tied = [make(f"tied_{i}") for i in range(cls.TIED)]
+        cls.older = make("older")
+        cls.newer = make("newer")
+        # `created` and `modified` come from the clock, so the ties are written by
+        # an update, which skips that.
+        tie = datetime(2024, 5, 5, 12, 0, 0)
+        Media.objects.filter(pk__in=[m.pk for m in cls.tied]).update(
+            created=tie, modified=tie
+        )
+        Media.objects.filter(pk=cls.older.pk).update(
+            created=tie - timedelta(days=1), modified=tie - timedelta(days=1)
+        )
+        Media.objects.filter(pk=cls.newer.pk).update(
+            created=tie + timedelta(days=1), modified=tie + timedelta(days=1)
+        )
+
+    @staticmethod
+    def _pk(media: Media) -> str:
+        return str(media.pk)
+
+    def _tied_ids(self) -> list[str]:
+        """The tied photos in the order the tie-break must give them: pk ascending."""
+        return [self._pk(m) for m in sorted(self.tied, key=lambda m: m.pk)]
+
+    def _walk(self, order: str, page_size: int) -> list[str]:
+        query = f"""
+            query ($first: Int!, $after: String) {{
+                medias(first: $first, after: $after{order}) {{
+                    pageInfo {{ hasNextPage endCursor }}
+                    edges {{ node {{ id }} }}
+                }}
+            }}
+        """
+        ids, after = [], None
+        while True:
+            result = execute_graphql(query, {"first": page_size, "after": after})
+            self.assertIsNone(result.errors)
+            page = result.data["medias"]
+            ids += [GlobalID.from_id(e["node"]["id"]).node_id for e in page["edges"]]
+            if not page["pageInfo"]["hasNextPage"]:
+                return ids
+            after = page["pageInfo"]["endCursor"]
+
+    def test_tied_photos_page_completely_across_page_boundaries(self):
+        expected_newest_first = [
+            self._pk(self.newer),
+            *self._tied_ids(),
+            self._pk(self.older),
+        ]
+        for order, expected in (
+            (", order: {created: DESC}", expected_newest_first),
+            (", order: {modified: DESC}", expected_newest_first),
+            (
+                ", order: {created: ASC}",
+                [
+                    self._pk(self.older),
+                    *self._tied_ids(),
+                    self._pk(self.newer),
+                ],
+            ),
+            (", order: {created: DESC, modified: ASC}", expected_newest_first),
+        ):
+            for page_size in (1, 2, 3, 4):
+                with self.subTest(order=order, page_size=page_size):
+                    self.assertEqual(self._walk(order, page_size), expected)
+
+    def test_a_feed_with_no_order_pages_by_primary_key(self):
+        everyone = sorted([*self.tied, self.older, self.newer], key=lambda m: m.pk)
+
+        for page_size in (1, 3):
+            with self.subTest(page_size=page_size):
+                self.assertEqual(
+                    self._walk("", page_size), [self._pk(m) for m in everyone]
+                )
+
+
 class TemporaryMediaConversionTaskTests(TestCase):
     """Video skips PIL; image path still verifies + links EventMedia."""
 
