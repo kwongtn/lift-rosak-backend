@@ -675,6 +675,23 @@ def _media_extension(file_name: str | None, mime_type: str | None) -> str:
     }.get(mime_type, "bin")
 
 
+# Extensions that mark a document as an image when its mime type does not
+# (older Android clients send application/octet-stream for HEIC and AVIF).
+_IMAGE_EXTENSIONS = {
+    "jpg",
+    "jpeg",
+    "png",
+    "gif",
+    "webp",
+    "bmp",
+    "tif",
+    "tiff",
+    "heic",
+    "heif",
+    "avif",
+}
+
+
 async def _download_without_gps(message, context, file_id, file_size) -> bytes | None:
     """The attachment's bytes with their EXIF GPS removed.
 
@@ -730,9 +747,13 @@ async def media(update: Update, context) -> None:
         file_size = message.animation.file_size
     elif message.document:
         document = message.document
-        if (document.mime_type or "").startswith("video/"):
+        mime = document.mime_type or ""
+        if mime.startswith("video/"):
             kind = "video"
-        elif (document.mime_type or "").startswith("image/"):
+        elif (
+            mime.startswith("image/")
+            or _media_extension(document.file_name, None) in _IMAGE_EXTENSIONS
+        ):
             kind = "image"
         else:
             await message.reply_html(text="Unsupported attachment type.")

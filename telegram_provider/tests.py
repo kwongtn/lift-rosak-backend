@@ -1662,6 +1662,28 @@ class MediaHandlerTests(TestCase):
             update.message, "set_reaction", ReactionEmoji.THUMBS_UP
         )
 
+    def test_image_document_with_a_generic_mime_type_is_staged_by_its_extension(self):
+        # Older Android clients send application/octet-stream for HEIC.
+        self.tg_file.download_as_bytearray = AsyncMock(
+            return_value=bytearray(HEIC_STUB)
+        )
+        document = MagicMock(name="document")
+        document.mime_type = "application/octet-stream"
+        document.file_id = "doc-file-id"
+        document.file_name = "IMG_0001.HEIC"
+        document.file_size = 1234
+        update = self._make_update(document=document)
+
+        with self._mock_handlers() as mocks:
+            self._stub_ready(mocks)
+            asyncio.run(media(update, self._context()))
+
+        kwargs = mocks["temp_media"].objects.acreate.await_args.kwargs
+        self.assertEqual(kwargs["status"], TemporaryMediaStatus.PENDING)
+        kwargs["file"].seek(0)
+        self.assertEqual(kwargs["file"].read(), HEIC_STUB)
+        update.message.reply_html.assert_not_awaited()
+
     def test_untrusted_video_awaits_review_and_persists_review_message_id(self):
         update = self._make_update(video=True)
         context = self._context()
