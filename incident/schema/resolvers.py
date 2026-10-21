@@ -37,10 +37,12 @@ from incident.schema.scalars import (
     LineStatusReportEdge,
     LineStatusReportPageInfo,
     LineStatusWeekBucket,
+    PushSubscriptionScalar,
     SocialMediaLinkConnection,
     SocialMediaLinkEdge,
     SocialMediaLinkPageInfo,
 )
+from incident.services import push
 from incident.services.access import get_incident
 from incident.services.errors import IncidentServiceError, LineStatusValidationError
 from incident.services.line_status import (
@@ -1251,3 +1253,14 @@ async def get_line_status_reports(
             end_cursor=edges[-1].cursor if edges else None,
         ),
     )
+
+
+async def get_push_subscription(
+    root, info: Info, token: str
+) -> Optional[PushSubscriptionScalar]:
+    """The caller's subscription for ``token``, so a device can restore its bells.
+
+    Null when the token is unknown or belongs to another account: a token is
+    not proof of ownership of anyone else's subscription.
+    """
+    return await push.get_subscription(info.context.user, token)

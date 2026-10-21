@@ -293,6 +293,19 @@ async def submit_incident(
     return incident
 
 
+def _enqueue_push(incident_id: int) -> None:
+    """Queue the push alert for a newly LIVE incident once the write commits.
+
+    Outside a transaction ``on_commit`` runs at once. ``robust``: a broker
+    outage is logged, not raised, because the approval itself already stands.
+    """
+    from incident.tasks import notify_push_subscribers  # tasks imports services
+
+    transaction.on_commit(
+        lambda: notify_push_subscribers.delay(incident_id), robust=True
+    )
+
+
 async def approve_incident(admin: User, *, incident_id: int) -> CalendarIncident:
     target = await get_incident(incident_id)
 
@@ -308,6 +321,7 @@ async def approve_incident(admin: User, *, incident_id: int) -> CalendarIncident
         target.status = CalendarIncidentStatus.LIVE
         target.rejection_reason = ""
         target.save()
+        _enqueue_push(target.pk)
 
     await sync_to_async(_promote)()
     return target
@@ -323,6 +337,7 @@ async def _merge_revision_into_parent(
             parent = CalendarIncident.objects.select_for_update().get(
                 pk=revision.parent_incident_id
             )
+            was_live = parent.status == CalendarIncidentStatus.LIVE
 
             parent.title = revision.title or ""
             parent.brief = revision.brief or ""
@@ -360,6 +375,8 @@ async def _merge_revision_into_parent(
                 chronology.save()
 
             revision.delete(force_policy=HARD_DELETE)
+            if not was_live:
+                _enqueue_push(parent.pk)
             return parent.pk
 
     parent_pk = await sync_to_async(_sync)()

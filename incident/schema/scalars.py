@@ -171,6 +171,14 @@ class CalendarIncidentCategoryScalar:
     name: str
 
 
+@strawberry_django.type(models.PushSubscription)
+class PushSubscriptionScalar:
+    """The caller's own push registration (``pushSubscription``), never another's."""
+
+    token: str
+    lines: List[Line]
+
+
 def _publicly_visible_subtree(
     rows: List[models.SocialMediaLink],
 ) -> List[models.SocialMediaLink]:

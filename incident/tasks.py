@@ -7,6 +7,7 @@ from typing import Any
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.utils.timezone import now
+from firebase_admin.exceptions import FirebaseError
 from safedelete.models import HARD_DELETE
 
 from common.models import User
@@ -19,6 +20,7 @@ from incident.services.official_posts import (
     ingest_posts,
     latest_post_id,
 )
+from incident.services.push import notify_major_incident
 from rosak.celery import app as celery_app
 from telegram_provider.models import TelegramSocialMediaLinkLog
 from telegram_provider.utils import send_message
@@ -301,6 +303,26 @@ def notify_official_post_links(link_ids: list[int]) -> int:
     notifications actually went out; a failure on one link never aborts the rest.
     """
     return _notify_created_links(WEBHOOK_HANDLE_LABEL, tuple(link_ids))
+
+
+@celery_app.task(
+    bind=True,
+    name="incident.tasks.notify_push_subscribers",
+    autoretry_for=(FirebaseError,),
+    max_retries=3,
+    retry_backoff=True,
+    retry_backoff_max=600,
+)
+def notify_push_subscribers(self, incident_id: int) -> int:
+    """Web-push a newly LIVE MAJOR incident to its lines' subscribers.
+
+    Enqueued by ``approve_incident`` once the approval commits. The service
+    re-checks status and severity itself, so a MINOR approval is a no-op here.
+    A raised ``FirebaseError`` (the whole FCM call failed) is retried at most 3
+    times with backoff; per-token failures come back in the batch, not raised.
+    Returns how many messages FCM accepted.
+    """
+    return notify_major_incident(incident_id)
 
 
 @celery_app.task(name="incident.tasks.ingest_official_posts")

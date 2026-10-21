@@ -706,6 +706,8 @@ type Mutation {
   downvoteSocialMediaLink(socialMediaLinkId: ID!): VoteMutationPayload!
   removeSocialMediaLinkVote(socialMediaLinkId: ID!): VoteMutationPayload!
   extractDataFromUrl(input: ExtractDataInput!): ExtractedIncidentDataScalar!
+  registerPushToken(token: String!, lineIds: [ID!]!): GenericMutationReturn!
+  unregisterPushToken(token: String!): GenericMutationReturn!
   triggerLineVehicleStatusSnapshot(input: TriggerInput!): GenericMutationReturn!
 }
 
@@ -762,6 +764,11 @@ type PassengerStatusCount {
 """Represents a point as `(x, y, z)` or `(x, y)`."""
 scalar Point
 
+type PushSubscriptionScalar {
+  token: String!
+  lines: [Line!]!
+}
+
 type Query {
   lines(filters: LineFilter): [Line!]!
   assets(filters: AssetFilter): [Asset!]!
@@ -807,6 +814,7 @@ type Query {
   linesStatusHistory(lineIds: [ID!]!, dayStartHour: Int = 3, daysAgo: Int = 0): [LineStatusHistory!]!
   lineStatusWeekProfile(lineId: ID!, weeks: Int = 6, dayStartHour: Int = 3): [LineStatusWeekBucket!]!
   lineStatusReports(lineId: ID!, first: Int! = 20, after: String = null): LineStatusReportConnection!
+  pushSubscription(token: String!): PushSubscriptionScalar
   locations(filters: LocationFilter, order: LocationOrder, pagination: OffsetPaginationInput): [Location!]!
   buses(order: BusOrder, pagination: OffsetPaginationInput): [Bus!]!
   locationsCount(filters: LocationFilter): Int!

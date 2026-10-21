@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import strawberry
 import strawberry_django
@@ -15,6 +15,7 @@ from incident.schema.mutations.interactions import (
     SocialMediaLinkMutations,
     VoteMutations,
 )
+from incident.schema.mutations.push import PushMutations
 from incident.schema.orderings import CalendarIncidentOrder
 from incident.schema.resolvers import (
     get_calendar_incident_categories,
@@ -27,6 +28,7 @@ from incident.schema.resolvers import (
     get_network_status_history,
     get_pending_calendar_incidents,
     get_public_social_media_links,
+    get_push_subscription,
     get_social_media_links,
 )
 from incident.schema.scalars import (
@@ -38,6 +40,7 @@ from incident.schema.scalars import (
     LineStatusHourBucket,
     LineStatusReportConnection,
     LineStatusWeekBucket,
+    PushSubscriptionScalar,
     SocialMediaLinkConnection,
     SocialMediaLinkScalar,
     StationIncident,
@@ -109,6 +112,11 @@ class IncidentScalars:
         resolver=get_line_status_reports,
     )
 
+    push_subscription: Optional[PushSubscriptionScalar] = strawberry.field(
+        resolver=get_push_subscription,
+        permission_classes=[IsLoggedIn],
+    )
+
 
 @strawberry.type
 class IncidentMutations(
@@ -117,5 +125,6 @@ class IncidentMutations(
     VoteMutations,
     SocialMediaLinkMutations,
     ExtractionMutations,
+    PushMutations,
 ):
     pass

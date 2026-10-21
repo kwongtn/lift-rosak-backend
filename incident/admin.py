@@ -15,6 +15,7 @@ from incident.models import (
     CalendarIncident,
     CalendarIncidentCategory,
     CalendarIncidentChronology,
+    PushSubscription,
     SocMedAccount,
     StationIncident,
     VehicleIncident,
@@ -216,6 +217,17 @@ class SocMedAccountAdmin(admin.ModelAdmin):
     autocomplete_fields = ("agency",)
 
 
+class PushSubscriptionAdmin(admin.ModelAdmin):
+    list_display = ("token_prefix", "user", "created")
+    list_select_related = ("user",)
+    autocomplete_fields = ("user",)
+    filter_horizontal = ("lines",)
+
+    @admin.display(description="Token")
+    def token_prefix(self, obj: PushSubscription) -> str:
+        return f"{obj.token[:16]}..."
+
+
 admin.site.register(VehicleIncident, VehicleIncidentAdmin)
 admin.site.register(StationIncident, StationIncidentAdmin)
 admin.site.register(CalendarIncident, CalendarIncidentAdmin)
@@ -223,3 +235,4 @@ admin.site.register(CalendarIncidentChronology, CalendarIncidentChronologyAdmin)
 admin.site.register(CalendarIncidentCategory, CalendarIncidentCategoryAdmin)
 admin.site.register(Agency, AgencyAdmin)
 admin.site.register(SocMedAccount, SocMedAccountAdmin)
+admin.site.register(PushSubscription, PushSubscriptionAdmin)

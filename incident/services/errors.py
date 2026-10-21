@@ -32,3 +32,7 @@ class OfficialPostFetchError(IncidentServiceError):
 
 class OfficialPostIngestError(IncidentServiceError):
     """An official post cannot be ingested (e.g. the system author is missing)."""
+
+
+class PushSubscriptionValidationError(IncidentServiceError):
+    """A push registration carries a malformed token or an unknown line id."""

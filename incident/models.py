@@ -707,3 +707,26 @@ class LineStatusReport(TimeStampedModel):
         indexes = [
             models.Index(fields=["line", "created"]),
         ]
+
+
+class PushSubscription(TimeStampedModel):
+    """One browser's FCM registration token and the lines it wants alerts for.
+
+    The token is the identity: registering it again, from any account, re-owns
+    the row instead of duplicating it (``services/push.py::register``).
+    """
+
+    token = models.TextField(unique=True)
+    user = models.ForeignKey(
+        "common.User",
+        on_delete=models.CASCADE,
+        related_name="push_subscriptions",
+    )
+    lines = models.ManyToManyField(
+        "operation.Line",
+        blank=True,
+        related_name="push_subscriptions",
+    )
+
+    def __str__(self) -> str:
+        return f"Push token {self.token[:16]}..."
