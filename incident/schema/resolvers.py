@@ -99,6 +99,9 @@ async def get_calendar_incidents_by_severity_count(
     it has ended, so months are independent: a row is not a running total, and
     January 2025 is not January 2024. ``date`` is the first of the month and
     ``is_long_term`` is null. Months after today are included (planned works).
+    The window bounds are exact dates, so a bound inside a month gives that
+    month a partial count (only the incidents that started inside the window):
+    pass the first and last day of a month for a whole-month figure.
 
     ``DAY``: one row per (day, severity, long or short term) from ``start_date``
     to today or ``end_date``, whichever is earlier. A long-term incident counts on
