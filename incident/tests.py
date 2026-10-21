@@ -85,7 +85,7 @@ from incident.tasks import (
     ingest_official_posts,
     notify_official_post_links,
 )
-from operation.models import Line, Station, Vehicle, VehicleType
+from operation.models import Line, Station, StationLine, Vehicle, VehicleType
 from rosak.celery import official_post_polling_entry
 from rosak.context import ContextLoaders
 from rosak.schema import schema
@@ -812,6 +812,243 @@ class TestCalendarIncidentFilter(TestCase):
         self.assertIn(self.incident_jan, results)
         self.assertIn(self.incident_jun, results)
         self.assertNotIn(self.incident_ongoing_jan, results)
+
+
+class CalendarIncidentWindowAndTagFilterTests(TestCase):
+    """`activeNow`, `upcomingWithinDays`, `lines` and `stations` on `calendarIncidents`.
+
+    Rows sit an hour or more away from the real clock, so a run that straddles
+    midnight cannot flip a verdict; the exact edges are pinned in
+    `CalendarIncidentWindowEdgeTests` with a frozen clock.
+    """
+
+    QUERY = """
+        query CalendarIncidents($filters: CalendarIncidentFilter) {
+            calendarIncidents(filters: $filters) { id }
+        }
+    """
+
+    def setUp(self):
+        self.now = timezone.now()
+        day, hour = timedelta(days=1), timedelta(hours=1)
+        self.open_since_yesterday = self._incident("Open", self.now - day)
+        self.ended_an_hour_ago = self._incident(
+            "Ended", self.now - 2 * day, self.now - hour
+        )
+        self.mid_window = self._incident("Mid", self.now - hour, self.now + hour)
+        self.starts_tomorrow = self._incident(
+            "Tomorrow", self.now + day, self.now + 2 * day
+        )
+        self.starts_in_ten_days = self._incident(
+            "Later", self.now + 10 * day, self.now + 11 * day
+        )
+
+    def _incident(self, title, start, end=None):
+        return CalendarIncident.objects.create(
+            title=title,
+            brief=title,
+            severity=CalendarIncidentSeverity.MINOR,
+            start_datetime=start,
+            end_datetime=end,
+        )
+
+    def _run(self, filters):
+        return execute_graphql(self.QUERY, variables={"filters": filters})
+
+    def _expect(self, filters, *incidents):
+        """Assert the exact multiset of ids, so a duplicated row fails too."""
+        result = self._run(filters)
+        self.assertIsNone(result.errors)
+        self.assertCountEqual(
+            [row["id"] for row in result.data["calendarIncidents"]],
+            [str(incident.id) for incident in incidents],
+        )
+
+    def test_active_now_true_keeps_only_started_and_unfinished_incidents(self):
+        self._expect({"activeNow": True}, self.open_since_yesterday, self.mid_window)
+
+    def test_active_now_false_is_the_exact_complement(self):
+        self._expect(
+            {"activeNow": False},
+            self.ended_an_hour_ago,
+            self.starts_tomorrow,
+            self.starts_in_ten_days,
+        )
+
+    def test_upcoming_within_days_returns_future_starts_inside_the_window(self):
+        self._expect({"upcomingWithinDays": 7}, self.starts_tomorrow)
+        self._expect(
+            {"upcomingWithinDays": 14}, self.starts_tomorrow, self.starts_in_ten_days
+        )
+
+    def test_upcoming_within_days_rejects_values_outside_one_to_sixty(self):
+        for days in (-1, 0, 61):
+            with (
+                self.subTest(days=days),
+                self.assertLogs("strawberry.execution", "ERROR"),
+            ):
+                result = self._run({"upcomingWithinDays": days})
+                self.assertIsNotNone(result.errors)
+                self.assertIn("upcomingWithinDays", result.errors[0].message)
+        for days in (1, 60):
+            with self.subTest(days=days):
+                self.assertIsNone(self._run({"upcomingWithinDays": days}).errors)
+
+    def test_window_filters_union_with_the_ongoing_wrapper(self):
+        open_future = self._incident("Open future", self.now + timedelta(days=20))
+        self._expect(
+            {"upcomingWithinDays": 7, "OR": {"ongoing": True}},
+            self.starts_tomorrow,
+            self.open_since_yesterday,
+            open_future,
+        )
+        self._expect(
+            {"activeNow": True, "OR": {"ongoing": True}},
+            self.open_since_yesterday,
+            self.mid_window,
+            open_future,
+        )
+
+    def test_window_filters_intersect_with_the_date_filter(self):
+        # An open-ended incident reaches any future day; a bounded one does not.
+        in_a_month = (self.now + timedelta(days=30)).date().isoformat()
+        self._expect(
+            {"activeNow": True, "date": {"exact": in_a_month}},
+            self.open_since_yesterday,
+        )
+
+    def test_lines_filter_returns_tagged_incidents_once_each(self):
+        line_a = Line.objects.create(
+            code="TA", display_name="Tagged Line A", display_color="#111111"
+        )
+        line_b = Line.objects.create(
+            code="TB", display_name="Tagged Line B", display_color="#222222"
+        )
+        spare = Line.objects.create(
+            code="TC", display_name="Spare", display_color="#333333"
+        )
+        self.open_since_yesterday.lines.set([line_a])
+        self.mid_window.lines.set([line_b])
+        self.starts_tomorrow.lines.set([line_a, line_b])
+
+        self._expect(
+            {"lines": {"id": str(line_a.id)}},
+            self.open_since_yesterday,
+            self.starts_tomorrow,
+        )
+        # Two lines match by name: the incident tagged with both is still one row.
+        self._expect(
+            {"lines": {"displayName": {"iContains": "Tagged Line"}}},
+            self.open_since_yesterday,
+            self.mid_window,
+            self.starts_tomorrow,
+        )
+        self._expect({"lines": {"id": str(spare.id)}})
+        self._expect(
+            {"lines": {"id": str(line_a.id)}, "activeNow": True},
+            self.open_since_yesterday,
+        )
+
+    def test_stations_filter_returns_tagged_incidents_once_each(self):
+        line = Line.objects.create(
+            code="TS", display_name="Station Line", display_color="#444444"
+        )
+        alpha = Station.objects.create(display_name="Alpha Halt")
+        beta = Station.objects.create(display_name="Beta Halt")
+        for index, station in enumerate((alpha, beta)):
+            StationLine.objects.create(
+                station=station,
+                line=line,
+                display_name=station.display_name,
+                internal_representation=f"TS{index}",
+            )
+        self.open_since_yesterday.stations.set([alpha])
+        self.mid_window.stations.set([alpha, beta])
+
+        self._expect(
+            {"stations": {"id": str(alpha.id)}},
+            self.open_since_yesterday,
+            self.mid_window,
+        )
+        self._expect({"stations": {"id": str(beta.id)}}, self.mid_window)
+        # Both stations match the name and share a line: still one row each.
+        self._expect(
+            {"stations": {"displayName": {"iContains": "Halt"}}},
+            self.open_since_yesterday,
+            self.mid_window,
+        )
+        self._expect(
+            {"stations": {"line": {"id": str(line.id)}}},
+            self.open_since_yesterday,
+            self.mid_window,
+        )
+
+    def test_soft_deleted_incidents_stay_hidden(self):
+        line = Line.objects.create(
+            code="TD", display_name="Deleted Line", display_color="#555555"
+        )
+        self.mid_window.lines.set([line])
+        self.mid_window.delete()
+
+        self._expect({"activeNow": True}, self.open_since_yesterday)
+        self._expect({"lines": {"id": str(line.id)}})
+
+
+class CalendarIncidentWindowEdgeTests(TestCase):
+    """Edges of `activeNow` / `upcomingWithinDays`, with `timezone.now` frozen."""
+
+    NOW = datetime(2030, 6, 15, 12, 0)
+
+    def setUp(self):
+        day, second = timedelta(days=1), timedelta(seconds=1)
+        for title, start, end in (
+            ("starts now", self.NOW, None),
+            ("starts next second", self.NOW + second, None),
+            ("ends now", self.NOW - day, self.NOW),
+            ("ended a second ago", self.NOW - day, self.NOW - second),
+            ("starts at the horizon", self.NOW + 7 * day, None),
+            ("starts past the horizon", self.NOW + 7 * day + second, None),
+        ):
+            CalendarIncident.objects.create(
+                title=title,
+                brief=title,
+                severity=CalendarIncidentSeverity.MINOR,
+                start_datetime=start,
+                end_datetime=end,
+            )
+
+    def _titles(self, filters):
+        with patch("incident.schema.filters.timezone.now", return_value=self.NOW):
+            result = execute_graphql(
+                """
+                query ($filters: CalendarIncidentFilter) {
+                    calendarIncidents(filters: $filters) { title }
+                }
+                """,
+                variables={"filters": filters},
+            )
+        self.assertIsNone(result.errors)
+        return [row["title"] for row in result.data["calendarIncidents"]]
+
+    def test_active_now_includes_an_incident_starting_or_ending_this_instant(self):
+        self.assertCountEqual(
+            self._titles({"activeNow": True}), ["starts now", "ends now"]
+        )
+        self.assertCountEqual(
+            self._titles({"activeNow": False}),
+            [
+                "starts next second",
+                "ended a second ago",
+                "starts at the horizon",
+                "starts past the horizon",
+            ],
+        )
+
+    def test_upcoming_window_excludes_now_and_includes_the_horizon(self):
+        self.assertCountEqual(
+            self._titles({"upcomingWithinDays": 7}),
+            ["starts next second", "starts at the horizon"],
+        )
 
 
 class TestFilterDecorators(TestCase):

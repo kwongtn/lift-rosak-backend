@@ -1,13 +1,16 @@
 from datetime import date, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 import strawberry
 import strawberry_django
 from django.contrib.gis.db.models import Q
+from django.utils import timezone
 from graphql import GraphQLError
+from strawberry.types import Info
+from strawberry_django.filters import process_filters
 
 from incident import models
-from operation.schema.filters import StationFilter, VehicleFilter
+from operation.schema.filters import LineFilter, StationFilter, VehicleFilter
 
 
 class IncidentAbstractFilter:
@@ -46,6 +49,20 @@ class CalendarIncidentDateFilter:
     year: strawberry.Maybe[IntExactInput] = None
 
 
+MAX_UPCOMING_DAYS = 60
+
+
+def _tagged_with(field: str, value: Any, info: Info) -> Q:
+    """Incidents with at least one `field` row matching the nested filter.
+
+    A `pk IN (subquery)` rather than a join on the M2M: a join repeats an incident once
+    per matching row, so two matching lines would return it twice."""
+    queryset, q = process_filters(
+        value, models.CalendarIncident.objects.all(), info, f"{field}__"
+    )
+    return Q(pk__in=queryset.filter(q).values("pk"))
+
+
 @strawberry_django.filter(models.CalendarIncident)
 class CalendarIncidentFilter:
     id: Optional[strawberry.ID]
@@ -58,6 +75,39 @@ class CalendarIncidentFilter:
         date range it started in (see docs/components/incident.md's read-only status-page
         feature opportunity)."""
         return Q(end_datetime__isnull=True) if value else Q(end_datetime__isnull=False)
+
+    @strawberry_django.filter_field
+    def active_now(self, value: bool, prefix) -> Q:
+        """Incidents in effect this instant: started, and not yet ended (or open-ended).
+        `False` is the exact complement (not started yet, or already ended)."""
+        now = timezone.now()
+        if value:
+            return Q(start_datetime__lte=now) & (
+                Q(end_datetime__isnull=True) | Q(end_datetime__gte=now)
+            )
+        return Q(start_datetime__gt=now) | Q(end_datetime__lt=now)
+
+    @strawberry_django.filter_field
+    def upcoming_within_days(self, value: int, prefix) -> Q:
+        """Incidents that have not started yet but start within `value` days: now <
+        start <= now + value. Scheduled works with a known end time never match
+        `ongoing`, so this is how a client asks for "planned works this week"."""
+        if not 1 <= value <= MAX_UPCOMING_DAYS:
+            raise GraphQLError(
+                f"upcomingWithinDays must be between 1 and {MAX_UPCOMING_DAYS}"
+            )
+        now = timezone.now()
+        return Q(
+            start_datetime__gt=now, start_datetime__lte=now + timedelta(days=value)
+        )
+
+    @strawberry_django.filter_field
+    def lines(self, info: Info, value: LineFilter, prefix) -> Q:
+        return _tagged_with("lines", value, info)
+
+    @strawberry_django.filter_field
+    def stations(self, info: Info, value: StationFilter, prefix) -> Q:
+        return _tagged_with("stations", value, info)
 
     @strawberry_django.filter_field
     def date(self, value: CalendarIncidentDateFilter, prefix) -> Q:
