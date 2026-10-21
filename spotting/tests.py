@@ -9,9 +9,10 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 from strawberry import UNSET
+from strawberry.relay import GlobalID
 from strawberry.types.maybe import Some
 
-from common.models import User
+from common.models import Media, User
 from generic.schema.inputs import WebLocationInput
 from operation.enums import VehicleStatus
 from operation.models import (
@@ -29,7 +30,7 @@ from spotting.enums import (
     SpottingVehicleStatus,
     SpottingWheelStatus,
 )
-from spotting.models import Event, EventRead, EventSource, LocationEvent
+from spotting.models import Event, EventMedia, EventRead, EventSource, LocationEvent
 from spotting.schema.inputs import EventInput
 from spotting.tasks import report_spotting_today
 
@@ -1461,6 +1462,149 @@ class AnonymousSpottingsOnProfileTests(TestCase):
 
         _, claim = await self._profile(self.reporter)
         claim.assert_not_called()
+
+
+class AnonymousPhotoUploaderTests(TestCase):
+    """A photo on an anonymous spotting stays visible everywhere, but its uploader (the
+    reporter) is null for all but that user and admins (F043)."""
+
+    EVENTS_QUERY = "{ events { id medias { id uploader { nickname shortId } } } }"
+    FEED_QUERY = """
+        { medias(first: 50) { edges { node { id uploader { nickname shortId } } } } }
+    """
+    NODE_QUERY = "query ($id: ID!) { media(id: $id) { id uploader { nickname } } }"
+    PROFILE_QUERY = """
+        query ($id: ID!) { publicUser(id: $id) { mediaCount } }
+    """
+
+    def setUp(self):
+        self.reporter = User.objects.create(
+            firebase_id="photo-reporter-uid", nickname="Reporter"
+        )
+        self.other = User.objects.create(firebase_id="photo-other-uid", nickname="O")
+        self.admin = User.objects.create(firebase_id="photo-admin-uid")
+        v_type = VehicleType.objects.create(
+            internal_name="PHOTO_TYPE", display_name="Photo type"
+        )
+        vehicle = Vehicle.objects.create(
+            identification_no="Set 93", vehicle_type=v_type
+        )
+        self.anonymous_media = self._photo(vehicle, anonymous=True)
+        self.public_media = self._photo(vehicle, anonymous=False)
+
+    def _photo(self, vehicle, *, anonymous: bool) -> Media:
+        event = Event.objects.create(
+            reporter=self.reporter,
+            vehicle=vehicle,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date(2026, 10, 1),
+            is_anonymous=anonymous,
+        )
+        media = Media.objects.create(
+            uploader=self.reporter, file=f"{event.id}.jpg", width=1, height=1
+        )
+        EventMedia.objects.create(event=event, media=media)
+        return media
+
+    async def _run(self, query, variables, viewer):
+        """`self.admin` is the only admin. Returns (data, admin-claim mock)."""
+        claim = AsyncMock(side_effect=lambda candidate: candidate.id == self.admin.id)
+        with patch("common.schema.loaders.has_admin_claim", new=claim):
+            result = await execute_graphql_async(query, variables, user=viewer)
+        self.assertIsNone(result.errors)
+        return result.data, claim
+
+    @staticmethod
+    def _viewer_name(viewer):
+        return getattr(viewer, "firebase_id", None)
+
+    async def _uploaders(self, path, viewer):
+        """media id -> uploader (None when hidden), via one of the three read paths."""
+        if path == "events.medias":
+            data, claim = await self._run(self.EVENTS_QUERY, {}, viewer)
+            rows = [m for event in data["events"] for m in event["medias"]]
+        elif path == "medias":
+            data, claim = await self._run(self.FEED_QUERY, {}, viewer)
+            rows = [edge["node"] for edge in data["medias"]["edges"]]
+        else:
+            rows = []
+            for media in (self.anonymous_media, self.public_media):
+                gid = str(GlobalID("MediaType", str(media.id)))
+                data, claim = await self._run(self.NODE_QUERY, {"id": gid}, viewer)
+                rows.append(data["media"])
+        uploaders = {}
+        for row in rows:
+            media_id = row["id"]
+            if path != "events.medias":  # Relay global id -> raw uuid
+                media_id = GlobalID.from_id(media_id).node_id
+            uploaders[media_id] = row["uploader"]
+        return uploaders, claim
+
+    async def test_the_uploader_is_hidden_on_every_path_except_for_uploader_and_admin(
+        self,
+    ):
+        anonymous, public = str(self.anonymous_media.id), str(self.public_media.id)
+        viewers = (
+            (None, False),
+            (self.other, False),
+            (self.reporter, True),
+            (self.admin, True),
+        )
+        for path in ("events.medias", "medias", "media(id)"):
+            for viewer, sees_uploader in viewers:
+                with self.subTest(path=path, viewer=self._viewer_name(viewer)):
+                    uploaders, _ = await self._uploaders(path, viewer)
+
+                    # Both photos are listed for everyone: only the name is hidden.
+                    self.assertEqual(set(uploaders), {anonymous, public})
+                    self.assertEqual(uploaders[anonymous] is not None, sees_uploader)
+                    self.assertEqual(uploaders[public]["nickname"], "Reporter")
+
+    async def test_admin_claim_is_looked_up_once_per_request(self):
+        vehicle = await Vehicle.objects.aget(identification_no="Set 93")
+        await sync_to_async(self._photo)(vehicle, anonymous=True)
+
+        for path in ("events.medias", "medias"):
+            with self.subTest(path=path):
+                _, claim = await self._uploaders(path, self.other)
+                self.assertEqual(claim.await_count, 1)
+
+        # No Firebase call at all when no one needs the answer.
+        for viewer in (None, self.reporter):
+            _, claim = await self._uploaders("medias", viewer)
+            claim.assert_not_called()
+
+    async def test_a_public_photo_costs_no_admin_lookup(self):
+        data, claim = await self._run(
+            self.NODE_QUERY,
+            {"id": str(GlobalID("MediaType", str(self.public_media.id)))},
+            self.other,
+        )
+
+        self.assertEqual(data["media"]["uploader"]["nickname"], "Reporter")
+        claim.assert_not_called()
+
+    def test_the_media_feed_cannot_be_sorted_by_uploader(self):
+        # Sorted by uploader, a hidden-uploader photo lands between the photos of
+        # the same (visible) user, which names the reporter by inference.
+        from rosak.schema import schema
+
+        self.assertNotIn("uploader", schema._schema.type_map["MediaOrder"].fields)
+
+    async def test_profile_media_count_leaves_out_anonymous_photos_for_strangers(self):
+        for viewer, expected in (
+            (None, 1),
+            (self.other, 1),
+            (self.reporter, 2),
+            (self.admin, 2),
+        ):
+            with self.subTest(viewer=self._viewer_name(viewer)):
+                data, _ = await self._run(
+                    self.PROFILE_QUERY, {"id": self.reporter.firebase_id}, viewer
+                )
+
+                self.assertEqual(data["publicUser"]["mediaCount"], expected)
 
 
 class TestFilterDecorators(TestCase):

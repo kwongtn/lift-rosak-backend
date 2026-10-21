@@ -5,6 +5,7 @@ import strawberry
 import strawberry_django
 from asgiref.sync import sync_to_async
 from django.db.models import Count, F, Q
+from strawberry.permission import BasePermission, PermissionExtension
 from strawberry.types import Info
 
 from common import models
@@ -21,13 +22,32 @@ from operation import models as operation_models
 from rosak.permissions import IsAdmin
 from spotting import models as spotting_models
 from spotting.enums import SpottingEventType
-from spotting.schema.resolvers import viewer_is_owner_or_admin
+from spotting.schema.resolvers import viewer_can_see_uploader, viewer_is_owner_or_admin
+
+
+class CanSeeUploader(BasePermission):
+    async def has_permission(self, source, info: Info, **kwargs) -> bool:
+        return await viewer_can_see_uploader(info, source.id)
+
+
+def uploader_field():
+    """`Media.uploader` for every type over Media: a photo on an anonymous spotting
+    keeps its file but resolves its uploader to null (not an error, so the photo still
+    renders) for all but that user and admins.
+    """
+    return strawberry_django.field(
+        extensions=[
+            PermissionExtension(
+                [CanSeeUploader()], use_directives=False, fail_silently=True
+            )
+        ]
+    )
 
 
 @strawberry_django.type(models.Media, pagination=True)
 class MediaScalar:
     id: strawberry.ID
-    uploader: "UserScalar"
+    uploader: Optional["UserScalar"] = uploader_field()
     file: Optional[strawberry_django.DjangoImageType]
     width: int
     height: int
@@ -60,7 +80,7 @@ class MediasGroupByPeriodScalar:
 class MediaType(strawberry.relay.Node):
     id: strawberry.relay.NodeID[str]
     created: datetime
-    uploader: "UserScalar"
+    uploader: Optional["UserScalar"] = uploader_field()
     file: strawberry_django.DjangoFileType
     width: int
     height: int
@@ -210,8 +230,14 @@ class UserScalar:
         ).acount()
 
     @strawberry_django.field
-    async def media_count(self) -> int:
-        return await common_models.Media.objects.filter(uploader_id=self.id).acount()
+    async def media_count(self, info: Info) -> int:
+        medias = common_models.Media.objects.filter(uploader_id=self.id)
+        # Photos on anonymous spottings count only for the uploader and admins, like
+        # the spotting counts, so the number does not give away a hidden photo.
+        if not await viewer_is_owner_or_admin(info, self.id):
+            medias = medias.exclude(eventmedia__event__is_anonymous=True)
+
+        return await medias.acount()
 
     @strawberry_django.field
     async def spotting_trends(

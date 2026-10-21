@@ -64,6 +64,22 @@ async def batch_load_media_from_event(keys):
     return [event_dict.get(key, []) for key in keys]
 
 
+async def batch_load_anonymous_uploader_from_media(keys):
+    """media id -> uploader id, for media attached to an anonymous event; else None.
+
+    One query however many photos a request lists. It only says WHOSE photo it is;
+    the viewer check stays in `viewer_can_see_uploader`.
+    """
+    rows = {
+        media_id: uploader_id
+        async for media_id, uploader_id in EventMedia.objects.filter(
+            media_id__in=keys, event__is_anonymous=True
+        ).values_list("media_id", "media__uploader_id")
+    }
+
+    return [rows.get(key) for key in keys]
+
+
 SpottingContextLoaders = {
     "is_read_from_event_loader": DataLoader(load_fn=batch_load_is_read_from_event),
     "location_event_from_event_loader": DataLoader(
@@ -74,4 +90,7 @@ SpottingContextLoaders = {
         load_fn=batch_load_media_count_from_event
     ),
     "media_from_event_loader": DataLoader(load_fn=batch_load_media_from_event),
+    "anonymous_uploader_from_media_loader": DataLoader(
+        load_fn=batch_load_anonymous_uploader_from_media
+    ),
 }

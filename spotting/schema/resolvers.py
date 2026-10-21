@@ -31,3 +31,18 @@ async def viewer_can_see_location(info: Info, event: Event) -> bool:
         return True
 
     return await viewer_is_owner_or_admin(info, event.reporter_id)
+
+
+async def viewer_can_see_uploader(info: Info, media_id) -> bool:
+    """A photo on an anonymous spotting stays visible, but names its uploader (who is
+    the reporter) only to that user and admins.
+
+    Every GraphQL type that exposes `Media.uploader` must go through this.
+    """
+    uploader_id = await info.context.loaders["spotting"][
+        "anonymous_uploader_from_media_loader"
+    ].load(media_id)
+    if uploader_id is None:
+        return True
+
+    return await viewer_is_owner_or_admin(info, uploader_id)

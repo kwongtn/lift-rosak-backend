@@ -587,14 +587,13 @@ input MarkEventAsReadInput {
 }
 
 input MediaOrder {
-  uploader: Ordering
   created: Ordering
   modified: Ordering
 }
 
 type MediaScalar {
   id: ID!
-  uploader: UserScalar!
+  uploader: UserScalar
   file: DjangoImageType
   width: Int!
   height: Int!
@@ -610,7 +609,7 @@ type MediaType implements Node {
   """The Globally Unique ID of this object"""
   id: ID!
   created: DateTime!
-  uploader: UserScalar!
+  uploader: UserScalar
   file: DjangoFileType!
   width: Int!
   height: Int!
