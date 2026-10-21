@@ -765,6 +765,7 @@ type Query {
     """Returns the items in the list that come after the specified cursor."""
     last: Int = null
   ): MediaTypeConnection!
+  media(id: ID!): MediaType
   user: UserScalar!
   myVotesCast: Int!
   publicUser(id: ID!): UserScalar

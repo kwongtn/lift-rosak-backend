@@ -1,9 +1,11 @@
 from typing import List, Optional
+from uuid import UUID
 
 import strawberry
 import strawberry_django
 from django.contrib.postgres.aggregates import ArrayAgg
 from django.db.models import Count, F, Q
+from strawberry.relay import GlobalID
 from strawberry.types import Info
 from strawberry_django.relay import DjangoListConnection
 
@@ -23,6 +25,26 @@ from rosak.permissions import IsLoggedIn
 @strawberry.type
 class CommonScalars:
     medias: DjangoListConnection[MediaType] = strawberry_django.connection()
+
+    @strawberry.field
+    async def media(self, info: Info, id: strawberry.ID) -> Optional[MediaType]:
+        """One photo by the Relay global id that `medias` nodes expose.
+
+        Resolves through `MediaType.resolve_node`, which starts from the same
+        default queryset and `MediaType.get_queryset` hook as the `medias`
+        connection, so it never returns a row the feed hides. A missing,
+        malformed or other-type id gives null, not an error: a stale shared
+        link is "not found".
+        """
+        try:
+            global_id = GlobalID.from_id(id)
+            UUID(global_id.node_id)  # a non-UUID pk would make the ORM raise
+        except ValueError:
+            return None
+        if global_id.type_name != MediaType.__strawberry_definition__.name:
+            return None
+
+        return await global_id.resolve_node(info)
 
     @strawberry.field(permission_classes=[IsLoggedIn])
     async def user(self, info: Info) -> UserScalar:

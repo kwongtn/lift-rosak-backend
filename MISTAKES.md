@@ -10,6 +10,13 @@
 
 ## Traps
 
+### [2026-10-21] common: `MediaType.createdDate` costs one query per photo
+
+**Problem**: `medias(first: 100) { edges { node { id createdDate … } } }` runs 101 SQL queries; with `createdDate` removed the same page runs 1. Measured on the dev DB: about 700 ms against about 160 ms for 100 photos, 25 queries for 24 photos. `media(id)` pays one extra query for the same reason. The gallery's feed query selects `createdDate`.
+**Root Cause**: `MediaType.created_date` is a plain `@strawberry_django.field` method that reads `self.created`. The optimizer's `.only(...)` only knows the model fields the selection names (`id`, `file`, `width`, `height`, `uploader`), so `created` is deferred and every node refetches it (`SELECT created, id … LIMIT 21`).
+**Fix**: _Not fixed._ `@strawberry_django.field(only=["created"])` on `created_date` removes it (verified: 1 query for 100 photos). No schema change.
+**Prevention**: A resolver that reads a model field must declare it with `only=` / `select_related=` / `prefetch_related=`. When adding a resolver-backed field to a connection node, read the `SQLPanel` subtitle in the local response (`debugToolbar`, `DEBUG=True`) and compare 1 node with 24.
+
 ### [2026-10-21] operation: the dev DB holds `Line.telegram_channel_id` uniqueness as a bare unique index, so name-based `DROP CONSTRAINT` fails
 
 **Problem**: `manage.py migrate` of a plain `AlterField(unique=True -> False)` on `Line.telegram_channel_id` failed on the dev DB with `ProgrammingError: constraint "operation_line_telegram_channel_id_key" of relation "operation_line" does not exist`, while the test DB (built by migrations) applied it fine.
@@ -262,8 +269,11 @@
 ### [2026-08-24] common: `Media` scalar non-null mismatch
 
 **Problem**: `MediaScalar`/`MediaType` (`common/schema/scalars.py`) declare `width: int` / `height: int` non-null while `Media.width`/`height` are `null=True, default=None`, so exposing more rows raises non-null resolution errors on legacy media.
+
+- **Recurrence 2026-10-21, `MediaType.file`.** It is non-null, but `Media.file` is `''` on 417 of the 2,856 rows of the dev DB (restored from a dump; production unverified): all dated 2023-10-21 to 2024-03-13, all with the Discord `file_id` / `file_name` set (the cause is presumably a failed legacy Imgur write; unverified). Any `medias` page that contains one returns `data: null` with `Cannot return null for non-nullable field MediaType.file.` The newest such row is at offset 650 of `created DESC`, so the feed fails from page 28 at 24 per page (page 7 at 100). The new `media(id)` returns `null` plus the same error for such a row, because it uses the same type. `MediaType` has no `url`, so the Discord CDN address (`Media.url`, which `MediaScalar` does expose) is out of reach. The gallery frontend already null-checks `file`.
+
 **Root Cause**: Scalar nullability was not matched to the model.
-**Fix**: _Not fixed._ Make the scalar widths `Optional[int]` or backfill dimensions.
+**Fix**: _Not fixed._ Make the scalar widths `Optional[int]` or backfill dimensions. For `file`: `Optional[DjangoFileType]` plus a `url` field on `MediaType`. The nullability change is a breaking change by graphql-core's rules, so it needs an entry in `EXPECTED_ACCEPTED_BREAKING_CHANGES` (`rosak/tests/test_schema_snapshot.py`, count pinned) and a regenerated snapshot.
 **Prevention**: Contract test asserting model nullability matches Strawberry scalar nullability.
 
 ### [2026-08-24] admin: ModelAdmin configuration defects

@@ -13,6 +13,7 @@
 
 - **GraphQL queries** (`common/schema/schema.py`, mixed into root `Query`):
   - `medias`: `DjangoListConnection[MediaType]` with `MediaOrder`. No `filters=` argument.
+  - `media(id: ID!)`: one `MediaType` by the **Relay global id** that `medias` nodes expose (base64 `MediaType:<uuid>`; a raw UUID is not accepted). Nullable: a missing, malformed, non-UUID or other-type id returns `null`, never an error. It resolves through `MediaType.resolve_node`, so it starts from the same default queryset and `MediaType.get_queryset` hook as the connection. Neither applies a filter today, so every `Media` row is visible; a future visibility rule belongs in `MediaType.get_queryset`, where both entry points pick it up.
   - `user`: current viewer (`IsLoggedIn`).
   - `my_votes_cast`: count of the caller's `Vote` rows across all content types (`IsLoggedIn`).
   - `public_user(id)`.
@@ -92,8 +93,9 @@
 2. **Unbounded self-re-enqueue.** `check_temporary_media_nsfw`, `convert_temporary_media_to_media_task`, and `add_width_height_to_media_task` each call `time.sleep(2)` and `apply_async` on themselves when the row is not yet visible. There is no retry cap, which breaks the bounded-retry rule in `AGENTS.md`.
 3. **Admin breakage.** `TemporaryMediaAdmin.prettified_metadata` calls `self.prettify_json()`, but the class inherits plain `admin.ModelAdmin` and the method never returns, so the page raises `AttributeError`. `search_fields = ["uploader"]` on `MediaAdmin` and `TemporaryMediaAdmin` needs a real lookup path such as `uploader__nickname`, or search raises `FieldError`.
 4. **Permanent failures are invisible.** `RETRY_ELAPSED` is assigned nowhere, so a conversion that gives up stays `PENDING`, indistinguishable from a fresh row.
-5. **`MediaScalar` and `MediaType` declare `width` and `height` as non-null,** but the model fields are nullable. Legacy rows raise resolution errors when exposed.
+5. **`MediaScalar` and `MediaType` declare `width` and `height` as non-null,** but the model fields are nullable. Legacy rows raise resolution errors when exposed. `MediaType.file` has the same problem: 417 of the 2,856 dev rows (dated 2023-10 to 2024-03) have an empty legacy Imgur `file`, so any `medias` page containing one returns `data: null` (`Cannot return null for non-nullable field MediaType.file.`), and `media(id)` returns `null` plus that error for such a row. `MediaType` has no `url` (Discord CDN), so these photos have no usable address on that type.
 6. **Feature flag bypasses.** `GenericUpload` ignores `IMAGE_UPLOAD`, and the same flag gates the GC (see Feature 4).
+7. **`MediaType.createdDate` is one query per photo.** The resolver reads `self.created`, which the optimizer's `.only(...)` defers, so `medias(first: 100)` runs 101 queries. `@strawberry_django.field(only=["created"])` on `created_date` brings it to 1.
 
 ## 🧩 Extension Points & Hooks
 

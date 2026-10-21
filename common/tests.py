@@ -1,6 +1,7 @@
 import io
 from datetime import date, timedelta
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
@@ -11,6 +12,7 @@ from django.test import TestCase
 from django.utils.timezone import now
 from PIL import Image
 from strawberry import UNSET
+from strawberry.relay import GlobalID
 from strawberry.types.maybe import Some
 
 from common.enums import (
@@ -30,7 +32,7 @@ from common.models import (
     Vote,
 )
 from common.schema.inputs import UserInput
-from common.schema.scalars import UserScalar
+from common.schema.scalars import MediaType, UserScalar
 from common.tasks import (
     cleanup_expired_verification_codes,
     cleanup_temporary_media_task,
@@ -1080,6 +1082,131 @@ class TestDjangoListConnection(TestCase):
         self.assertFalse(page_info["hasPreviousPage"])
         self.assertIsNotNone(page_info["startCursor"])
         self.assertIsNotNone(page_info["endCursor"])
+
+
+class MediaByIdQueryTests(TestCase):
+    """`media(id:)` looks up one photo by the Relay id the `medias` nodes expose.
+
+    It resolves through the same `MediaType` node path as the connection, so it
+    must agree with `medias` about which rows exist.
+    """
+
+    QUERY = """
+        query ($id: ID!) {
+            media(id: $id) {
+                id
+                createdDate
+                width
+                height
+                file { url }
+                uploader { nickname }
+            }
+        }
+    """
+
+    def setUp(self):
+        self.user = User.objects.create(
+            firebase_id="media-by-id-uid", nickname="PhotoNick"
+        )
+
+    async def _make_media(self, name: str) -> Media:
+        return await Media.objects.acreate(
+            uploader=self.user,
+            file=f"{name}.jpeg",
+            width=3000,
+            height=4000,
+        )
+
+    async def _feed_ids(self) -> list[str]:
+        """Ids as `medias` exposes them, newest first."""
+        result = await execute_graphql_async(
+            "{ medias(first: 50, order: {created: DESC}) { edges { node { id } } } }"
+        )
+        self.assertIsNone(result.errors)
+        return [edge["node"]["id"] for edge in result.data["medias"]["edges"]]
+
+    async def test_found_by_the_id_the_feed_exposes(self):
+        media = await self._make_media("found")
+        # Relay global id (base64 "MediaType:<uuid>"), not the raw database id.
+        relay_id = str(GlobalID("MediaType", str(media.id)))
+        self.assertEqual((await self._feed_ids())[0], relay_id)
+        self.assertNotEqual(relay_id, str(media.id))
+
+        result = await execute_graphql_async(self.QUERY, {"id": relay_id})
+
+        self.assertIsNone(result.errors)
+        self.assertEqual(
+            result.data["media"],
+            {
+                "id": relay_id,
+                "createdDate": media.created.date().isoformat(),
+                "width": 3000,
+                "height": 4000,
+                "file": {"url": "https://i.imgur.com/found.jpeg"},
+                "uploader": {"nickname": "PhotoNick"},
+            },
+        )
+
+    async def test_unknown_id_is_null_not_an_error(self):
+        result = await execute_graphql_async(
+            self.QUERY, {"id": str(GlobalID("MediaType", str(uuid4())))}
+        )
+
+        self.assertIsNone(result.errors)
+        self.assertIsNone(result.data["media"])
+
+    async def test_unusable_ids_are_null_not_an_error(self):
+        media = await self._make_media("unusable")
+        bad_ids = {
+            "empty": "",
+            "not a global id": "not-a-global-id",
+            "raw database id": str(media.id),
+            "other node type": str(GlobalID("UserScalar", str(media.id))),
+            "pk is not a uuid": str(GlobalID("MediaType", "42")),
+        }
+
+        for label, bad_id in bad_ids.items():
+            with self.subTest(label):
+                result = await execute_graphql_async(self.QUERY, {"id": bad_id})
+
+                self.assertIsNone(result.errors)
+                self.assertIsNone(result.data["media"])
+
+    async def test_agrees_with_the_feed_about_which_rows_exist(self):
+        for name in ("a", "b", "c"):
+            await self._make_media(name)
+        # Legacy rows with no imgur file stay in the feed, so they stay here too.
+        await Media.objects.acreate(uploader=self.user, width=1, height=1)
+        feed_ids = await self._feed_ids()
+        self.assertEqual(len(feed_ids), 4)
+
+        for feed_id in feed_ids:
+            with self.subTest(feed_id):
+                result = await execute_graphql_async(
+                    "query ($id: ID!) { media(id: $id) { id } }", {"id": feed_id}
+                )
+
+                self.assertIsNone(result.errors)
+                self.assertEqual(result.data["media"], {"id": feed_id})
+
+    async def test_a_media_type_visibility_rule_hides_the_row_from_both(self):
+        hidden = await self._make_media("hidden")
+        shown = await self._make_media("shown")
+        hidden_id = str(GlobalID("MediaType", str(hidden.id)))
+        shown_id = str(GlobalID("MediaType", str(shown.id)))
+
+        def hide(cls, queryset, info, **kwargs):
+            return queryset.exclude(pk=hidden.pk)
+
+        with patch.object(MediaType, "get_queryset", classmethod(hide), create=True):
+            feed_ids = await self._feed_ids()
+            hidden_result = await execute_graphql_async(self.QUERY, {"id": hidden_id})
+            shown_result = await execute_graphql_async(self.QUERY, {"id": shown_id})
+
+        self.assertEqual(feed_ids, [shown_id])
+        self.assertIsNone(hidden_result.errors)
+        self.assertIsNone(hidden_result.data["media"])
+        self.assertEqual(shown_result.data["media"]["id"], shown_id)
 
 
 class TemporaryMediaConversionTaskTests(TestCase):
