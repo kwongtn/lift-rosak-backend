@@ -1,6 +1,8 @@
 import copy
+import importlib
 import json
 from datetime import date
+from types import SimpleNamespace
 
 from asgiref.sync import async_to_sync
 from django.contrib import admin
@@ -8,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection
+from django.db.migrations.loader import MigrationLoader
 from django.test import RequestFactory, TestCase, modify_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
@@ -909,6 +912,67 @@ class AssetStatusGraphQLTests(TestCase):
 
         self.assertIsNotNone(result.errors)
         self.assertIsNone(result.data)
+
+
+class AssetStatusMigrationGuardTests(TestCase):
+    """Migration 0019 must refuse rows a TextChoicesField could not read back."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.station = Station.objects.create(
+            display_name="KL Sentral", location=Point(101.6869, 3.1341)
+        )
+        # Creating the asset also writes its simple_history row.
+        cls.asset = Asset.objects.create(
+            station=cls.station,
+            officialid="LIFT-01",
+            asset_type=AssetType.LIFT,
+            status=AssetStatus.IN_OPERATION,
+        )
+
+    def run_guard(self):
+        migration = importlib.import_module(
+            "operation.migrations.0019_asset_status_text_choices_field"
+        )
+        # The migration reads the models as they stood at 0018, where status is a
+        # plain CharField: the live TextChoicesField would raise on the very rows
+        # the guard looks for.
+        apps_at_0018 = (
+            MigrationLoader(None)
+            .project_state(("operation", "0018_line_telegram_channel_id_not_unique"))
+            .apps
+        )
+        migration.refuse_statuses_outside_the_enum(
+            apps_at_0018, SimpleNamespace(connection=connection)
+        )
+
+    def corrupt(self, table: str, status: str):
+        # Raw SQL: the model refuses to write the value the guard exists to catch.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"UPDATE {table} SET status = %s WHERE id = %s",
+                [status, self.asset.pk],
+            )
+
+    def test_passes_when_every_status_is_in_the_enum(self):
+        self.run_guard()
+
+    def test_refuses_an_asset_status_outside_the_enum(self):
+        self.corrupt("operation_asset", "ACTIVE")
+
+        with self.assertRaises(ValueError) as caught:
+            self.run_guard()
+
+        self.assertIn("{'operation_asset': {'ACTIVE': 1}}", str(caught.exception))
+
+    def test_refuses_a_blank_historical_asset_status(self):
+        # TextChoicesField reads "" back as None, which AssetStatus! cannot return.
+        self.corrupt("operation_historicalasset", "")
+
+        with self.assertRaises(ValueError) as caught:
+            self.run_guard()
+
+        self.assertIn("{'operation_historicalasset': {'': 1}}", str(caught.exception))
 
 
 class TestFilterDecorators(TestCase):
