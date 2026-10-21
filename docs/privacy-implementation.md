@@ -27,9 +27,9 @@
 
 | Tier                                           | Fields                                                                                                                            |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Always public                                  | `nickname`, `shortId` (first 8 chars of the Firebase UID), `mediaCount`, and `spottingsCount`, `spottingTrends`, `withMostEntries`, `favouriteVehicles` without anonymous spottings |
+| Always public                                  | `nickname`, `shortId` (first 8 chars of the Firebase UID), `mediaCount`, and `spottingsCount`, `spottingTrends`, `withMostEntries`, `favouriteVehicles` without anonymous spottings (`mediaCount` also leaves out the user's photos on them) |
 | Opt-in (`spotting_data_public=true`, or owner) | `spottings` — date, notes, vehicle details, media count, status                                                                   |
-| Owner and admins only                          | the anonymous spottings in `spottings`, and in the four figures above                                                             |
+| Owner and admins only                          | the anonymous spottings in `spottings`, and in the four figures above; the `uploader` of a photo on an anonymous spotting (the photo itself is public) |
 | Never exposed                                  | email; full Firebase UID (`firebase_id` is `IsAdmin`-only)                                                                        |
 
 ## Anonymous spottings
@@ -49,10 +49,25 @@ F043). They share one per-viewer filter, `_events_shown_to_viewer`
 (`common/schema/scalars.py`), built on `spotting.schema.resolvers.viewer_is_owner_or_admin`.
 The owner's own `user { … }` is unchanged. Tests: `AnonymousSpottingsOnProfileTests`.
 
-**Known gaps:** `withMostEntries` raises `IndexError` for a viewer who can see no events, so
-a user whose spottings are all anonymous fails it for strangers (as a user with no spottings
-always has). `mediaCount` and `Media.uploader` do not look at `EventMedia`, so a photo of an
-anonymous spotting still names its uploader in the gallery.
+**Photos.** A photo attached to an anonymous spotting (an `EventMedia` row) stays visible
+everywhere, but its `uploader` (the reporter: the upload task enforces `uploader == reporter`)
+resolves to `null` for everyone except that user and admins (decision F043). Both GraphQL types
+over `Media` use the same gate, `common.schema.scalars.uploader_field()` (a fail-silent
+`PermissionExtension` around `CanSeeUploader`), so `events { medias }`, `medias`, `media(id)`
+and the incident photo edges agree; `uploader` is nullable on `MediaScalar` and `MediaType`.
+`spotting.schema.resolvers.viewer_can_see_uploader` reads `anonymous_uploader_from_media_loader`
+(media id to uploader id for media of an anonymous event: one query per request) and then
+`viewer_is_owner_or_admin`, so a request without a hidden photo makes no Firebase call.
+Two side channels are closed with it: `UserScalar.mediaCount` leaves those photos out for other
+viewers, and `MediaOrder` has no `uploader` (sorting by it would group a hidden photo between
+the same user's visible ones). Tests: `AnonymousPhotoUploaderTests`.
+
+**Empty views.** `withMostEntries` is `null` (it is nullable) when the viewer can see no events,
+so a profile whose spottings are all anonymous loads for a stranger; `spottingTrends(freeRange)`
+falls back to its default start for an empty range.
+
+**Known gaps:** none. The admin claim is still a live, uncached Firebase call per viewer per
+request wherever `viewer_is_owner_or_admin` needs it (see `MISTAKES.md`).
 
 ## Notes
 
