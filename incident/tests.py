@@ -2502,6 +2502,12 @@ class WeekProfileBucketingTests(SimpleTestCase):
     def _entry(status, at):
         return ReportEntry(status=status, created=at)
 
+    def test_use_tz_stays_off_because_slots_read_the_stored_clock_as_local(self):
+        # ``created`` is naive Kuala Lumpur time and ``bucket_week_profile`` (like
+        # ``bucket_hourly``) reads its weekday and hour as-is. Stored UTC values
+        # would shift every slot, so a settings flip must fail here, not in a chart.
+        self.assertFalse(settings.USE_TZ)
+
     def test_reports_land_in_their_weekday_and_hour_slot(self):
         entries = [
             self._entry(PassengerStatus.CROWDED, datetime(2026, 1, 5, 8, 15)),

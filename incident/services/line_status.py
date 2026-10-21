@@ -629,6 +629,8 @@ async def load_line_status_week_profile(
     resolved_now = now or timezone.now()
     # ``.order_by()`` clears the model's ``-created`` default: a tally ignores
     # order. ``values_list`` skips hydrating each row's notes text.
+    # shortcut: tallied in Python over every row of the window (up to 12 weeks of
+    # one line), move to a DB-side Count by status, hour and weekday if volume grows.
     rows = (
         LineStatusReport.objects.filter(
             line_id=line_id,
