@@ -10,7 +10,8 @@ query (``_service_day_entries``): one line (``load_line_status_history``), the
 whole network at once (``load_network_status_history``), and N lines in a
 single query (``load_lines_status_history``). All three bucket through
 ``bucket_hourly`` and all three cost ONE query however many rows or lines they
-cover.
+cover. Each reads the current service day by default, or the one that started
+``days_ago`` service days earlier.
 """
 
 from collections.abc import Iterable, Mapping, Sequence
@@ -46,6 +47,10 @@ _MAX_PULSE_LINKS = 5
 # has ~a dozen lines, so 64 is generous), and it keeps a client bug that sends
 # the whole id space from turning into a full-table scan of the service day.
 MAX_LINES_PER_HISTORY_REQUEST = 64
+# How far back ``daysAgo`` may reach: eight whole weeks, so a client can still
+# line up "the same weekday, N weeks ago" while each read stays one day's slice
+# of the table.
+MAX_HISTORY_DAYS_AGO = 56
 
 # Ordinal = enum declaration order.
 SEVERITY_RANK: dict[str, int] = {
@@ -297,15 +302,18 @@ def bucket_hourly(
     data"; once it has one, all ``HOURS_IN_SERVICE_DAY`` hours from ``day_start``
     through 02:00 are emitted — empty hours with ``count=0`` and
     ``dominant_status=None`` so a chart always gets its full set of labels.
-    Entries outside ``[day_start, now]`` are ignored. ``dominant_status`` is the
-    most frequent status in the hour; ties go to the most severe per
+    Entries outside ``[day_start, now]`` are ignored, and so is one at or after
+    ``day_start`` + 24h: that instant opens the NEXT service day, which matters
+    for a past day, where ``now`` lies beyond the day's end. ``dominant_status``
+    is the most frequent status in the hour; ties go to the most severe per
     ``SEVERITY_RANK``. ``status_counts`` carries the hour's per-status tallies
     (raw status values) so callers can render a segmented bar; it is ``{}`` for
     an empty hour and always sums to ``count``.
     """
+    day_end = day_start + timedelta(hours=HOURS_IN_SERVICE_DAY)
     per_hour: dict[datetime, dict[str, int]] = {}
     for entry in entries:
-        if not day_start <= entry.created <= now:
+        if not day_start <= entry.created <= now or entry.created >= day_end:
             continue
         hour = entry.created.replace(minute=0, second=0, microsecond=0)
         statuses = per_hour.setdefault(hour, {})
@@ -339,13 +347,20 @@ async def _service_day_entries(
     line_ids: Sequence[int] | None,
     *,
     day_start_hour: int = DAY_START_HOUR,
+    days_ago: int = 0,
     now: datetime | None = None,
 ) -> tuple[datetime, datetime, list[tuple[int, ReportEntry]]]:
     """Resolve the service-day window and read the rows inside it: ONE query.
 
-    The single place the ``day_start_hour`` validation, the
+    The single place the ``day_start_hour`` / ``days_ago`` validation, the
     ``service_day_start`` arithmetic and the ``LineStatusReport`` read live, so
     the three history loaders cannot drift apart on any of them.
+
+    ``days_ago`` picks the service day: ``0`` is the current one (window
+    ``[day_start, now]``), ``N > 0`` the one that started N service days before
+    it (the whole day, ``[day_start, day_start + 24h)``, never capped at
+    ``now``). The client sends a literal integer and all the date arithmetic is
+    done here.
 
     ``line_ids`` selects the scope:
 
@@ -359,19 +374,30 @@ async def _service_day_entries(
       request costs ZERO queries.
 
     Returns ``(now, day_start, rows)`` where ``rows`` pairs each report with its
-    ``line_id``, in ``created`` order, for the caller to bucket.
+    ``line_id``, in ``created`` order, for the caller to bucket (``bucket_hourly``
+    caps a past day at its own end, so ``now`` is passed on unchanged).
     """
     if not 0 <= day_start_hour <= 23:
         raise LineStatusValidationError(
             f"dayStartHour must be between 0 and 23, got {day_start_hour}."
         )
+    if not 0 <= days_ago <= MAX_HISTORY_DAYS_AGO:
+        raise LineStatusValidationError(
+            f"daysAgo must be between 0 and {MAX_HISTORY_DAYS_AGO}, got {days_ago}."
+        )
     resolved_now = now or timezone.now()
-    day_start = service_day_start(resolved_now, day_start_hour)
+    day_start = service_day_start(resolved_now, day_start_hour) - timedelta(
+        days=days_ago
+    )
     if line_ids is not None and not line_ids:
         return resolved_now, day_start, []
 
     queryset = LineStatusReport.objects.filter(
         created__gte=day_start,
+        # Exclusive: a report stamped at the next service day's first instant
+        # belongs to that day. For the current day this bound lies beyond
+        # ``now``, so ``created__lte`` is the one that decides.
+        created__lt=day_start + timedelta(hours=HOURS_IN_SERVICE_DAY),
         created__lte=resolved_now,
     )
     if line_ids is not None:
@@ -394,15 +420,17 @@ async def load_line_status_history(
     line_id: int,
     *,
     day_start_hour: int = DAY_START_HOUR,
+    days_ago: int = 0,
     now: datetime | None = None,
 ) -> list[HourBucket]:
-    """Hourly history for one line over its current service day (one query).
+    """Hourly history for one line over one service day (one query).
 
-    Returns an empty list when the line has no report in the service day,
+    The current service day, or the one that started ``days_ago`` service days
+    earlier. Returns an empty list when the line has no report in that day,
     otherwise the full 24-bucket series (see ``bucket_hourly``).
     """
     resolved_now, day_start, rows = await _service_day_entries(
-        [line_id], day_start_hour=day_start_hour, now=now
+        [line_id], day_start_hour=day_start_hour, days_ago=days_ago, now=now
     )
     return bucket_hourly(
         (entry for _, entry in rows), day_start=day_start, now=resolved_now
@@ -412,9 +440,12 @@ async def load_line_status_history(
 async def load_network_status_history(
     day_start_hour: int = DAY_START_HOUR,
     *,
+    days_ago: int = 0,
     now: datetime | None = None,
 ) -> list[HourBucket]:
-    """Network-wide hourly history over the current service day (one query).
+    """Network-wide hourly history over one service day (one query).
+
+    The current service day, or the one ``days_ago`` service days earlier.
 
     The same series ``load_line_status_history`` builds, with **no line
     filter**: ONE read of every ``LineStatusReport`` in the service day, then
@@ -426,7 +457,7 @@ async def load_network_status_history(
     24-bucket series (see ``bucket_hourly``).
     """
     resolved_now, day_start, rows = await _service_day_entries(
-        None, day_start_hour=day_start_hour, now=now
+        None, day_start_hour=day_start_hour, days_ago=days_ago, now=now
     )
     return bucket_hourly(
         (entry for _, entry in rows), day_start=day_start, now=resolved_now
@@ -437,9 +468,12 @@ async def load_lines_status_history(
     line_ids: Sequence[int],
     day_start_hour: int = DAY_START_HOUR,
     *,
+    days_ago: int = 0,
     now: datetime | None = None,
 ) -> list[LineHistory]:
     """Per-line hourly history for many lines at once (ONE query for N lines).
+
+    The current service day, or the one ``days_ago`` service days earlier.
 
     Returns one ``LineHistory`` per requested line, in the order requested; a
     line with no report that service day carries ``buckets == []``, which the
@@ -458,7 +492,7 @@ async def load_lines_status_history(
         )
     unique_ids = list(dict.fromkeys(line_ids))
     resolved_now, day_start, rows = await _service_day_entries(
-        unique_ids, day_start_hour=day_start_hour, now=now
+        unique_ids, day_start_hour=day_start_hour, days_ago=days_ago, now=now
     )
 
     entries_by_line: dict[int, list[ReportEntry]] = {

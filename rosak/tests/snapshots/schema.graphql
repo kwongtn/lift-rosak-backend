@@ -794,9 +794,9 @@ type Query {
   publicSocialMediaLinks(incidentId: ID, lineId: ID, first: Int! = 20, after: String = null, mine: Boolean, status: SocialMediaLinkStatus, currentServiceDayOnly: Boolean! = false, lastWeekOnly: Boolean! = false, alignPageToDay: Boolean! = false, displayTodayInLastWeek: Boolean! = false, collapseThreads: Boolean! = false): SocialMediaLinkConnection!
   calendarIncidentCategories: [CalendarIncidentCategoryScalar!]!
   calendarIncidentHistory(id: ID!, limit: Int! = 50): [CalendarIncidentHistoryEntryScalar!]!
-  lineStatusHistory(lineId: ID!, dayStartHour: Int = 3): [LineStatusHourBucket!]!
-  networkStatusHistory(dayStartHour: Int = 3): [LineStatusHourBucket!]!
-  linesStatusHistory(lineIds: [ID!]!, dayStartHour: Int = 3): [LineStatusHistory!]!
+  lineStatusHistory(lineId: ID!, dayStartHour: Int = 3, daysAgo: Int = 0): [LineStatusHourBucket!]!
+  networkStatusHistory(dayStartHour: Int = 3, daysAgo: Int = 0): [LineStatusHourBucket!]!
+  linesStatusHistory(lineIds: [ID!]!, dayStartHour: Int = 3, daysAgo: Int = 0): [LineStatusHistory!]!
   lineStatusReports(lineId: ID!, first: Int! = 20, after: String = null): LineStatusReportConnection!
   locations(filters: LocationFilter, order: LocationOrder, pagination: OffsetPaginationInput): [Location!]!
   buses(order: BusOrder, pagination: OffsetPaginationInput): [Bus!]!

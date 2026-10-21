@@ -1035,9 +1035,12 @@ async def get_line_status_history(
     info: Info,
     line_id: strawberry.ID,
     day_start_hour: Optional[int] = 3,
+    days_ago: Optional[int] = 0,
 ) -> List[LineStatusHourBucket]:
-    """Hourly passenger-status history for one line over its current service day.
+    """Hourly passenger-status history for one line over one service day.
 
+    The current service day by default; ``daysAgo: N`` (0..56) reads the one that
+    started N service days earlier, the whole day rather than a prefix up to now.
     Buckets always cover the whole service day — all 24 hours from the
     service-day start (``dayStartHour``, default 03:00) through 02:00, empty
     hours included. A line with no report that service day returns an empty
@@ -1046,9 +1049,11 @@ async def get_line_status_history(
     """
     if day_start_hour is None:
         day_start_hour = 3
+    if days_ago is None:
+        days_ago = 0
     try:
         buckets = await load_line_status_history(
-            int(line_id), day_start_hour=day_start_hour
+            int(line_id), day_start_hour=day_start_hour, days_ago=days_ago
         )
     except IncidentServiceError as exc:
         raise_service_error(exc)
@@ -1060,14 +1065,16 @@ async def get_network_status_history(
     root,
     info: Info,
     day_start_hour: Optional[int] = 3,
+    days_ago: Optional[int] = 0,
 ) -> List[LineStatusHourBucket]:
-    """Network-wide hourly passenger-status history for the current service day.
+    """Network-wide hourly passenger-status history for one service day.
 
-    The same 24-bucket service-day series as ``lineStatusHistory``, with **no
-    line filter** — one read over every line's reports in the day, so a board
-    can draw the whole network's trend without fanning out one query per line.
-    Each bucket's ``count`` / ``dominantStatus`` / ``statusCounts`` are tallies
-    across ALL lines in that hour, not one line's.
+    The current service day by default, or the one ``daysAgo`` service days
+    earlier (0..56). The same 24-bucket service-day series as
+    ``lineStatusHistory``, with **no line filter** — one read over every line's
+    reports in the day, so a board can draw the whole network's trend without
+    fanning out one query per line. Each bucket's ``count`` / ``dominantStatus``
+    / ``statusCounts`` are tallies across ALL lines in that hour, not one line's.
 
     Returns ``[]`` when nothing at all was reported that service day (the
     "no data" state); otherwise the full 24 buckets, empty hours included. One
@@ -1075,8 +1082,10 @@ async def get_network_status_history(
     """
     if day_start_hour is None:
         day_start_hour = 3
+    if days_ago is None:
+        days_ago = 0
     try:
-        buckets = await load_network_status_history(day_start_hour)
+        buckets = await load_network_status_history(day_start_hour, days_ago=days_ago)
     except IncidentServiceError as exc:
         raise_service_error(exc)
 
@@ -1088,15 +1097,17 @@ async def get_lines_status_history(
     info: Info,
     line_ids: List[strawberry.ID],
     day_start_hour: Optional[int] = 3,
+    days_ago: Optional[int] = 0,
 ) -> List[LineStatusHistory]:
-    """Per-line hourly passenger-status history for the current service day.
+    """Per-line hourly passenger-status history for one service day.
 
-    The batched sibling of ``lineStatusHistory``: ONE query answers every
-    requested line, so a screen that shows several lines' sparklines reads one
-    field instead of N. ``buckets`` per line follows the single-line contract
-    exactly — the full 24 hours from ``dayStartHour`` through 02:00 once the
-    line has any report that day, and ``[]`` (that line's "no data") when it has
-    none.
+    The current service day by default, or the one ``daysAgo`` service days
+    earlier (0..56). The batched sibling of ``lineStatusHistory``: ONE query
+    answers every requested line, so a screen that shows several lines'
+    sparklines reads one field instead of N. ``buckets`` per line follows the
+    single-line contract exactly — the full 24 hours from ``dayStartHour``
+    through 02:00 once the line has any report that day, and ``[]`` (that line's
+    "no data") when it has none.
 
     Returns one entry per requested id, in the requested order; ``[]`` for an
     empty ``lineIds``. ``lineIds`` is length-capped by the service (a client bug
@@ -1105,6 +1116,8 @@ async def get_lines_status_history(
     """
     if day_start_hour is None:
         day_start_hour = 3
+    if days_ago is None:
+        days_ago = 0
     try:
         ids = [int(line_id) for line_id in line_ids]
     except (TypeError, ValueError):
@@ -1112,7 +1125,9 @@ async def get_lines_status_history(
             LineStatusValidationError("lineIds must contain only numeric line ids.")
         )
     try:
-        histories = await load_lines_status_history(ids, day_start_hour)
+        histories = await load_lines_status_history(
+            ids, day_start_hour, days_ago=days_ago
+        )
     except IncidentServiceError as exc:
         raise_service_error(exc)
 

@@ -54,7 +54,10 @@ from incident.models import (
 from incident.services import official_posts
 from incident.services.errors import LineStatusValidationError, OfficialPostFetchError
 from incident.services.line_status import (
+    MAX_HISTORY_DAYS_AGO,
     MAX_LINES_PER_HISTORY_REQUEST,
+    ReportEntry,
+    bucket_hourly,
     load_line_status_history,
     load_lines_status_history,
     load_network_status_history,
@@ -2095,6 +2098,365 @@ class StatusHistoryQueryTests(ServiceDayHistoryFixtureMixin, TestCase):
             [bucket["count"] for bucket in single],
             [bucket["count"] for bucket in network],
         )
+
+
+#: ``daysAgo=1`` against ``_HISTORY_NOW``: the service day that opened at
+#: 2026-01-01 03:00 and closes, exclusively, at ``_HISTORY_DAY_START``.
+_PREVIOUS_DAY_START = _HISTORY_DAY_START - timedelta(days=1)
+
+
+class DaysAgoHistoryTests(ServiceDayHistoryFixtureMixin, TestCase):
+    """``days_ago`` on the three loaders: a whole earlier service day."""
+
+    def test_days_ago_one_reads_exactly_the_previous_service_day(self):
+        self._report(
+            self.line,
+            PassengerStatus.DISRUPTED,
+            _PREVIOUS_DAY_START - timedelta(minutes=1),
+        )
+        self._report(self.line, PassengerStatus.NORMAL, _PREVIOUS_DAY_START)
+        self._report(
+            self.line,
+            PassengerStatus.CROWDED,
+            _PREVIOUS_DAY_START + timedelta(hours=20, minutes=30),
+        )
+        self._report(
+            self.line,
+            PassengerStatus.DELAYED,
+            _HISTORY_DAY_START - timedelta(seconds=1),
+        )
+        # The current service day's first instant and a report after it.
+        self._report(self.line, PassengerStatus.BUSY, _HISTORY_DAY_START)
+        self._report(
+            self.line,
+            PassengerStatus.BACKLOGGED,
+            _HISTORY_DAY_START + timedelta(minutes=30),
+        )
+
+        previous = async_to_sync(load_line_status_history)(
+            self.line.id,
+            day_start_hour=_HISTORY_DAY_START_HOUR,
+            days_ago=1,
+            now=_HISTORY_NOW,
+        )
+        current = async_to_sync(load_line_status_history)(
+            self.line.id, day_start_hour=_HISTORY_DAY_START_HOUR, now=_HISTORY_NOW
+        )
+
+        self.assertEqual(len(previous), 24)
+        self.assertEqual(previous[0].hour_start, _PREVIOUS_DAY_START)
+        self.assertEqual(previous[-1].hour_end, _HISTORY_DAY_START)
+        # Before the day's start and from the next day's start on: both out.
+        self.assertEqual(
+            [(bucket.hour_start, bucket.count) for bucket in previous if bucket.count],
+            [
+                (_PREVIOUS_DAY_START, 1),
+                (_PREVIOUS_DAY_START + timedelta(hours=20), 1),
+                (_PREVIOUS_DAY_START + timedelta(hours=23), 1),
+            ],
+        )
+        self.assertEqual(previous[0].dominant_status, PassengerStatus.NORMAL)
+        self.assertEqual(previous[20].dominant_status, PassengerStatus.CROWDED)
+        self.assertEqual(previous[23].dominant_status, PassengerStatus.DELAYED)
+        # ``days_ago=0`` is untouched: the two reports of the current day.
+        self.assertEqual(
+            [(bucket.hour_start, bucket.count) for bucket in current if bucket.count],
+            [(_HISTORY_DAY_START, 2)],
+        )
+
+    def test_days_ago_is_empty_when_that_day_has_no_report(self):
+        # Right on either side of the previous day: one before it opened, one at
+        # the instant the current day opens. Neither belongs to it, and neither
+        # may turn the answer into 24 empty buckets.
+        self._report(
+            self.line,
+            PassengerStatus.DISRUPTED,
+            _PREVIOUS_DAY_START - timedelta(minutes=1),
+        )
+        self._report(self.line, PassengerStatus.DISRUPTED, _HISTORY_DAY_START)
+
+        buckets = async_to_sync(load_line_status_history)(
+            self.line.id,
+            day_start_hour=_HISTORY_DAY_START_HOUR,
+            days_ago=1,
+            now=_HISTORY_NOW,
+        )
+
+        self.assertEqual(buckets, [])
+
+    def test_days_ago_counts_service_days_not_calendar_days(self):
+        # 01:00 on Jan 2 still belongs to the service day that opened at 03:00
+        # on Jan 1, so "one service day ago" opened on Dec 31, not Jan 1.
+        now = datetime(2026, 1, 2, 1, 0)
+        self._report(self.line, PassengerStatus.NORMAL, datetime(2026, 1, 1, 4, 0))
+        self._report(self.line, PassengerStatus.CROWDED, datetime(2025, 12, 31, 4, 0))
+
+        today = async_to_sync(load_line_status_history)(
+            self.line.id, day_start_hour=3, now=now
+        )
+        yesterday = async_to_sync(load_line_status_history)(
+            self.line.id, day_start_hour=3, days_ago=1, now=now
+        )
+
+        self.assertEqual(today[0].hour_start, datetime(2026, 1, 1, 3, 0))
+        self.assertEqual(today[1].dominant_status, PassengerStatus.NORMAL)
+        self.assertEqual(sum(bucket.count for bucket in today), 1)
+        self.assertEqual(yesterday[0].hour_start, datetime(2025, 12, 31, 3, 0))
+        self.assertEqual(yesterday[1].dominant_status, PassengerStatus.CROWDED)
+        self.assertEqual(sum(bucket.count for bucket in yesterday), 1)
+
+    def test_network_and_lines_history_read_the_same_earlier_day(self):
+        self._report(
+            self.line,
+            PassengerStatus.CROWDED,
+            _PREVIOUS_DAY_START + timedelta(minutes=5),
+        )
+        self._report(
+            self.other_line,
+            PassengerStatus.DELAYED,
+            _PREVIOUS_DAY_START + timedelta(minutes=45),
+        )
+        self._report(
+            self.other_line,
+            PassengerStatus.NORMAL,
+            _HISTORY_DAY_START + timedelta(minutes=5),
+        )
+
+        network = async_to_sync(load_network_status_history)(
+            _HISTORY_DAY_START_HOUR, days_ago=1, now=_HISTORY_NOW
+        )
+        histories = async_to_sync(load_lines_status_history)(
+            [self.line.id, self.other_line.id],
+            _HISTORY_DAY_START_HOUR,
+            days_ago=1,
+            now=_HISTORY_NOW,
+        )
+
+        self.assertEqual(network[0].hour_start, _PREVIOUS_DAY_START)
+        self.assertEqual(
+            network[0].status_counts,
+            {PassengerStatus.CROWDED: 1, PassengerStatus.DELAYED: 1},
+        )
+        self.assertEqual(sum(bucket.count for bucket in network), 2)
+        self.assertEqual(
+            [sum(bucket.count for bucket in h.buckets) for h in histories], [1, 1]
+        )
+        self.assertEqual(histories[1].buckets[0].dominant_status, "DELAYED")
+
+    def test_days_ago_uses_one_query_whatever_the_loader(self):
+        self._report(
+            self.line, PassengerStatus.NORMAL, _PREVIOUS_DAY_START + timedelta(hours=1)
+        )
+
+        for load, args in (
+            (load_line_status_history, (self.line.id,)),
+            (load_network_status_history, ()),
+            (load_lines_status_history, ([self.line.id, self.other_line.id],)),
+        ):
+            with self.subTest(loader=load.__name__):
+                with CaptureQueriesContext(connection) as captured:
+                    async_to_sync(load)(
+                        *args,
+                        days_ago=1,
+                        now=_HISTORY_NOW,
+                    )
+                self.assertEqual(len(captured.captured_queries), 1)
+
+    def test_days_ago_is_range_checked_by_every_loader(self):
+        loaders = (
+            lambda days_ago: load_line_status_history(
+                self.line.id, days_ago=days_ago, now=_HISTORY_NOW
+            ),
+            lambda days_ago: load_network_status_history(
+                days_ago=days_ago, now=_HISTORY_NOW
+            ),
+            lambda days_ago: load_lines_status_history(
+                [self.line.id], days_ago=days_ago, now=_HISTORY_NOW
+            ),
+            # Validation comes before the zero-query empty-request shortcut.
+            lambda days_ago: load_lines_status_history(
+                [], days_ago=days_ago, now=_HISTORY_NOW
+            ),
+        )
+        for index, load in enumerate(loaders):
+            for bad in (-1, MAX_HISTORY_DAYS_AGO + 1):
+                with self.subTest(loader=index, days_ago=bad):
+                    with self.assertRaises(LineStatusValidationError) as raised:
+                        async_to_sync(load)(bad)
+                    self.assertIn("daysAgo", str(raised.exception))
+            for good in (0, MAX_HISTORY_DAYS_AGO):
+                with self.subTest(loader=index, days_ago=good):
+                    async_to_sync(load)(good)
+
+    def test_bucket_hourly_ignores_the_instant_the_next_service_day_opens(self):
+        next_day = _PREVIOUS_DAY_START + timedelta(hours=24)
+
+        buckets = bucket_hourly(
+            [ReportEntry(status=PassengerStatus.NORMAL, created=next_day)],
+            day_start=_PREVIOUS_DAY_START,
+            now=next_day,
+        )
+
+        self.assertEqual(buckets, [])
+
+
+class DaysAgoQueryTests(ServiceDayHistoryFixtureMixin, TestCase):
+    """``daysAgo`` through the real schema.
+
+    The resolvers read the clock, so the fixtures follow the
+    ``StatusHistoryQueryTests`` trick: passing the current hour as
+    ``dayStartHour`` makes the current service day open at that hour, and the
+    previous one then spans ``[anchor - 24h, anchor)`` at every time of day.
+    """
+
+    HISTORY = """
+        query($id: ID!, $hour: Int!, $ago: Int) {
+          lineStatusHistory(lineId: $id, dayStartHour: $hour, daysAgo: $ago) {
+            hourStart
+            hourEnd
+            count
+            dominantStatus
+            statusCounts { status count }
+          }
+        }
+    """
+
+    def _anchor(self):
+        return timezone.now().replace(minute=0, second=0, microsecond=0)
+
+    def _history(self, anchor, days_ago):
+        result = execute_graphql(
+            self.HISTORY,
+            variables={
+                "id": str(self.line.id),
+                "hour": anchor.hour,
+                "ago": days_ago,
+            },
+        )
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        return result.data["lineStatusHistory"]
+
+    def test_graphql_line_history_days_ago_one_reads_the_previous_day(self):
+        anchor = self._anchor()
+        previous_start = anchor - timedelta(days=1)
+        self._report(
+            self.line, PassengerStatus.DISRUPTED, previous_start - timedelta(minutes=1)
+        )
+        self._report(
+            self.line, PassengerStatus.CROWDED, previous_start + timedelta(minutes=30)
+        )
+        self._report(self.line, PassengerStatus.DELAYED, anchor - timedelta(minutes=50))
+        self._report(self.line, PassengerStatus.NORMAL, anchor)
+
+        previous = self._history(anchor, 1)
+        current = self._history(anchor, 0)
+
+        self.assertEqual(len(previous), 24)
+        self.assertEqual(previous[0]["hourStart"], previous_start.isoformat())
+        self.assertEqual(previous[-1]["hourEnd"], anchor.isoformat())
+        self.assertEqual(previous[0]["count"], 1)
+        self.assertEqual(previous[0]["dominantStatus"], "CROWDED")
+        self.assertEqual(previous[23]["count"], 1)
+        self.assertEqual(previous[23]["dominantStatus"], "DELAYED")
+        self.assertEqual(sum(bucket["count"] for bucket in previous), 2)
+        # The current day is its own slice: only the report at its first instant.
+        self.assertEqual(sum(bucket["count"] for bucket in current), 1)
+        self.assertEqual(current[0]["dominantStatus"], "NORMAL")
+
+    def test_graphql_days_ago_defaults_to_today_and_accepts_null(self):
+        anchor = self._anchor()
+        self._report(self.line, PassengerStatus.NORMAL, anchor)
+
+        omitted = execute_graphql(
+            "query($id: ID!, $hour: Int!) {"
+            " lineStatusHistory(lineId: $id, dayStartHour: $hour) { count } }",
+            variables={"id": str(self.line.id), "hour": anchor.hour},
+        )
+
+        self.assertIsNone(omitted.errors, msg=f"errors: {omitted.errors}")
+        self.assertEqual(
+            omitted.data["lineStatusHistory"],
+            [{"count": bucket["count"]} for bucket in self._history(anchor, 0)],
+        )
+        self.assertEqual(
+            [bucket["count"] for bucket in self._history(anchor, None)],
+            [bucket["count"] for bucket in self._history(anchor, 0)],
+        )
+
+    def test_graphql_network_and_lines_history_accept_days_ago(self):
+        anchor = self._anchor()
+        previous_start = anchor - timedelta(days=1)
+        self._report(
+            self.line, PassengerStatus.CROWDED, previous_start + timedelta(minutes=5)
+        )
+        self._report(
+            self.other_line,
+            PassengerStatus.DELAYED,
+            previous_start + timedelta(minutes=6),
+        )
+        self._report(self.line, PassengerStatus.NORMAL, anchor)
+
+        result = execute_graphql(
+            """
+            query($ids: [ID!]!, $hour: Int!) {
+              networkStatusHistory(dayStartHour: $hour, daysAgo: 1) {
+                count
+                statusCounts { status count }
+              }
+              linesStatusHistory(lineIds: $ids, dayStartHour: $hour, daysAgo: 1) {
+                lineId
+                buckets { count }
+              }
+            }
+            """,
+            variables={
+                "ids": [str(self.line.id), str(self.other_line.id)],
+                "hour": anchor.hour,
+            },
+        )
+
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        network = result.data["networkStatusHistory"]
+        self.assertEqual(len(network), 24)
+        self.assertEqual(network[0]["count"], 2)
+        self.assertEqual(
+            network[0]["statusCounts"],
+            [
+                {"status": "CROWDED", "count": 1},
+                {"status": "DELAYED", "count": 1},
+            ],
+        )
+        self.assertEqual(sum(bucket["count"] for bucket in network), 2)
+        histories = result.data["linesStatusHistory"]
+        self.assertEqual(
+            [history["lineId"] for history in histories],
+            [str(self.line.id), str(self.other_line.id)],
+        )
+        for history in histories:
+            self.assertEqual(sum(bucket["count"] for bucket in history["buckets"]), 1)
+
+    def test_graphql_days_ago_out_of_range_is_a_validation_error(self):
+        queries = (
+            "query($ago: Int) { lineStatusHistory(lineId: 1, daysAgo: $ago) "
+            "{ count } }",
+            "query($ago: Int) { networkStatusHistory(daysAgo: $ago) { count } }",
+            "query($ago: Int) { linesStatusHistory(lineIds: [1], daysAgo: $ago) "
+            "{ lineId } }",
+        )
+        for query in queries:
+            for bad in (-1, MAX_HISTORY_DAYS_AGO + 1):
+                with self.subTest(query=query, days_ago=bad):
+                    result = execute_graphql(query, variables={"ago": bad})
+
+                    self.assertIsNotNone(result.errors)
+                    self.assertIn(
+                        f"daysAgo must be between 0 and {MAX_HISTORY_DAYS_AGO}",
+                        result.errors[0].message,
+                    )
+            with self.subTest(query=query, days_ago=MAX_HISTORY_DAYS_AGO):
+                result = execute_graphql(query, variables={"ago": MAX_HISTORY_DAYS_AGO})
+
+                self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
 
 
 class PublicFeedContractTests(TestCase):
