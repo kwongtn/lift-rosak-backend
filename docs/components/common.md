@@ -42,7 +42,7 @@
   - `UserVerificationCodeScalar`, `MediasGroupByPeriodScalar`.
   - `GenericMutationReturn` (`{ ok: bool }`): the shared mutation return shape of `spotting` and `chartography`.
   - Plain types in `schema/types.py`: `UserSpottingTrend`, `WithMostEntriesData`, `FavouriteVehicleData`.
-- **DataLoaders** (`common/schema/loaders.py`, exposed as `info.context.loaders["common"]`): `spottings_from_user_loader`, `media_from_id_loader`.
+- **DataLoaders** (`common/schema/loaders.py`, exposed as `info.context.loaders["common"]`): `spottings_from_user_loader`, `media_from_id_loader`, and `is_admin_from_user_loader` (the Firebase admin claim, keyed by `User`: one uncached `has_admin_claim` call per viewer per request, used by `spotting` to show an anonymous event's GPS to admins).
 - **Celery tasks** (`rosak.celery.app`):
   - `convert_temporary_media_to_media_task`: the pipeline core (below).
   - `check_temporary_media_nsfw`: RapidAPI NSFW classifier. Skips video. Users with `TRUSTED_MEDIA_UPLOADER` are set to `TRUSTED_CLEARED` and dispatched to convert. Otherwise probability goes to `metadata["nsfw_probability"]`; above `RAPID_API_NSFW_THRESHOLD = 0.5` sets `BLOCKED`, else `CLEARED` and dispatches convert.

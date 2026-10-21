@@ -30,6 +30,16 @@
 | Opt-in (`spotting_data_public=true`, or owner) | `spottings` — date, notes, vehicle details, media count, status                                                                   |
 | Never exposed                                  | email; full Firebase UID (`firebase_id` is `IsAdmin`-only)                                                                        |
 
+## Anonymous spottings
+
+`Event.is_anonymous` hides the reporter (`EventScalar.reporter` is `null`) and the
+event's GPS position. `EventScalar.location` resolves to `null` unless the viewer is the
+event's reporter or an admin (Firebase `admin` claim), on every path that returns an
+`EventScalar`: `events`, `Vehicle.spottings`, `UserScalar.spottings` and the `addEvent`
+payload. Non-anonymous events show their position to everyone. See
+`spotting.schema.resolvers.viewer_can_see_location` and
+[components/spotting.md](components/spotting.md).
+
 ## Notes
 
 - Privacy is field-level, in the resolver; the per-user DataLoader

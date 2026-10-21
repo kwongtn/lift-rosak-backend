@@ -10,6 +10,7 @@ from common.schema.scalars import MediaScalar, UserScalar
 from operation.schema.scalars import Station, Vehicle
 from rosak.permissions import IsLoggedIn
 from spotting import models
+from spotting.schema.resolvers import viewer_can_see_location
 
 
 @strawberry_django.type(models.LocationEvent)
@@ -53,9 +54,15 @@ class EventScalar:
 
     @strawberry.field
     async def location(self, info: Info) -> Optional["LocationEvent"]:
-        return await info.context.loaders["spotting"][
+        location_event = await info.context.loaders["spotting"][
             "location_event_from_event_loader"
         ].load(self.id)
+        if location_event and not await viewer_can_see_location(
+            info, location_event.event
+        ):
+            return None
+
+        return location_event
 
     @strawberry.field
     async def media_count(self, info: Info) -> int:

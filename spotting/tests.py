@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -1140,6 +1140,187 @@ class TestAddEventMutation(TestCase):
         self.assertEqual(float(location_event.altitude_accuracy), 1.5)
         self.assertEqual(float(location_event.heading), 270.0)
         self.assertEqual(float(location_event.speed), 22.5)
+
+
+class AnonymousLocationVisibilityTests(TestCase):
+    """An anonymous spotting's GPS is visible only to its reporter and admins (F043)."""
+
+    EVENTS_QUERY = """
+        query ($id: ID!) {
+            events(filters: { id: $id }) {
+                id
+                location { location accuracy altitude heading speed }
+            }
+        }
+    """
+
+    def setUp(self):
+        self.reporter = User.objects.create(firebase_id="loc-reporter")
+        self.other = User.objects.create(firebase_id="loc-other", nickname="Other")
+        self.admin = User.objects.create(firebase_id="loc-admin")
+        v_type = VehicleType.objects.create(
+            internal_name="LOC_TYPE", display_name="Loc type"
+        )
+        self.vehicle = Vehicle.objects.create(
+            identification_no="Set 90", vehicle_type=v_type
+        )
+
+    async def _event(
+        self, *, anonymous: bool, lon: float = 101.6231, lat: float = 3.1048
+    ):
+        event = await Event.objects.acreate(
+            reporter=self.reporter,
+            vehicle=self.vehicle,
+            type=SpottingEventType.LOCATION,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date(2026, 10, 1),
+            is_anonymous=anonymous,
+        )
+        await LocationEvent.objects.acreate(
+            event=event,
+            location=Point(x=lon, y=lat),
+            accuracy=12.5,
+            altitude=30,
+            heading=90,
+            speed=4,
+        )
+        return event
+
+    async def _query(self, query, variables, user):
+        """Run `query` as `user` (None = logged out); `self.admin` is the only admin."""
+        claim = AsyncMock(side_effect=lambda candidate: candidate.id == self.admin.id)
+        with patch("common.schema.loaders.has_admin_claim", new=claim):
+            result = await execute_graphql_async(query, variables, user=user)
+        self.assertIsNone(result.errors)
+        return result.data, claim
+
+    async def _location(self, event, user):
+        data, claim = await self._query(
+            self.EVENTS_QUERY, {"id": str(event.id)}, user=user
+        )
+        (row,) = data["events"]
+        return row["location"], claim
+
+    def _assert_full_location(self, location):
+        self.assertEqual(list(location["location"]), [101.6231, 3.1048])
+        self.assertEqual(location["accuracy"], 12.5)
+        self.assertEqual(location["altitude"], 30.0)
+        self.assertEqual(location["heading"], 90.0)
+        self.assertEqual(location["speed"], 4.0)
+
+    async def test_anonymous_location_hidden_from_logged_out_viewer(self):
+        event = await self._event(anonymous=True)
+
+        location, claim = await self._location(event, user=None)
+
+        self.assertIsNone(location)
+        claim.assert_not_called()
+
+    async def test_anonymous_location_hidden_from_other_user(self):
+        event = await self._event(anonymous=True)
+
+        location, _ = await self._location(event, user=self.other)
+
+        self.assertIsNone(location)
+
+    async def test_anonymous_location_visible_to_reporter(self):
+        event = await self._event(anonymous=True)
+
+        location, claim = await self._location(event, user=self.reporter)
+
+        self._assert_full_location(location)
+        claim.assert_not_called()
+
+    async def test_anonymous_location_visible_to_admin(self):
+        event = await self._event(anonymous=True)
+
+        location, _ = await self._location(event, user=self.admin)
+
+        self._assert_full_location(location)
+
+    async def test_public_location_visible_to_everyone(self):
+        event = await self._event(anonymous=False)
+
+        for viewer in (None, self.other, self.reporter, self.admin):
+            with self.subTest(viewer=getattr(viewer, "firebase_id", None)):
+                location, claim = await self._location(event, user=viewer)
+
+                self._assert_full_location(location)
+                claim.assert_not_called()
+
+    async def test_admin_claim_is_looked_up_once_per_request(self):
+        # has_admin_claim is an uncached Firebase call: a list of anonymous
+        # spottings must not cost one call per row.
+        events = [
+            await self._event(anonymous=True, lon=101.6 + i / 100) for i in range(3)
+        ]
+
+        data, claim = await self._query(
+            "{ events { id location { accuracy } } }", {}, user=self.other
+        )
+
+        self.assertEqual(
+            {row["id"] for row in data["events"]}, {str(e.id) for e in events}
+        )
+        self.assertTrue(all(row["location"] is None for row in data["events"]))
+        self.assertEqual(claim.await_count, 1)
+
+    async def test_other_paths_to_an_event_are_gated_too(self):
+        anonymous = await self._event(anonymous=True)
+        self.reporter.spotting_data_public = True
+        await self.reporter.asave()
+
+        paths = {
+            "vehicles.spottings": (
+                "query ($id: ID!) { vehicles(filters: { id: $id }) {"
+                " spottings { id location { accuracy } } } }",
+                str(self.vehicle.id),
+                lambda data: data["vehicles"][0]["spottings"],
+            ),
+            "publicUser.spottings": (
+                "query ($id: ID!) { publicUser(id: $id) {"
+                " spottings { id location { accuracy } } } }",
+                self.reporter.firebase_id,
+                lambda data: data["publicUser"]["spottings"],
+            ),
+        }
+        viewers = (
+            (None, False),
+            (self.other, False),
+            (self.reporter, True),
+            (self.admin, True),
+        )
+        for path, (query, ident, rows_of) in paths.items():
+            for viewer, sees_location in viewers:
+                with self.subTest(
+                    path=path, viewer=getattr(viewer, "firebase_id", None)
+                ):
+                    data, _ = await self._query(query, {"id": ident}, user=viewer)
+                    (row,) = [r for r in rows_of(data) if r["id"] == str(anonymous.id)]
+                    self.assertEqual(row["location"] is not None, sees_location)
+
+    def test_only_event_location_returns_the_location_event_type(self):
+        from graphql import get_named_type, is_object_type
+
+        from rosak.schema import schema
+
+        gps_type = "LocationEvent"
+        exposing = sorted(
+            f"{type_.name}.{name}"
+            for type_ in schema._schema.type_map.values()
+            if is_object_type(type_)
+            for name, field in type_.fields.items()
+            if get_named_type(field.type).name == gps_type
+        )
+        self.assertEqual(exposing, ["EventScalar.location"])
+
+    def test_event_filter_has_no_location_lookup(self):
+        # A location filter would let a caller bisect an anonymous event's
+        # position even while `location` itself resolves to null.
+        from rosak.schema import schema
+
+        fields = schema._schema.type_map["EventFilter"].fields
+        self.assertEqual([n for n in fields if "locat" in n.lower()], [])
 
 
 class TestFilterDecorators(TestCase):

@@ -5,6 +5,7 @@ from uuid import UUID
 from strawberry.dataloader import DataLoader
 
 from common.models import Media
+from rosak.permissions import has_admin_claim
 from spotting.models import Event
 
 
@@ -25,7 +26,14 @@ async def batch_load_media_from_id(keys: List[UUID]):
     return [media_dict.get(key, None) for key in keys]
 
 
+async def batch_load_is_admin_from_user(keys):
+    # has_admin_claim is an uncached Firebase call; loading it keeps that to one
+    # call per viewer per request, however many rows ask.
+    return [await has_admin_claim(user) for user in keys]
+
+
 CommonContextLoaders = {
     "spottings_from_user_loader": DataLoader(load_fn=batch_load_spottings_from_user),
     "media_from_id_loader": DataLoader(load_fn=batch_load_media_from_id),
+    "is_admin_from_user_loader": DataLoader(load_fn=batch_load_is_admin_from_user),
 }

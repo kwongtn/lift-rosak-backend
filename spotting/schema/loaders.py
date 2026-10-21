@@ -33,7 +33,11 @@ async def batch_load_is_read_from_event(keys):
 
 async def batch_load_location_event_from_event(keys):
     event_dict = defaultdict()
-    async for location_event in LocationEvent.objects.filter(event_id__in=keys):
+    # select_related: the resolver needs event.is_anonymous / reporter_id to decide
+    # visibility, and this keeps that to the same single query.
+    async for location_event in LocationEvent.objects.select_related("event").filter(
+        event_id__in=keys
+    ):
         event_dict[location_event.event_id] = location_event
 
     return [event_dict.get(key, None) for key in keys]
