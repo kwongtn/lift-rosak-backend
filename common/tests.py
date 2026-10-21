@@ -1,6 +1,7 @@
 import io
 import struct
 from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -1145,6 +1146,8 @@ class TestUserScalarTrends(TestCase):
             nickname="TrendsUser",
             spotting_data_public=True,
         )
+        # The resolver only asks who is viewing; the owner needs no loader.
+        self.owner_info = SimpleNamespace(context=SimpleNamespace(user=self.user))
         self.line = Line.objects.create(
             display_name="Kelana Jaya Line",
             code="KJL",
@@ -1175,29 +1178,29 @@ class TestUserScalarTrends(TestCase):
             status=SpottingVehicleStatus.IN_SERVICE,
         )
 
-    def test_spotting_trends_defaults_to_last_7_days(self):
-        trends = UserScalar.spotting_trends.base_resolver(
-            self.user, start=None, end=None
+    async def test_spotting_trends_defaults_to_last_7_days(self):
+        trends = await UserScalar.spotting_trends.base_resolver(
+            self.user, self.owner_info, start=None, end=None
         )
         self.assertIsNotNone(trends)
         self.assertGreater(len(trends), 0)
         self.assertEqual(len(trends), 366)
 
-    def test_spotting_trends_with_explicit_range(self):
+    async def test_spotting_trends_with_explicit_range(self):
         today = date.today()
         start = today - timedelta(days=5)
         end = today
-        trends = UserScalar.spotting_trends.base_resolver(
-            self.user, start=Some(start), end=Some(end)
+        trends = await UserScalar.spotting_trends.base_resolver(
+            self.user, self.owner_info, start=Some(start), end=Some(end)
         )
         self.assertIsNotNone(trends)
         self.assertEqual(len(trends), 6)
 
-    def test_spotting_trends_with_partial_start_only(self):
+    async def test_spotting_trends_with_partial_start_only(self):
         today = date.today()
         start = today - timedelta(days=15)
-        trends = UserScalar.spotting_trends.base_resolver(
-            self.user, start=Some(start), end=None
+        trends = await UserScalar.spotting_trends.base_resolver(
+            self.user, self.owner_info, start=Some(start), end=None
         )
         self.assertIsNotNone(trends)
         self.assertEqual(len(trends), 16)

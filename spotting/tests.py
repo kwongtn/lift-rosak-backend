@@ -2,6 +2,7 @@ from datetime import date, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.db import IntegrityError, transaction
@@ -1270,18 +1271,23 @@ class AnonymousLocationVisibilityTests(TestCase):
         self.reporter.spotting_data_public = True
         await self.reporter.asave()
 
+        # (query, id, rows, whether strangers see the anonymous row at all). A vehicle
+        # lists every sighting of it, with the reporter hidden; a profile does not
+        # list an anonymous spotting for strangers (see AnonymousSpottingsOnProfileTests).
         paths = {
             "vehicles.spottings": (
                 "query ($id: ID!) { vehicles(filters: { id: $id }) {"
                 " spottings { id location { accuracy } } } }",
                 str(self.vehicle.id),
                 lambda data: data["vehicles"][0]["spottings"],
+                True,
             ),
             "publicUser.spottings": (
                 "query ($id: ID!) { publicUser(id: $id) {"
                 " spottings { id location { accuracy } } } }",
                 self.reporter.firebase_id,
                 lambda data: data["publicUser"]["spottings"],
+                False,
             ),
         }
         viewers = (
@@ -1290,13 +1296,18 @@ class AnonymousLocationVisibilityTests(TestCase):
             (self.reporter, True),
             (self.admin, True),
         )
-        for path, (query, ident, rows_of) in paths.items():
+        for path, (query, ident, rows_of, strangers_see_row) in paths.items():
             for viewer, sees_location in viewers:
                 with self.subTest(
                     path=path, viewer=getattr(viewer, "firebase_id", None)
                 ):
                     data, _ = await self._query(query, {"id": ident}, user=viewer)
-                    (row,) = [r for r in rows_of(data) if r["id"] == str(anonymous.id)]
+                    rows = [r for r in rows_of(data) if r["id"] == str(anonymous.id)]
+                    if not (sees_location or strangers_see_row):
+                        self.assertEqual(rows, [])
+                        continue
+
+                    (row,) = rows
                     self.assertEqual(row["location"] is not None, sees_location)
 
     def test_only_event_location_returns_the_location_event_type(self):
@@ -1321,6 +1332,135 @@ class AnonymousLocationVisibilityTests(TestCase):
 
         fields = schema._schema.type_map["EventFilter"].fields
         self.assertEqual([n for n in fields if "locat" in n.lower()], [])
+
+
+class AnonymousSpottingsOnProfileTests(TestCase):
+    """A public profile neither lists nor counts anonymous spottings, except for its
+    owner and admins (F043)."""
+
+    PROFILE_QUERY = """
+        query ($id: ID!) {
+            publicUser(id: $id) {
+                spottings { id }
+                spottingsCount
+                favouriteVehicles(count: 5) { count vehicle { identificationNo } }
+                withMostEntries(type: DAY) { count }
+                spottingTrends(dateGroup: YEAR, freeRange: true) { count }
+            }
+        }
+    """
+
+    def setUp(self):
+        self.reporter = User.objects.create(
+            firebase_id="profile-reporter", spotting_data_public=True
+        )
+        self.other = User.objects.create(firebase_id="profile-other", nickname="Other")
+        self.admin = User.objects.create(firebase_id="profile-admin")
+        v_type = VehicleType.objects.create(
+            internal_name="PROFILE_TYPE", display_name="Profile type"
+        )
+        self.vehicle_a = Vehicle.objects.create(
+            identification_no="Set 91", vehicle_type=v_type
+        )
+        self.vehicle_b = Vehicle.objects.create(
+            identification_no="Set 92", vehicle_type=v_type
+        )
+
+    def _event(self, vehicle, *, anonymous: bool):
+        return Event.objects.create(
+            reporter=self.reporter,
+            vehicle=vehicle,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date.today(),
+            is_anonymous=anonymous,
+        )
+
+    def _spot(self):
+        """One public sighting of A and two anonymous ones of B."""
+        self.public = self._event(self.vehicle_a, anonymous=False)
+        self.anonymous = [self._event(self.vehicle_b, anonymous=True) for _ in range(2)]
+
+    async def _profile(self, viewer):
+        """The reporter's public profile as `viewer`; `self.admin` is the only admin."""
+        claim = AsyncMock(side_effect=lambda candidate: candidate.id == self.admin.id)
+        with patch("common.schema.loaders.has_admin_claim", new=claim):
+            result = await execute_graphql_async(
+                self.PROFILE_QUERY, {"id": self.reporter.firebase_id}, user=viewer
+            )
+        self.assertIsNone(result.errors)
+        return result.data["publicUser"], claim
+
+    @staticmethod
+    def _favourites(profile):
+        return [
+            (f["vehicle"]["identificationNo"], f["count"])
+            for f in profile["favouriteVehicles"]
+        ]
+
+    async def test_strangers_see_no_anonymous_spotting_and_no_count_of_it(self):
+        await sync_to_async(self._spot)()
+
+        for viewer in (None, self.other):
+            with self.subTest(viewer=getattr(viewer, "firebase_id", None)):
+                profile, _ = await self._profile(viewer)
+
+                self.assertEqual(
+                    [row["id"] for row in profile["spottings"]], [str(self.public.id)]
+                )
+                self.assertEqual(profile["spottingsCount"], 1)
+                self.assertEqual(self._favourites(profile), [("Set 91", 1)])
+                self.assertEqual(profile["withMostEntries"]["count"], 1)
+                self.assertEqual(sum(t["count"] for t in profile["spottingTrends"]), 1)
+
+    async def test_owner_and_admin_still_see_every_spotting(self):
+        await sync_to_async(self._spot)()
+        everything = {str(self.public.id), *(str(e.id) for e in self.anonymous)}
+
+        for viewer in (self.reporter, self.admin):
+            with self.subTest(viewer=viewer.firebase_id):
+                profile, _ = await self._profile(viewer)
+
+                self.assertEqual({r["id"] for r in profile["spottings"]}, everything)
+                self.assertEqual(profile["spottingsCount"], 3)
+                self.assertEqual(
+                    self._favourites(profile), [("Set 92", 2), ("Set 91", 1)]
+                )
+                self.assertEqual(profile["withMostEntries"]["count"], 3)
+                self.assertEqual(sum(t["count"] for t in profile["spottingTrends"]), 3)
+
+    async def test_owner_sees_every_spotting_on_their_own_user_query(self):
+        await sync_to_async(self._spot)()
+
+        result = await execute_graphql_async(
+            "{ user { spottings { id } spottingsCount } }", user=self.reporter
+        )
+
+        self.assertIsNone(result.errors)
+        self.assertEqual(len(result.data["user"]["spottings"]), 3)
+        self.assertEqual(result.data["user"]["spottingsCount"], 3)
+
+    async def test_a_private_profile_still_lists_nothing_to_strangers(self):
+        await sync_to_async(self._spot)()
+        self.reporter.spotting_data_public = False
+        await self.reporter.asave()
+
+        profile, _ = await self._profile(self.other)
+
+        self.assertIsNone(profile["spottings"])
+        self.assertEqual(profile["spottingsCount"], 1)
+
+    async def test_the_admin_claim_is_looked_up_once_per_request(self):
+        await sync_to_async(self._spot)()
+
+        _, claim = await self._profile(self.other)
+        self.assertEqual(claim.await_count, 1)
+
+        _, claim = await self._profile(None)
+        claim.assert_not_called()
+
+        _, claim = await self._profile(self.reporter)
+        claim.assert_not_called()
 
 
 class TestFilterDecorators(TestCase):

@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Annotated, List, Optional
 
 import strawberry
 import strawberry_django
+from asgiref.sync import sync_to_async
 from django.db.models import Count, F, Q
 from strawberry.types import Info
 
@@ -20,6 +21,7 @@ from operation import models as operation_models
 from rosak.permissions import IsAdmin
 from spotting import models as spotting_models
 from spotting.enums import SpottingEventType
+from spotting.schema.resolvers import viewer_is_owner_or_admin
 
 
 @strawberry_django.type(models.Media, pagination=True)
@@ -68,6 +70,20 @@ class MediaType(strawberry.relay.Node):
         return self.created.date()
 
 
+async def _events_shown_to_viewer(info: Info, user_id) -> Q:
+    """The events of `user_id` the viewer may see or count on that user's profile.
+
+    An anonymous spotting is listed and counted only for its reporter and admins, so a
+    stranger cannot link it to the profile. Every per-user spotting figure goes through
+    this, so the list and the numbers agree.
+    """
+    shown = Q(reporter_id=user_id)
+    if not await viewer_is_owner_or_admin(info, user_id):
+        shown &= Q(is_anonymous=False)
+
+    return shown
+
+
 @strawberry_django.type(models.User)
 class UserScalar:
     if TYPE_CHECKING:
@@ -88,19 +104,22 @@ class UserScalar:
         return self.spotting_data_public
 
     @strawberry_django.field
-    def favourite_vehicles(
-        self, count: Optional[int] = 1
+    async def favourite_vehicles(
+        self, info: Info, count: Optional[int] = 1
     ) -> List[FavouriteVehicleData]:
-        vehicle_count_dict = list(
-            spotting_models.Event.objects.filter(reporter_id=self.id)
+        vehicle_count_dict = [
+            row
+            async for row in spotting_models.Event.objects.filter(
+                await _events_shown_to_viewer(info, self.id)
+            )
             .values("vehicle")
             .annotate(Count("vehicle"))
             .order_by("-vehicle__count")[0:count]
-        )
+        ]
 
-        vehicles = operation_models.Vehicle.objects.filter(
+        vehicles = await operation_models.Vehicle.objects.filter(
             id__in=[elem["vehicle"] for elem in vehicle_count_dict]
-        ).in_bulk()
+        ).ain_bulk()
 
         return [
             FavouriteVehicleData(
@@ -111,7 +130,9 @@ class UserScalar:
         ]
 
     @strawberry_django.field
-    def with_most_entries(self, type: DateGroupings) -> WithMostEntriesData:
+    async def with_most_entries(
+        self, info: Info, type: DateGroupings
+    ) -> WithMostEntriesData:
         groupings = {"year": F("created__year")}
 
         if type in [DateGroupings.MONTH, DateGroupings.DAY]:
@@ -120,13 +141,19 @@ class UserScalar:
             if type == DateGroupings.DAY:
                 groupings["day"] = F("created__day")
 
-        max = (
-            spotting_models.Event.objects.filter(reporter_id=self.id)
+        # No visible events leaves `rows` empty and `[0]` raises IndexError (a known
+        # defect, pinned by a test).
+        rows = [
+            row
+            async for row in spotting_models.Event.objects.filter(
+                await _events_shown_to_viewer(info, self.id)
+            )
             .annotate(**groupings)
             .values(*groupings.keys())
             .annotate(count=Count("id"))
-            .order_by("-count")[0]
-        )
+            .order_by("-count")[:1]
+        ]
+        max = rows[0]
 
         return WithMostEntriesData(
             type=type,
@@ -153,26 +180,34 @@ class UserScalar:
                 "spottings_from_user_loader"
             ].load(self.id)
 
-        # Non-owners only see spottings if data is public
+        # Non-owners only see spottings if data is public, minus the anonymous ones
+        # (admins keep those).
         if self.spotting_data_public:
-            return await info.context.loaders["common"][
+            spottings = await info.context.loaders["common"][
                 "spottings_from_user_loader"
             ].load(self.id)
+            if await viewer_is_owner_or_admin(info, self.id):
+                return spottings
+
+            return [event for event in spottings if not event.is_anonymous]
 
         # Private data - return None
         return None
 
     @strawberry_django.field
     async def spottings_count(self, info: Info) -> int:
-        return await spotting_models.Event.objects.filter(reporter_id=self.id).acount()
+        return await spotting_models.Event.objects.filter(
+            await _events_shown_to_viewer(info, self.id)
+        ).acount()
 
     @strawberry_django.field
     async def media_count(self) -> int:
         return await common_models.Media.objects.filter(uploader_id=self.id).acount()
 
     @strawberry_django.field
-    def spotting_trends(
+    async def spotting_trends(
         self,
+        info: Info,
         start: strawberry.Maybe[date] = None,
         end: strawberry.Maybe[date] = None,
         date_group: Optional[DateGroupings] = DateGroupings.DAY,
@@ -189,10 +224,10 @@ class UserScalar:
         else:
             end = end.value
 
-        results = get_trends(
+        results = await sync_to_async(get_trends)(
             groupby_field="spotting_date",
             count_model=spotting_models.Event,
-            filters=Q(reporter_id=self.id),
+            filters=await _events_shown_to_viewer(info, self.id),
             start=start,
             end=end,
             add_zero=True,

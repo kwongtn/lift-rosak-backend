@@ -38,7 +38,7 @@
 - **GraphQL types** (`common/schema/scalars.py`):
   - `MediaType`: Relay `Node` over `Media` (`created`, `created_date`, `uploader`, `file`, `width`, `height`).
   - `MediaScalar`: non-Relay variant that adds `url`, `discord_suffix`, `caption`, `duration`, `content_type`, `file_name`. `spotting` and `incident` reuse it for their media edges.
-  - `UserScalar`: `firebase_id` (gated by `IsAdmin`), `short_id`, `spotting_data_public`, `favourite_vehicles` (→ `operation.Vehicle`), `with_most_entries`, `spottings` (DataLoader), `spottings_count`, `media_count`, `spotting_trends`.
+  - `UserScalar`: `firebase_id` (gated by `IsAdmin`), `short_id`, `spotting_data_public`, `favourite_vehicles` (→ `operation.Vehicle`), `with_most_entries`, `spottings` (DataLoader), `spottings_count`, `media_count`, `spotting_trends`. `spottings` and the four spotting figures (`spottings_count`, `favourite_vehicles`, `with_most_entries`, `spotting_trends`) leave out the user's **anonymous** spottings unless the viewer is that user or an admin (`_events_shown_to_viewer`, built on `spotting.schema.resolvers.viewer_is_owner_or_admin`); `favourite_vehicles`, `with_most_entries`, `spotting_trends` and `spottings_count` are async for that check. `with_most_entries` still raises `IndexError` when the viewer can see no events.
   - `UserVerificationCodeScalar`, `MediasGroupByPeriodScalar`.
   - `GenericMutationReturn` (`{ ok: bool }`): the shared mutation return shape of `spotting` and `chartography`.
   - Plain types in `schema/types.py`: `UserSpottingTrend`, `WithMostEntriesData`, `FavouriteVehicleData`.
