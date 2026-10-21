@@ -1,6 +1,7 @@
 type Asset {
   id: ID!
   assetType: String!
+  status: AssetStatus!
   officialid: String!
   shortDescription: String!
   longDescription: String!
@@ -10,12 +11,18 @@ type Asset {
 input AssetFilter {
   id: ID
   assetType: String
+  status: AssetStatus
   officialid: StrFilterLookup
   station: StationFilter
   AND: AssetFilter
   OR: AssetFilter
   NOT: AssetFilter
   DISTINCT: Boolean
+}
+
+enum AssetStatus {
+  UNDER_MAINTENANCE
+  IN_OPERATION
 }
 
 type Bus {

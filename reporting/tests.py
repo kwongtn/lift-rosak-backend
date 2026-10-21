@@ -2,6 +2,7 @@ from django.contrib.gis.geos import Point
 from django.test import TestCase
 
 from common.models import User
+from operation.enums import AssetStatus
 from operation.models import Asset, Station
 from reporting.enums import ReportType
 from reporting.models import Report, Vote
@@ -14,7 +15,9 @@ class ReportingModelTests(TestCase):
             display_name="Subang Jaya", location=Point(101.58, 3.08)
         )
         self.asset = Asset.objects.create(
-            station=self.station, officialid="LFT-A", status="ACTIVE"
+            station=self.station,
+            officialid="LFT-A",
+            status=AssetStatus.IN_OPERATION,
         )
 
     def test_create_report_and_vote(self):

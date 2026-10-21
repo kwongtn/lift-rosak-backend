@@ -222,9 +222,9 @@ class Asset(TimeStampedModel):
         to="common.Media",
         through="operation.AssetMedia",
     )
-    status = models.CharField(
+    status = TextChoicesField(
         max_length=32,
-        choices=AssetStatus.choices,
+        choices_enum=AssetStatus,
     )
 
     history = HistoricalRecords()

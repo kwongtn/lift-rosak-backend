@@ -38,6 +38,7 @@ class VehicleTypeFilter:
 class AssetFilter:
     id: strawberry.auto
     asset_type: strawberry.auto
+    status: strawberry.auto
     officialid: Optional[StrFilterLookup]
 
     station: Optional["StationFilter"]

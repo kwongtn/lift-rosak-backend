@@ -257,6 +257,7 @@ class Line:
 class Asset:
     id: strawberry.auto
     asset_type: strawberry.auto
+    status: strawberry.auto
     officialid: str
     short_description: str
     long_description: str

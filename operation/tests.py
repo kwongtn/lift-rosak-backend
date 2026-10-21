@@ -4,18 +4,22 @@ from datetime import date
 
 from asgiref.sync import async_to_sync
 from django.contrib import admin
+from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
-from django.db import IntegrityError
-from django.test import TestCase, modify_settings
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, connection
+from django.test import RequestFactory, TestCase, modify_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from dotmap import DotMap
+from graphql import GraphQLEnumType
 
 from chartography.enums import DataSources
 from chartography.models import LineVehicleStatusCountHistory, Snapshot, Source
 from common.models import User
 from incident.enums import PassengerStatus
 from incident.models import LineStatusReport
-from operation.admin import LineAdmin
+from operation.admin import AssetAdmin, LineAdmin
 from operation.enums import AssetStatus, AssetType, VehicleStatus, WheelStatus
 from operation.models import (
     Asset,
@@ -100,6 +104,16 @@ class OperationModelTests(TestCase):
         self.assertEqual(asset.station, self.station)
         self.assertEqual(asset.officialid, "ESC-01")
 
+    def test_asset_rejects_a_status_outside_the_enum(self):
+        # A plain CharField(choices=...) stored anything; TextChoicesField refuses it.
+        with self.assertRaises(ValidationError):
+            Asset.objects.create(
+                station=self.station,
+                officialid="ESC-02",
+                asset_type=AssetType.ESCALATOR,
+                status="ACTIVE",
+            )
+
     def test_unique_constraint_on_line_code(self):
         with self.assertRaises(IntegrityError):
             Line.objects.create(
@@ -113,6 +127,55 @@ class LineAdminConfigTests(TestCase):
     def test_calendar_incidents_not_rendered_in_line_change_form(self):
         model_admin = LineAdmin(Line, admin.site)
         self.assertNotIn("calendar_incidents", model_admin.get_fields(None))
+
+
+class AssetAdminStatusTests(TestCase):
+    """`Asset.status` became a TextChoicesField; the admin must still list and edit it."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.station = Station.objects.create(
+            display_name="KL Sentral", location=Point(101.6869, 3.1341)
+        )
+        cls.asset = Asset.objects.create(
+            station=cls.station,
+            officialid="LIFT-01",
+            asset_type=AssetType.LIFT,
+            status=AssetStatus.IN_OPERATION,
+        )
+        # The station dropdown asks the request's user for add/change permissions.
+        cls.request = RequestFactory().get("/")
+        cls.request.user = get_user_model().objects.create_superuser(
+            "asset-admin", "asset-admin@example.com", "pw"
+        )
+
+    def test_status_is_listed_filterable_and_editable(self):
+        model_admin = AssetAdmin(Asset, admin.site)
+        self.assertIn("status", model_admin.list_display)
+        self.assertIn("status", model_admin.list_filter)
+        self.assertIn("status", model_admin.get_fields(self.request))
+
+    def test_change_form_saves_a_valid_status_and_rejects_an_unknown_one(self):
+        form_class = AssetAdmin(Asset, admin.site).get_form(
+            self.request, self.asset, change=True
+        )
+        data = {
+            "officialid": "LIFT-01",
+            "station": self.station.pk,
+            "short_description": "",
+            "long_description": "",
+            "asset_type": AssetType.LIFT,
+        }
+
+        form = form_class({**data, "status": "UNDER_MAINTENANCE"}, instance=self.asset)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.UNDER_MAINTENANCE)
+
+        form = form_class({**data, "status": "BROKEN"}, instance=self.asset)
+        self.assertFalse(form.is_valid())
+        self.assertIn("status", form.errors)
 
 
 @modify_settings(
@@ -692,6 +755,160 @@ class OperationGraphQLTests(TestCase):
         self.assertEqual(counts_by_ident.get("Set 42"), 1)
         self.assertEqual(counts_by_ident.get("Set 10"), 0)
         self.assertEqual(counts_by_ident.get("Set 11"), 0)
+
+
+class AssetStatusGraphQLTests(TestCase):
+    """`Asset.status` is a GraphQL enum (not a String) and can be filtered on."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.kl_sentral = Station.objects.create(
+            display_name="KL Sentral", location=Point(101.6869, 3.1341)
+        )
+        cls.klcc = Station.objects.create(
+            display_name="KLCC", location=Point(101.7118, 3.1592)
+        )
+        for station, officialid, asset_type, status in (
+            (cls.kl_sentral, "LIFT-01", AssetType.LIFT, AssetStatus.IN_OPERATION),
+            (cls.kl_sentral, "LIFT-02", AssetType.LIFT, AssetStatus.UNDER_MAINTENANCE),
+            (cls.klcc, "ESC-01", AssetType.ESCALATOR, AssetStatus.IN_OPERATION),
+        ):
+            Asset.objects.create(
+                station=station,
+                officialid=officialid,
+                asset_type=asset_type,
+                status=status,
+            )
+
+    def test_assets_return_the_status_enum_value(self):
+        result = execute_graphql("query { assets { officialid status } }")
+
+        self.assertIsNone(result.errors)
+        self.assertEqual(
+            {row["officialid"]: row["status"] for row in result.data["assets"]},
+            {
+                "LIFT-01": "IN_OPERATION",
+                "LIFT-02": "UNDER_MAINTENANCE",
+                "ESC-01": "IN_OPERATION",
+            },
+        )
+
+    def test_status_is_an_enum_type_not_a_string(self):
+        # Read off the schema object, not an introspection query: introspection is
+        # blocked whenever DEBUG is off.
+        type_map = schema._schema.type_map
+
+        self.assertEqual(str(type_map["Asset"].fields["status"].type), "AssetStatus!")
+        self.assertEqual(
+            str(type_map["AssetFilter"].fields["status"].type), "AssetStatus"
+        )
+        status_enum = type_map["AssetStatus"]
+        self.assertIsInstance(status_enum, GraphQLEnumType)
+        self.assertEqual(
+            list(status_enum.values), ["UNDER_MAINTENANCE", "IN_OPERATION"]
+        )
+
+    def test_stored_values_are_the_plain_enum_strings(self):
+        # The TextChoicesField conversion must not change what the column holds.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT status FROM operation_asset ORDER BY officialid",
+            )
+            self.assertEqual(
+                [row[0] for row in cursor.fetchall()],
+                ["IN_OPERATION", "IN_OPERATION", "UNDER_MAINTENANCE"],
+            )
+
+    def test_nested_station_assets_expose_status(self):
+        result = execute_graphql(
+            "query { stations { displayName assets { officialid status } } }"
+        )
+
+        self.assertIsNone(result.errors)
+        self.assertEqual(
+            {
+                station["displayName"]: {
+                    asset["officialid"]: asset["status"] for asset in station["assets"]
+                }
+                for station in result.data["stations"]
+            },
+            {
+                "KL Sentral": {
+                    "LIFT-01": "IN_OPERATION",
+                    "LIFT-02": "UNDER_MAINTENANCE",
+                },
+                "KLCC": {"ESC-01": "IN_OPERATION"},
+            },
+        )
+
+    def test_nested_station_assets_do_not_fan_out_per_station(self):
+        # `Station.assets` is a plain reverse relation and the optimizer prefetches
+        # it, so no assets-by-station DataLoader is needed. A per-station fetch would
+        # make the second run cost more queries than the first.
+        query = "query { stations { displayName assets { officialid status } } }"
+
+        def run() -> int:
+            with CaptureQueriesContext(connection) as captured:
+                result = execute_graphql(query)
+            self.assertIsNone(result.errors)
+            return len(captured)
+
+        queries_for_two_stations = run()
+        for i in range(3):
+            station = Station.objects.create(
+                display_name=f"Extra {i}", location=Point(101.7 + i / 100, 3.1)
+            )
+            Asset.objects.create(
+                station=station,
+                officialid=f"EXTRA-{i}",
+                asset_type=AssetType.LIFT,
+                status=AssetStatus.IN_OPERATION,
+            )
+
+        self.assertEqual(run(), queries_for_two_stations)
+
+    def test_assets_filter_by_status(self):
+        query = """
+            query ($filters: AssetFilter) {
+                assets(filters: $filters) { officialid }
+            }
+        """
+        for filters, expected in (
+            ({"status": "UNDER_MAINTENANCE"}, ["LIFT-02"]),
+            ({"status": "IN_OPERATION"}, ["ESC-01", "LIFT-01"]),
+            ({"status": "IN_OPERATION", "assetType": "LIFT"}, ["LIFT-01"]),
+            (
+                {
+                    "status": "IN_OPERATION",
+                    "station": {"displayName": {"exact": "KL Sentral"}},
+                },
+                ["LIFT-01"],
+            ),
+            (
+                {
+                    "status": "UNDER_MAINTENANCE",
+                    "station": {"displayName": {"exact": "KLCC"}},
+                },
+                [],
+            ),
+        ):
+            with self.subTest(filters=filters):
+                result = execute_graphql(query, variables={"filters": filters})
+                self.assertIsNone(result.errors)
+                self.assertEqual(
+                    sorted(row["officialid"] for row in result.data["assets"]),
+                    expected,
+                )
+
+    def test_assets_filter_rejects_an_unknown_status(self):
+        # A String-typed filter would accept "BROKEN" and quietly return nothing.
+        result = execute_graphql(
+            "query ($filters: AssetFilter) { assets(filters: $filters) { id } }",
+            variables={"filters": {"status": "BROKEN"}},
+        )
+
+        self.assertIsNotNone(result.errors)
+        self.assertIsNone(result.data)
 
 
 class TestFilterDecorators(TestCase):
