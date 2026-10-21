@@ -45,7 +45,13 @@ class MediasGroupByPeriodScalar:
     month: Optional[int]
     day: Optional[int]
     count: int
-    medias: List["MediaScalar"]
+
+    @strawberry.field
+    async def medias(self, info: Info) -> List["MediaScalar"]:
+        # Lazy: only a query that selects `medias` pays for loading the rows.
+        return await info.context.loaders["common"]["medias_from_period_loader"].load(
+            (self.year, self.month, self.day)
+        )
 
 
 @strawberry_django.type(models.Media, order=MediaOrder, pagination=True)

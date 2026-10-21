@@ -1,16 +1,19 @@
 import io
 import struct
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
+from django.contrib.postgres.aggregates import ArrayAgg
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.db.models import Count
+from django.db import connection
+from django.db.models import Count, F, Q
 from django.db.models.functions import TruncHour
 from django.test import SimpleTestCase, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils.timezone import now
 from PIL import ExifTags, Image
 from rest_framework.test import APIRequestFactory
@@ -42,7 +45,7 @@ from common.tasks import (
     cleanup_temporary_media_task,
     convert_temporary_media_to_media_task,
 )
-from common.utils import get_default_start_time
+from common.utils import get_date_key, get_default_start_time
 from common.views import GenericUpload
 from generic.schema.enums import DateGroupings
 from incident.enums import PassengerStatus
@@ -56,7 +59,7 @@ from operation.models import (
     VehicleLine,
     VehicleType,
 )
-from rosak.tests import execute_graphql_async
+from rosak.tests import execute_graphql, execute_graphql_async
 from spotting.enums import SpottingEventType, SpottingVehicleStatus
 from spotting.models import Event, EventMedia
 
@@ -691,6 +694,156 @@ class CommonGraphQLTests(TestCase):
         media_ids = [str(m["id"]) for m in year_entry["medias"]]
         self.assertIn(str(m1.id), media_ids)
         self.assertIn(str(m2.id), media_ids)
+
+
+class MediasGroupByPeriodTests(TestCase):
+    """The GROUP BY resolver returns what the old ArrayAgg-and-loader one did (F012)."""
+
+    QUERY = """
+        query ($type: DateGroupings!) {
+            mediasGroupByPeriod(type: $type) {
+                type dateKey year month day count medias { id }
+            }
+        }
+    """
+
+    # Naive local times (USE_TZ = False), around year, month and leap-day edges.
+    CREATED = [
+        datetime(2023, 12, 31, 23, 59, 59),
+        datetime(2024, 1, 1, 0, 0, 0),
+        datetime(2024, 1, 1, 12, 0, 0),
+        datetime(2024, 2, 29, 8, 15, 0),
+        datetime(2024, 2, 29, 20, 45, 0),
+        datetime(2024, 3, 31, 23, 59, 59),
+        datetime(2025, 7, 4, 3, 30, 0),
+    ]
+
+    def setUp(self):
+        self.user = User.objects.create(firebase_id="period-uid", nickname="Period")
+        for created in self.CREATED:
+            self._media("photo.jpg", created)
+        # No photo file (None is saved as ""): filtered out, so these add no count
+        # to an existing period and leave no period at all for 2022.
+        self._media(None, datetime(2024, 5, 5, 10, 0, 0))
+        self._media("", datetime(2024, 1, 1, 9, 0, 0))
+        self._media("", datetime(2022, 6, 15, 9, 0, 0))
+
+    def _media(self, file, created):
+        with patch(SIGNAL_APPLY_ASYNC):
+            media = Media.objects.create(uploader=self.user, file=file)
+        # `created` is stamped from the real clock on insert, so move it afterwards.
+        Media.objects.filter(pk=media.pk).update(created=created)
+
+    @staticmethod
+    async def _old_implementation(type):
+        """The resolver as it was: ArrayAgg of ids per group, then a loader per id."""
+        groupings = {"year": F("created__year")}
+        if type in [DateGroupings.MONTH, DateGroupings.DAY]:
+            groupings["month"] = F("created__month")
+            if type == DateGroupings.DAY:
+                groupings["day"] = F("created__day")
+
+        rows = (
+            Media.objects.filter(~Q(file=""))
+            .annotate(**groupings)
+            .values(*groupings.keys())
+            .annotate(
+                count=Count("id"), medias=ArrayAgg(F("id"), distinct=True, default=[])
+            )
+        )
+        return [
+            {
+                "type": type.name,
+                "dateKey": get_date_key(
+                    year=row["year"], month=row.get("month"), day=row.get("day")
+                ),
+                "year": row["year"],
+                "month": row.get("month"),
+                "day": row.get("day"),
+                "count": row["count"],
+                "medias": [{"id": str(pk)} for pk in row["medias"]],
+            }
+            async for row in rows
+        ]
+
+    async def _new_implementation(self, type):
+        result = await execute_graphql_async(self.QUERY, {"type": type.name})
+        self.assertIsNone(result.errors)
+        return result.data["mediasGroupByPeriod"]
+
+    async def test_matches_the_old_implementation_for_every_period_type(self):
+        expected_periods = {
+            DateGroupings.YEAR: 3,
+            DateGroupings.WEEK: 3,  # WEEK has always grouped like YEAR
+            DateGroupings.MONTH: 5,
+            DateGroupings.DAY: 5,
+        }
+        for type, n_periods in expected_periods.items():
+            with self.subTest(type=type.name):
+                old = await self._old_implementation(type)
+                new = await self._new_implementation(type)
+
+                self.assertEqual(new, old)
+                self.assertEqual(len(new), n_periods)
+                self.assertEqual(sum(p["count"] for p in new), 7)
+                self.assertTrue(all(p["type"] == type.name for p in new))
+
+    async def test_periods_are_oldest_first_and_empty_ones_are_absent(self):
+        years = [p["year"] for p in await self._new_implementation(DateGroupings.YEAR)]
+        self.assertEqual(years, [2023, 2024, 2025])  # 2022 only had a fileless row
+
+        days = await self._new_implementation(DateGroupings.DAY)
+        keys = [p["dateKey"] for p in days]
+        self.assertEqual(keys, sorted(keys))
+        self.assertEqual(
+            keys[:3], ["2023-12-31", "2024-01-01", "2024-02-29"]
+        )  # year edge and leap day stay on their own local date
+
+    def test_a_count_only_selection_is_one_query_and_loads_no_media(self):
+        # Sync on purpose: CaptureQueriesContext cannot be entered from async code.
+        for type in (DateGroupings.YEAR, DateGroupings.DAY):
+            with self.subTest(type=type.name):
+                with CaptureQueriesContext(connection) as queries:
+                    result = execute_graphql(
+                        "query ($type: DateGroupings!) { mediasGroupByPeriod("
+                        "type: $type) { year count } }",
+                        {"type": type.name},
+                    )
+
+                self.assertIsNone(result.errors)
+                self.assertEqual(len(queries), 1)
+                self.assertIn("GROUP BY", queries[0]["sql"])
+                self.assertNotIn("ARRAY_AGG", queries[0]["sql"])
+
+    async def test_medias_of_mixed_groupings_in_one_request(self):
+        result = await execute_graphql_async(
+            """
+            {
+                byYear: mediasGroupByPeriod(type: YEAR) { year medias { id } }
+                byDay: mediasGroupByPeriod(type: DAY) { year month day medias { id } }
+            }
+            """
+        )
+        self.assertIsNone(result.errors)
+
+        old_year = await self._old_implementation(DateGroupings.YEAR)
+        old_day = await self._old_implementation(DateGroupings.DAY)
+        self.assertEqual(
+            result.data["byYear"],
+            [{"year": p["year"], "medias": p["medias"]} for p in old_year],
+        )
+        self.assertEqual(
+            result.data["byDay"],
+            [
+                {
+                    "year": p["year"],
+                    "month": p["month"],
+                    "day": p["day"],
+                    "medias": p["medias"],
+                }
+                for p in old_day
+            ],
+        )
 
 
 class UserPrivacyTests(TestCase):

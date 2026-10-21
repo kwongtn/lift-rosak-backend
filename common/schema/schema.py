@@ -3,8 +3,8 @@ from uuid import UUID
 
 import strawberry
 import strawberry_django
-from django.contrib.postgres.aggregates import ArrayAgg
-from django.db.models import Count, F, Q
+from django.db.models import Count, Q
+from django.db.models.functions import ExtractDay, ExtractMonth, ExtractYear
 from strawberry.relay import GlobalID
 from strawberry.types import Info
 from strawberry_django.relay import DjangoListConnection
@@ -84,21 +84,22 @@ class CommonScalars:
     async def medias_group_by_period(
         self, info: Info, type: DateGroupings
     ) -> List[MediasGroupByPeriodScalar]:
-        groupings = {"year": F("created__year")}
+        # One GROUP BY in the database. `medias` is a lazy field, so a count-only
+        # selection (the gallery's year slider) never loads a media row. `created`
+        # is a naive local datetime (USE_TZ = False), so EXTRACT needs no time zone.
+        groupings = {"year": ExtractYear("created")}
 
         if type in [DateGroupings.MONTH, DateGroupings.DAY]:
-            groupings["month"] = F("created__month")
+            groupings["month"] = ExtractMonth("created")
 
             if type == DateGroupings.DAY:
-                groupings["day"] = F("created__day")
+                groupings["day"] = ExtractDay("created")
 
-        annotations = (
+        periods = (
             Media.objects.filter(~Q(file=""))
-            .annotate(**groupings)
-            .values(*groupings.keys())
-            .annotate(
-                count=Count("id"), medias=ArrayAgg(F("id"), distinct=True, default=[])
-            )
+            .values(**groupings)
+            .annotate(count=Count("id"))
+            .order_by(*groupings)
         )
 
         return [
@@ -113,14 +114,8 @@ class CommonScalars:
                 month=elem.get("month", None),
                 day=elem.get("day", None),
                 count=elem["count"],
-                medias=[
-                    await info.context.loaders["common"]["media_from_id_loader"].load(
-                        key
-                    )
-                    for key in elem["medias"]
-                ],
             )
-            async for elem in annotations
+            async for elem in periods
         ]
 
 

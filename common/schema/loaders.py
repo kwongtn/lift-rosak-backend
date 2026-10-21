@@ -1,7 +1,6 @@
 from collections import defaultdict
-from typing import List
-from uuid import UUID
 
+from django.db.models import Q
 from strawberry.dataloader import DataLoader
 
 from common.models import Media
@@ -21,9 +20,28 @@ async def batch_load_spottings_from_user(keys):
     return [reporter_dict.get(key, set()) for key in keys]
 
 
-async def batch_load_media_from_id(keys: List[UUID]):
-    media_dict = await Media.objects.filter(id__in=set(keys)).ain_bulk()
-    return [media_dict.get(key, None) for key in keys]
+async def batch_load_medias_from_period(keys):
+    """The media of each (year, month, day) period, in id order.
+
+    `month` / `day` are None for the coarser groupings of `mediasGroupByPeriod`, and
+    the keys of one request can mix groupings, so each row is filed under the year,
+    month and day key it matches.
+    """
+    buckets = {key: [] for key in keys}
+    medias = Media.objects.filter(
+        ~Q(file=""), created__year__in={year for year, _, _ in keys}
+    ).order_by("id")
+    async for media in medias:
+        created = media.created
+        for key in (
+            (created.year, None, None),
+            (created.year, created.month, None),
+            (created.year, created.month, created.day),
+        ):
+            if key in buckets:
+                buckets[key].append(media)
+
+    return [buckets[key] for key in keys]
 
 
 async def batch_load_is_admin_from_user(keys):
@@ -34,6 +52,6 @@ async def batch_load_is_admin_from_user(keys):
 
 CommonContextLoaders = {
     "spottings_from_user_loader": DataLoader(load_fn=batch_load_spottings_from_user),
-    "media_from_id_loader": DataLoader(load_fn=batch_load_media_from_id),
+    "medias_from_period_loader": DataLoader(load_fn=batch_load_medias_from_period),
     "is_admin_from_user_loader": DataLoader(load_fn=batch_load_is_admin_from_user),
 }
