@@ -1638,8 +1638,8 @@ class MediaHandlerTests(TestCase):
         self.assertEqual(exif[ExifTags.Base.Make], "TestMake")
         self.assertEqual(exif[ExifTags.Base.DateTime], "2026:10:21 08:30:00")
 
-    def test_heic_sent_as_a_file_is_refused_and_not_staged(self):
-        # strip_gps cannot edit HEIC, so it would stage the original with its GPS.
+    def test_heic_sent_as_a_file_is_staged_as_sent(self):
+        # strip_gps cannot edit HEIC; the owner chose to accept it as is, GPS included.
         self.tg_file.download_as_bytearray = AsyncMock(
             return_value=bytearray(HEIC_STUB)
         )
@@ -1654,14 +1654,13 @@ class MediaHandlerTests(TestCase):
             self._stub_ready(mocks)
             asyncio.run(media(update, self._context()))
 
-        update.message.reply_html.assert_awaited_once_with(
-            text=(
-                "HEIC photos are not supported. Send it as a photo, "
-                "or export it as JPEG first."
-            )
+        staged = mocks["temp_media"].objects.acreate.await_args.kwargs["file"]
+        staged.seek(0)
+        self.assertEqual(staged.read(), HEIC_STUB)
+        update.message.reply_html.assert_not_awaited()
+        mocks["retry"].assert_awaited_once_with(
+            update.message, "set_reaction", ReactionEmoji.THUMBS_UP
         )
-        mocks["temp_media"].objects.acreate.assert_not_awaited()
-        mocks["retry"].assert_not_awaited()
 
     def test_untrusted_video_awaits_review_and_persists_review_message_id(self):
         update = self._make_update(video=True)

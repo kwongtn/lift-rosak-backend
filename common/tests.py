@@ -29,7 +29,7 @@ from common.enums import (
     TemporaryMediaStatus,
     TemporaryMediaType,
 )
-from common.exif import is_heif, strip_gps
+from common.exif import strip_gps
 from common.models import (
     Clearance,
     FeatureFlag,
@@ -2111,25 +2111,12 @@ class StripGpsTests(SimpleTestCase):
             "exif without gps": jpeg_with_gps(gps=False),
             "jpeg without exif": _jpeg(),
             "png": png.getvalue(),
+            "heic": HEIC_STUB,
             "video": b"\x00\x00\x00\x18ftypmp42 not a real video",
             "empty": b"",
         }.items():
             with self.subTest(label):
                 self.assertIs(strip_gps(data), data)
-
-    def test_is_heif_recognises_heic_by_its_ftyp_brand(self):
-        for brand in (b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"heif"):
-            with self.subTest(brand):
-                self.assertTrue(is_heif(HEIC_STUB.replace(b"heic", brand)))
-
-        for label, data in {
-            "mp4": b"\x00\x00\x00\x18ftypmp42 not a real video",
-            "jpeg": jpeg_with_gps(),
-            "short": b"\x00\x00\x00\x18ftyp",
-            "empty": b"",
-        }.items():
-            with self.subTest(label):
-                self.assertFalse(is_heif(data))
 
     def test_drops_an_exif_segment_it_cannot_read(self):
         # With no way to show it holds no position, the whole segment goes.
@@ -2267,10 +2254,7 @@ class GenericUploadStripsGpsTests(TestCase):
             with self.subTest(name):
                 self.assertEqual(self._upload(content, name=name), content)
 
-    def test_heic_is_refused_and_nothing_is_stored(self):
-        # strip_gps cannot edit HEIC, so it would keep its GPS all the way to Discord.
-        response, stored = self._post(HEIC_STUB, name="IMG_0001.heic")
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(stored, [])
-        self.assertFalse(TemporaryMedia.objects.filter(uploader=self.user).exists())
+    def test_heic_is_accepted_and_stored_unchanged(self):
+        # strip_gps cannot edit HEIC; the owner chose to accept it as is, GPS included.
+        self.assertEqual(self._upload(HEIC_STUB, name="IMG_0001.heic"), HEIC_STUB)
+        self.assertTrue(TemporaryMedia.objects.filter(uploader=self.user).exists())

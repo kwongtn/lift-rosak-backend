@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.enums import TemporaryMediaStatus, TemporaryMediaType
-from common.exif import JPEG_MAGIC, is_heif, strip_gps
+from common.exif import JPEG_MAGIC, strip_gps
 from common.models import TemporaryMedia
 from common.utils import FirebaseUser
 from spotting.models import Event
@@ -72,14 +72,6 @@ class GenericUpload(APIView):
         if user is None:
             return Response(status=status.HTTP_401_UNAUTHORIZED)
 
-        # HEIC keeps its GPS (strip_gps edits JPEG only), so it is neither stored nor
-        # forwarded to Discord.
-        if is_heif(_head(file)):
-            return Response(
-                {"detail": "HEIC images are not supported. Upload a JPEG."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         # Create metadata & some checks
         metadata = {}
         if upload_type == TemporaryMediaType.SPOTTING_EVENT:
@@ -96,9 +88,11 @@ class GenericUpload(APIView):
         else:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        # Upload to temporary media bucket. The GPS is stripped here, before anything
-        # is stored, so temp storage, the Discord webhook and the Imgur copy never see
-        # it, whichever client sent the photo.
+        # Upload to temporary media bucket. The GPS is stripped from a JPEG here, before
+        # anything is stored, so temp storage, the Discord webhook and the Imgur copy
+        # never see it, whichever client sent the photo. Other formats (HEIC, PNG,
+        # WebP, ...) are stored as received, GPS included: the owner chose to never
+        # refuse an image.
         await TemporaryMedia.objects.acreate(
             uploader_id=user.id,
             file=File(file=_without_gps(file), name=extension),

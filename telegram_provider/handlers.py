@@ -18,7 +18,7 @@ from telegram import Update
 from telegram.constants import ReactionEmoji
 
 from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
-from common.exif import is_heif, strip_gps
+from common.exif import strip_gps
 from common.models import TemporaryMedia, User, UserVerificationCode
 from common.tasks import convert_temporary_media_to_media_task
 from common.utils import should_upload_media
@@ -678,7 +678,7 @@ def _media_extension(file_name: str | None, mime_type: str | None) -> str:
 async def _download_without_gps(message, context, file_id, file_size) -> bytes | None:
     """The attachment's bytes with their EXIF GPS removed.
 
-    None, after replying to the user, for a file over 20 MB or a HEIC image.
+    None, after replying to the user, for a file over 20 MB.
     """
     if file_size and file_size > 20 * 1024 * 1024:
         await message.reply_html(text="File is too large (max 20 MB).")
@@ -686,17 +686,8 @@ async def _download_without_gps(message, context, file_id, file_size) -> bytes |
 
     tg_file = await context.bot.get_file(file_id)
     downloaded = bytes(await tg_file.download_as_bytearray())
-    # An iPhone's original ("send as file") is HEIC, whose GPS strip_gps cannot remove.
-    if is_heif(downloaded):
-        await message.reply_html(
-            text=(
-                "HEIC photos are not supported. Send it as a photo, "
-                "or export it as JPEG first."
-            )
-        )
-        return None
-
     # Telegram strips EXIF from photos, but not from images sent as a file.
+    # strip_gps cleans JPEG only, so HEIC and other formats are staged as sent.
     return strip_gps(downloaded)
 
 
