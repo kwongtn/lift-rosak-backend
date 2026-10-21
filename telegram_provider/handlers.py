@@ -18,6 +18,7 @@ from telegram import Update
 from telegram.constants import ReactionEmoji
 
 from common.enums import ClearanceType, TemporaryMediaStatus, TemporaryMediaType
+from common.exif import strip_gps
 from common.models import TemporaryMedia, User, UserVerificationCode
 from common.tasks import convert_temporary_media_to_media_task
 from common.utils import should_upload_media
@@ -765,7 +766,8 @@ async def media(update: Update, context) -> None:
         return
 
     tg_file = await context.bot.get_file(file_id)
-    content = bytes(await tg_file.download_as_bytearray())
+    # Telegram strips EXIF from photos, but not from images sent as a file.
+    content = strip_gps(bytes(await tg_file.download_as_bytearray()))
 
     ext = _media_extension(file_name, mime_type)
     file_obj = File(ContentFile(content), name=f"telegram_{file_id}.{ext}")

@@ -1,16 +1,19 @@
 import io
+import struct
 from datetime import date, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db.models import Count
 from django.db.models.functions import TruncHour
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils.timezone import now
-from PIL import Image
+from PIL import ExifTags, Image
+from rest_framework.test import APIRequestFactory
 from strawberry import UNSET
 from strawberry.relay import GlobalID
 from strawberry.types.maybe import Some
@@ -21,6 +24,7 @@ from common.enums import (
     TemporaryMediaStatus,
     TemporaryMediaType,
 )
+from common.exif import strip_gps
 from common.models import (
     Clearance,
     FeatureFlag,
@@ -39,6 +43,7 @@ from common.tasks import (
     convert_temporary_media_to_media_task,
 )
 from common.utils import get_default_start_time
+from common.views import GenericUpload
 from generic.schema.enums import DateGroupings
 from incident.enums import PassengerStatus
 from incident.models import LineStatusReport, SocialMediaLink
@@ -58,6 +63,67 @@ from spotting.models import Event, EventMedia
 SIGNAL_APPLY_ASYNC = "common.signals.convert_temporary_media_to_media_task.apply_async"
 TASK_APPLY_ASYNC = "common.tasks.convert_temporary_media_to_media_task.apply_async"
 SIGNAL_NSFW_APPLY_ASYNC = "common.signals.check_temporary_media_nsfw.apply_async"
+
+PRINT_IM = b"PrintIM\x000300"
+
+
+def _jpeg(exif: Image.Exif | None = None) -> bytes:
+    buffer = io.BytesIO()
+    image = Image.effect_noise((64, 48), 80).convert("RGB")
+    image.save(buffer, format="JPEG", quality=90, **({"exif": exif} if exif else {}))
+    return buffer.getvalue()
+
+
+def jpeg_with_gps(*, gps: bool = True, after_gps: bool = False) -> bytes:
+    """A JPEG like a phone makes: capture time, make and model, orientation, GPS.
+
+    `after_gps` adds an IFD0 tag that sorts after the GPS pointer (Samsung writes one).
+    """
+    exif = Image.Exif()
+    exif[ExifTags.Base.Make] = "TestMake"
+    exif[ExifTags.Base.Model] = "TestModel"
+    exif[ExifTags.Base.Orientation] = 6
+    exif[ExifTags.Base.DateTime] = "2026:10:21 08:30:00"
+    exif[ExifTags.IFD.Exif] = {ExifTags.Base.DateTimeOriginal: "2026:10:21 08:30:01"}
+    if gps:
+        exif[ExifTags.IFD.GPSInfo] = {
+            ExifTags.GPS.GPSLatitudeRef: "N",
+            ExifTags.GPS.GPSLatitude: (3.0, 6.0, 17.0),
+            ExifTags.GPS.GPSLongitudeRef: "E",
+            ExifTags.GPS.GPSLongitude: (101.0, 39.0, 22.0),
+        }
+    if after_gps:
+        exif[0xC4A5] = PRINT_IM
+    return _jpeg(exif)
+
+
+def _tiff_with_gps(order: str, gps_offset: int | None = None) -> tuple[bytes, bytes]:
+    """An EXIF TIFF block built by hand: (block, the raw GPS latitude bytes).
+
+    IFD0 holds Orientation, the GPS pointer and a PrintIM-style tag after it.
+    """
+    header = (b"II" if order == "<" else b"MM") + struct.pack(order + "HI", 42, 8)
+    gps_ifd = 8 + 2 + 12 * 3 + 4
+    latitude_at = gps_ifd + 2 + 12 * 2 + 4
+
+    ifd0 = struct.pack(order + "H", 3)
+    ifd0 += struct.pack(order + "HHIHH", 0x0112, 3, 1, 6, 0)
+    ifd0 += struct.pack(order + "HHII", 0x8825, 4, 1, gps_offset or gps_ifd)
+    ifd0 += struct.pack(order + "HHI", 0xC4A5, 7, 4) + b"PIM\x00"
+    ifd0 += struct.pack(order + "I", 0)
+
+    gps = struct.pack(order + "H", 2)
+    gps += struct.pack(order + "HHI", 1, 2, 2) + b"N\x00\x00\x00"
+    gps += struct.pack(order + "HHII", 2, 5, 3, latitude_at)
+    gps += struct.pack(order + "I", 0)
+
+    latitude = struct.pack(order + "6I", 3, 1, 6, 1, 17, 1)
+    return header + ifd0 + gps + latitude, latitude
+
+
+def _with_exif_segment(jpeg: bytes, tiff: bytes) -> bytes:
+    segment = b"\xff\xe1" + struct.pack(">H", 2 + 6 + len(tiff)) + b"Exif\x00\x00"
+    return jpeg[:2] + segment + tiff + jpeg[2:]
 
 
 class CommonModelTests(TestCase):
@@ -1273,6 +1339,7 @@ class TemporaryMediaConversionTaskTests(TestCase):
             ) as mock_storage_save,
             patch("common.tasks.Image.open", wraps=Image.open) as mock_image_open,
         ):
+            self.mock_webhook = mock_webhook
             mock_get.return_value.content = content
             mock_webhook.return_value.execute.return_value.json.return_value = {
                 "id": "discord-message-id",
@@ -1366,6 +1433,29 @@ class TemporaryMediaConversionTaskTests(TestCase):
         self.assertTrue(
             EventMedia.objects.filter(event=self.event, media=media).exists()
         )
+
+    def test_discord_upload_never_carries_gps(self):
+        temp_media = self._create_temporary_media(
+            metadata={
+                "mime_type": "image/jpeg",
+                "spotting_event_id": self.event.id,
+                "file_name": "photo.jpg",
+            },
+            filename="photo.jpg",
+        )
+
+        # The staged file predates the upload-time strip and still holds GPS.
+        self._run_convert_task(
+            temp_media,
+            content=jpeg_with_gps(),
+            attachment={"id": "discord-attachment-3", "filename": "photo.jpg"},
+        )
+
+        sent = self.mock_webhook.return_value.add_file.call_args.kwargs["file"]
+        exif = Image.open(io.BytesIO(sent)).getexif()
+        self.assertNotIn(ExifTags.Base.GPSInfo, exif)
+        self.assertEqual(exif[ExifTags.Base.Make], "TestMake")
+        self.assertEqual(exif[ExifTags.Base.DateTime], "2026:10:21 08:30:00")
 
 
 class TemporaryMediaReviewHoldAndCleanupTests(TestCase):
@@ -1621,3 +1711,174 @@ class SeedDemoDataCommandTests(TestCase):
         self.assertFalse(self._seeded(SocialMediaLink).exists())
         self.assertTrue(SocialMediaLink.objects.filter(id=keep_link.id).exists())
         self.assertTrue(LineStatusReport.objects.filter(user=outsider).exists())
+
+
+class StripGpsTests(SimpleTestCase):
+    """`strip_gps` removes only the GPS IFD and leaves the rest byte-identical."""
+
+    @staticmethod
+    def _pixels(jpeg: bytes) -> bytes:
+        return Image.open(io.BytesIO(jpeg)).convert("RGB").tobytes()
+
+    @staticmethod
+    def _exif_segment(jpeg: bytes) -> tuple[int, int]:
+        start = jpeg.index(b"\xff\xe1")
+        (length,) = struct.unpack(">H", jpeg[start + 2 : start + 4])
+        return start, start + 2 + length
+
+    def test_removes_gps_and_keeps_every_other_tag(self):
+        for after_gps in (False, True):
+            with self.subTest(after_gps=after_gps):
+                source = jpeg_with_gps(after_gps=after_gps)
+                latitude = struct.pack("<6I", 3, 1, 6, 1, 17, 1)
+                self.assertIn(latitude, source)
+
+                out = strip_gps(source)
+
+                self.assertNotIn(latitude, out)
+                exif = Image.open(io.BytesIO(out)).getexif()
+                self.assertNotIn(ExifTags.Base.GPSInfo, exif)
+                self.assertEqual(exif.get_ifd(ExifTags.IFD.GPSInfo), {})
+                self.assertEqual(exif[ExifTags.Base.Make], "TestMake")
+                self.assertEqual(exif[ExifTags.Base.Model], "TestModel")
+                self.assertEqual(exif[ExifTags.Base.Orientation], 6)
+                self.assertEqual(exif[ExifTags.Base.DateTime], "2026:10:21 08:30:00")
+                self.assertEqual(
+                    exif.get_ifd(ExifTags.IFD.Exif)[ExifTags.Base.DateTimeOriginal],
+                    "2026:10:21 08:30:01",
+                )
+                if after_gps:
+                    self.assertEqual(exif[0xC4A5], PRINT_IM)
+
+    def test_edit_is_lossless(self):
+        source = jpeg_with_gps()
+        out = strip_gps(source)
+
+        start, end = self._exif_segment(source)
+        self.assertEqual(len(out), len(source))
+        self.assertEqual(out[:start], source[:start])
+        self.assertEqual(out[end:], source[end:])
+        self.assertEqual(self._pixels(out), self._pixels(source))
+
+    def test_handles_both_byte_orders(self):
+        for order in ("<", ">"):
+            with self.subTest(order=order):
+                tiff, latitude = _tiff_with_gps(order)
+                source = _with_exif_segment(_jpeg(), tiff)
+
+                out = strip_gps(source)
+
+                self.assertEqual(len(out), len(source))
+                self.assertIn(latitude, source)
+                self.assertNotIn(latitude, out)
+                exif = Image.open(io.BytesIO(out)).getexif()
+                self.assertEqual(sorted(exif), [0x0112, 0xC4A5])
+                self.assertEqual(exif[0x0112], 6)
+                self.assertEqual(exif[0xC4A5], b"PIM\x00")
+
+    def test_leaves_files_with_nothing_to_strip_untouched(self):
+        png = io.BytesIO()
+        Image.new("RGB", (4, 4)).save(png, format="PNG")
+        for label, data in {
+            "exif without gps": jpeg_with_gps(gps=False),
+            "jpeg without exif": _jpeg(),
+            "png": png.getvalue(),
+            "video": b"\x00\x00\x00\x18ftypmp42 not a real video",
+            "empty": b"",
+        }.items():
+            with self.subTest(label):
+                self.assertIs(strip_gps(data), data)
+
+    def test_drops_an_exif_segment_it_cannot_read(self):
+        # With no way to show it holds no position, the whole segment goes.
+        plain = _jpeg()
+        for label, tiff in {
+            "ifd0 runs past the block": b"II*\x00\x08\x00\x00\x00\xff\xff",
+            "not a tiff block": b"garbage!",
+            "gps pointer outside the block": _tiff_with_gps("<", 0x7FFFFFF0)[0],
+        }.items():
+            with self.subTest(label), self.assertLogs("common.exif", "WARNING"):
+                self.assertEqual(strip_gps(_with_exif_segment(plain, tiff)), plain)
+
+
+class GenericUploadStripsGpsTests(TestCase):
+    """POST /upload/ stores the photo without its GPS, whichever client sent it."""
+
+    def setUp(self):
+        self.user = User.objects.create(firebase_id="upload-gps-uid", nickname="Snap")
+        vehicle_type = VehicleType.objects.create(
+            internal_name="UPLOAD_GPS_VT", display_name="Upload GPS Vehicle Type"
+        )
+        vehicle = Vehicle.objects.create(
+            identification_no="Set 901",
+            vehicle_type=vehicle_type,
+            status=SpottingVehicleStatus.IN_SERVICE,
+        )
+        self.event = Event.objects.create(
+            reporter=self.user,
+            vehicle=vehicle,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date.today(),
+        )
+
+    def _upload(self, content: bytes, name: str = "IMG_0001.jpg") -> bytes:
+        """POST `content` as the reporter and return the bytes handed to storage."""
+        stored = []
+
+        def save(storage, name, file):
+            file.seek(0)
+            stored.append(file.read())
+            return name
+
+        request = APIRequestFactory().post(
+            "/upload/",
+            {
+                "upload_type": TemporaryMediaType.SPOTTING_EVENT,
+                "related_id": str(self.event.id),
+                "image": SimpleUploadedFile(name, content),
+            },
+            format="multipart",
+        )
+        with (
+            patch("common.views.FirebaseUser") as firebase_user,
+            patch(
+                "storages.backends.s3boto3.S3Boto3Storage._save",
+                autospec=True,
+                side_effect=save,
+            ),
+            patch(SIGNAL_APPLY_ASYNC),
+            patch(SIGNAL_NSFW_APPLY_ASYNC),
+        ):
+            firebase_user.return_value.get_current_user = AsyncMock(
+                return_value=self.user
+            )
+            response = GenericUpload.as_view()(request)
+
+        self.assertEqual(response.status_code, 201)
+        (content_stored,) = stored
+        return content_stored
+
+    def test_jpeg_is_stored_without_gps_but_with_its_capture_data(self):
+        source = jpeg_with_gps()
+
+        stored = self._upload(source)
+
+        self.assertTrue(TemporaryMedia.objects.filter(uploader=self.user).exists())
+        exif = Image.open(io.BytesIO(stored)).getexif()
+        self.assertNotIn(ExifTags.Base.GPSInfo, exif)
+        self.assertEqual(exif[ExifTags.Base.Make], "TestMake")
+        self.assertEqual(exif[ExifTags.Base.Model], "TestModel")
+        self.assertEqual(exif[ExifTags.Base.DateTime], "2026:10:21 08:30:00")
+        self.assertEqual(
+            Image.open(io.BytesIO(stored)).convert("RGB").tobytes(),
+            Image.open(io.BytesIO(source)).convert("RGB").tobytes(),
+        )
+
+    def test_other_uploads_are_stored_as_received(self):
+        for name, content in {
+            "clip.mp4": b"\x00\x00\x00\x18ftypmp42 not a real video",
+            "no_gps.jpg": jpeg_with_gps(gps=False),
+        }.items():
+            with self.subTest(name):
+                self.assertEqual(self._upload(content, name=name), content)

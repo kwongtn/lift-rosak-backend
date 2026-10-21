@@ -15,6 +15,7 @@ from common.enums import (
     TemporaryMediaStatus,
     TemporaryMediaType,
 )
+from common.exif import strip_gps
 from incident.models import CalendarIncidentMedia
 from rosak.celery import app as celery_app
 from spotting.models import Event, EventMedia
@@ -163,8 +164,10 @@ def convert_temporary_media_to_media_task(self, *, temporary_media_id: str | int
             # Do not reupload if already uploaded to discord
             if not temp_media.uploaded_discord:
                 webhook = DiscordWebhook(url=settings.DISCORD_MEDIA_WEBHOOK_URL)
+                # Defence in depth: the upload view and the Telegram handler already
+                # strip GPS, but staged files predating them still hold it.
                 webhook.add_file(
-                    file=image_response.content,
+                    file=strip_gps(image_response.content),
                     filename=temp_media.file.name.split("/")[-1],
                 )
 

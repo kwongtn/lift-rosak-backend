@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import io
 import os
 import subprocess
 import sys
@@ -13,10 +14,12 @@ from zoneinfo import ZoneInfo
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
+from PIL import ExifTags, Image
 from telegram.constants import ReactionEmoji
 from telegram.error import BadRequest
 
 from common.enums import TemporaryMediaStatus, TemporaryMediaType
+from common.tests import jpeg_with_gps
 from incident.enums import SocialMediaLinkStatus
 from incident.services import IncidentServiceError, SocialMediaLinkWrite
 from operation.enums import VehicleStatus
@@ -1611,6 +1614,29 @@ class MediaHandlerTests(TestCase):
         mocks["retry"].assert_awaited_once_with(
             update.message, "set_reaction", ReactionEmoji.THUMBS_UP
         )
+
+    def test_image_sent_as_a_file_is_staged_without_exif_gps(self):
+        # Telegram strips EXIF from photos, but not from images sent as a file.
+        self.tg_file.download_as_bytearray = AsyncMock(
+            return_value=bytearray(jpeg_with_gps())
+        )
+        document = MagicMock(name="document")
+        document.mime_type = "image/jpeg"
+        document.file_id = "doc-file-id"
+        document.file_name = "IMG_0001.jpg"
+        document.file_size = 1234
+        update = self._make_update(document=document)
+
+        with self._mock_handlers() as mocks:
+            self._stub_ready(mocks)
+            asyncio.run(media(update, self._context()))
+
+        staged = mocks["temp_media"].objects.acreate.await_args.kwargs["file"]
+        staged.seek(0)
+        exif = Image.open(io.BytesIO(staged.read())).getexif()
+        self.assertNotIn(ExifTags.Base.GPSInfo, exif)
+        self.assertEqual(exif[ExifTags.Base.Make], "TestMake")
+        self.assertEqual(exif[ExifTags.Base.DateTime], "2026:10:21 08:30:00")
 
     def test_untrusted_video_awaits_review_and_persists_review_message_id(self):
         update = self._make_update(video=True)

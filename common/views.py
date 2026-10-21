@@ -2,6 +2,7 @@ import boto3
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.core.files import File
+from django.core.files.base import ContentFile
 from django.db import transaction
 from django.http import HttpRequest
 from rest_framework import status
@@ -10,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.enums import TemporaryMediaStatus, TemporaryMediaType
+from common.exif import JPEG_MAGIC, strip_gps
 from common.models import TemporaryMedia
 from common.utils import FirebaseUser
 from spotting.models import Event
@@ -29,6 +31,18 @@ def get_s3_resource():
         kwargs["endpoint_url"] = settings.AWS_S3_ENDPOINT_URL
 
     return boto3.resource("s3", **kwargs)
+
+
+def _without_gps(file):
+    """The upload with its EXIF GPS removed; anything but a JPEG passes through.
+
+    Peeks at the first bytes so a large video is not read into memory to be skipped.
+    """
+    file.seek(0)
+    is_jpeg = file.read(len(JPEG_MAGIC)) == JPEG_MAGIC
+    file.seek(0)
+
+    return ContentFile(strip_gps(file.read())) if is_jpeg else file
 
 
 class GenericUpload(APIView):
@@ -69,10 +83,12 @@ class GenericUpload(APIView):
         else:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        # Upload to temporary media bucket
+        # Upload to temporary media bucket. The GPS is stripped here, before anything
+        # is stored, so temp storage, the Discord webhook and the Imgur copy never see
+        # it, whichever client sent the photo.
         await TemporaryMedia.objects.acreate(
             uploader_id=user.id,
-            file=File(file=file, name=extension),
+            file=File(file=_without_gps(file), name=extension),
             upload_type=upload_type,
             metadata=metadata,
             status=TemporaryMediaStatus.PENDING,
