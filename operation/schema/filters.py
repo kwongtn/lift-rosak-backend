@@ -56,7 +56,7 @@ class StationFilter:
     ) -> tuple[QuerySet, Q]:
         # A declarative `station_line` field looks up `station_line`, which is not a
         # relation; Django names the reverse one `stationline` and the field errored.
-        return process_filters(value, queryset, info, f"{prefix}stationline__")
+        return process_filters(value, queryset, info, f"{prefix}stationline__")  # type: ignore[arg-type]
 
     @strawberry_django.filter_field
     def location(self, value: strawberry.scalars.JSON, prefix) -> Q:
