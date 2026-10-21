@@ -9,6 +9,7 @@ from asgiref.sync import sync_to_async
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import BigIntegerField, Count, Min, Q, QuerySet
 from django.db.models.expressions import RawSQL
+from django.db.models.functions import ExtractMonth, ExtractYear
 from django.utils import timezone
 from strawberry.exceptions import GraphQLError
 from strawberry.types import Info
@@ -86,6 +87,25 @@ async def get_calendar_incidents_by_severity_count(
     end_date: strawberry.Maybe[date] = None,
     group_by: GroupByEnum = GroupByEnum.DAY,
 ) -> List[CalendarIncidentGroupByDateSeverityScalar]:
+    """Severity counts of the LIVE calendar incidents that started in a window.
+
+    ``start_date`` and ``end_date`` are required and inclusive. Only ``LIVE``
+    incidents count: drafts, pending-approval and rejected rows never do. Only
+    non-empty buckets come back (no zero fill), oldest first.
+
+    ``MONTH``: one row per (calendar month, severity) holding the number of
+    incidents whose ``start_datetime`` falls in that month. Each incident is
+    counted once, in its start month, however long it lasted and whether or not
+    it has ended, so months are independent: a row is not a running total, and
+    January 2025 is not January 2024. ``date`` is the first of the month and
+    ``is_long_term`` is null. Months after today are included (planned works).
+
+    ``DAY``: one row per (day, severity, long or short term) from ``start_date``
+    to today or ``end_date``, whichever is earlier. A long-term incident counts on
+    its start date only. A short-term one counts on every day from its start to
+    its end, or through the last day of that range while it is open-ended. An
+    incident that ends after ``end_date`` is left out.
+    """
     if (
         start_date is None
         or end_date is None
@@ -97,13 +117,38 @@ async def get_calendar_incidents_by_severity_count(
     start = start_date.value
     end = end_date.value
 
-    return_list = []
-    qs = CalendarIncident.objects.filter(
-        Q(Q(start_datetime__date__lte=end) & Q(start_datetime__date__gte=start))
-        & Q(
-            Q(end_datetime__isnull=True)
-            | Q(Q(end_datetime__date__gte=start) & Q(end_datetime__date__lte=end))
+    live_in_window = CalendarIncident.objects.filter(
+        status=CalendarIncidentStatus.LIVE,
+        start_datetime__date__gte=start,
+        start_datetime__date__lte=end,
+    )
+
+    if group_by == GroupByEnum.MONTH:
+        # A GROUP BY on the start month. Comparing month NUMBERS with no year bound
+        # made every row a running total that reset each January.
+        buckets = (
+            live_in_window.values(
+                "severity",
+                year=ExtractYear("start_datetime"),
+                month=ExtractMonth("start_datetime"),
+            )
+            .annotate(count=Count("id"))
+            .order_by("year", "month", "severity")
         )
+        return [
+            CalendarIncidentGroupByDateSeverityScalar(
+                date=date(bucket["year"], bucket["month"], 1),
+                severity=str(bucket["severity"]),
+                count=bucket["count"],
+                is_long_term=None,
+            )
+            async for bucket in buckets
+        ]
+
+    return_list = []
+    qs = live_in_window.filter(
+        Q(end_datetime__isnull=True)
+        | Q(Q(end_datetime__date__gte=start) & Q(end_datetime__date__lte=end))
     )
     min = (await qs.aaggregate(min=Min("start_datetime__date")))["min"]
     today = date.today()
@@ -117,46 +162,7 @@ async def get_calendar_incidents_by_severity_count(
     )
 
     aggregations = {}
-    if group_by == GroupByEnum.MONTH:
-        range = interval.range("months")
-        for range_date in range:
-            range_str = range_date.strftime("%Y-%m")
-            range_year, range_month = range_str.split("-")
-
-            for severity in CalendarIncidentSeverity.values:
-                aggregations[f"{range_str}_{severity}"] = Count(
-                    "id",
-                    filter=Q(
-                        Q(
-                            start_datetime__year__lte=range_year,
-                            start_datetime__month__lte=range_month,
-                        )
-                        & Q(
-                            Q(
-                                end_datetime__year__lte=range_year,
-                                end_datetime__month__lte=range_month,
-                            )
-                            | Q(end_datetime__isnull=True)
-                        )
-                        & Q(severity=severity)
-                    ),
-                )
-
-        for key, value in (await qs.aaggregate(**aggregations)).items():
-            if value > 0:
-                incident_date, severity = key.split("_")
-                year, month = incident_date.split("-")
-
-                return_list.append(
-                    CalendarIncidentGroupByDateSeverityScalar(
-                        date=date(int(year), int(month), 1),
-                        severity=severity,
-                        count=value,
-                        is_long_term=None,
-                    )
-                )
-
-    elif group_by == GroupByEnum.DAY:
+    if group_by == GroupByEnum.DAY:
         range = interval.range("days")
         for range_date in range:
             long_term_filter = Q(Q(long_term=True) & Q(start_datetime__date=range_date))

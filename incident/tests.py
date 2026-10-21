@@ -625,6 +625,7 @@ class TestCalendarIncidentResolvers(TestCase):
             severity=CalendarIncidentSeverity.MAJOR,
             start_datetime=datetime(2024, 1, 5, 10, 0),
             end_datetime=datetime(2024, 1, 6, 10, 0),
+            status=CalendarIncidentStatus.LIVE,
         )
         query = """
             query {
@@ -643,6 +644,173 @@ class TestCalendarIncidentResolvers(TestCase):
         self.assertIsNone(result.errors)
         self.assertIsNotNone(result.data["calendarIncidentsBySeverityCount"])
         self.assertGreater(len(result.data["calendarIncidentsBySeverityCount"]), 0)
+
+
+class TestSeverityCountBuckets(TestCase):
+    """`calendarIncidentsBySeverityCount` counts LIVE incidents per bucket.
+
+    MONTH used to compare month NUMBERS across years, so every row was a running
+    total that reset each January, and every status was counted.
+    """
+
+    QUERY = """
+        query ($start: Date, $end: Date, $groupBy: GroupByEnum!) {
+            calendarIncidentsBySeverityCount(
+                startDate: $start
+                endDate: $end
+                groupBy: $groupBy
+            ) {
+                date
+                severity
+                count
+                isLongTerm
+            }
+        }
+    """
+
+    def make(
+        self,
+        severity,
+        start,
+        end=None,
+        *,
+        status=CalendarIncidentStatus.LIVE,
+        long_term=False,
+    ):
+        return CalendarIncident.objects.create(
+            title="Chart incident",
+            brief="chart",
+            severity=severity,
+            start_datetime=start,
+            end_datetime=end,
+            long_term=long_term,
+            status=status,
+        )
+
+    def rows(self, start, end, group_by):
+        result = execute_graphql(
+            self.QUERY,
+            variables={"start": start, "end": end, "groupBy": group_by},
+        )
+        self.assertIsNone(result.errors)
+        return result.data["calendarIncidentsBySeverityCount"]
+
+    def test_month_counts_are_independent_across_a_year_boundary(self):
+        major, minor, others = (
+            CalendarIncidentSeverity.MAJOR,
+            CalendarIncidentSeverity.MINOR,
+            CalendarIncidentSeverity.OTHERS,
+        )
+        # Before the window: must not leak into any month.
+        self.make(major, datetime(2023, 10, 15, 9, 0))
+        # November 2023: two MAJOR and a MINOR. December 2023 ends on its last minute.
+        self.make(major, datetime(2023, 11, 3, 9, 0), datetime(2023, 11, 3, 12, 0))
+        self.make(major, datetime(2023, 11, 20, 9, 0))
+        self.make(minor, datetime(2023, 11, 25, 9, 0), datetime(2023, 11, 26, 9, 0))
+        self.make(major, datetime(2023, 12, 31, 23, 59))
+        # January 2024: the first instant of the month, and its last day.
+        self.make(major, datetime(2024, 1, 1, 0, 0))
+        self.make(minor, datetime(2024, 1, 31, 12, 0), datetime(2024, 1, 31, 18, 0))
+        # February to mid-March: counted in February only, however long it lasted.
+        self.make(major, datetime(2024, 2, 10, 9, 0), datetime(2024, 3, 15, 9, 0))
+        # March 2024: one that ends after the window still started inside it.
+        self.make(others, datetime(2024, 3, 1, 9, 0), datetime(2024, 3, 2, 9, 0))
+        self.make(major, datetime(2024, 3, 20, 9, 0), datetime(2024, 5, 1, 9, 0))
+        # After the window.
+        self.make(major, datetime(2024, 4, 2, 9, 0))
+
+        rows = self.rows("2023-11-01", "2024-03-31", "MONTH")
+
+        self.assertEqual(
+            [(row["date"], row["severity"], row["count"]) for row in rows],
+            [
+                ("2023-11-01", "MAJOR", 2),
+                ("2023-11-01", "MINOR", 1),
+                ("2023-12-01", "MAJOR", 1),
+                ("2024-01-01", "MAJOR", 1),
+                ("2024-01-01", "MINOR", 1),
+                ("2024-02-01", "MAJOR", 1),
+                ("2024-03-01", "MAJOR", 1),
+                ("2024-03-01", "OTHERS", 1),
+            ],
+        )
+        self.assertTrue(all(row["isLongTerm"] is None for row in rows))
+
+    def test_a_window_inside_one_month_still_counts_that_month(self):
+        self.make(CalendarIncidentSeverity.MAJOR, datetime(2024, 6, 10, 9, 0))
+        self.make(CalendarIncidentSeverity.MAJOR, datetime(2024, 6, 25, 9, 0))
+
+        rows = self.rows("2024-06-05", "2024-06-15", "MONTH")
+
+        self.assertEqual(
+            [(row["date"], row["severity"], row["count"]) for row in rows],
+            [("2024-06-01", "MAJOR", 1)],
+        )
+
+    def test_only_live_incidents_are_counted(self):
+        for status in CalendarIncidentStatus:
+            self.make(
+                CalendarIncidentSeverity.MAJOR,
+                datetime(2024, 2, 10, 9, 0),
+                status=status,
+            )
+
+        for group_by, expected in (
+            ("MONTH", {("2024-02-01", "MAJOR", None): 1}),
+            ("DAY", {("2024-02-10", "MAJOR", False): 1}),
+        ):
+            with self.subTest(group_by=group_by):
+                rows = self.rows("2024-02-10", "2024-02-10", group_by)
+
+                self.assertEqual(
+                    {
+                        (row["date"], row["severity"], row["isLongTerm"]): row["count"]
+                        for row in rows
+                    },
+                    expected,
+                )
+
+    def test_day_mode_keeps_its_exact_date_semantics(self):
+        major, minor, others = (
+            CalendarIncidentSeverity.MAJOR,
+            CalendarIncidentSeverity.MINOR,
+            CalendarIncidentSeverity.OTHERS,
+        )
+        # A long-term incident counts on its start date only, even while open-ended.
+        self.make(major, datetime(2024, 3, 10, 10, 0), long_term=True)
+        # A short-term one counts on each day it ran.
+        self.make(minor, datetime(2024, 3, 10, 8, 0), datetime(2024, 3, 11, 18, 0))
+        # An open-ended short-term one runs through the end of the window.
+        self.make(others, datetime(2024, 3, 11, 9, 0))
+        # Started before the window: not part of it.
+        self.make(major, datetime(2024, 3, 9, 9, 0))
+
+        rows = self.rows("2024-03-10", "2024-03-12", "DAY")
+
+        self.assertEqual(
+            {
+                (row["date"], row["severity"], row["isLongTerm"]): row["count"]
+                for row in rows
+            },
+            {
+                ("2024-03-10", "MAJOR", True): 1,
+                ("2024-03-10", "MINOR", False): 1,
+                ("2024-03-11", "MINOR", False): 1,
+                ("2024-03-11", "OTHERS", False): 1,
+                ("2024-03-12", "OTHERS", False): 1,
+            },
+        )
+
+    def test_a_window_with_no_live_incident_is_empty(self):
+        self.make(
+            CalendarIncidentSeverity.MAJOR,
+            datetime(2024, 2, 10, 9, 0),
+            status=CalendarIncidentStatus.DRAFT,
+        )
+
+        for group_by in ("MONTH", "DAY"):
+            with self.subTest(group_by=group_by):
+                self.assertEqual(self.rows("2024-02-01", "2024-02-29", group_by), [])
 
 
 class TestCalendarIncidentFilter(TestCase):
