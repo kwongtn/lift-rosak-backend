@@ -17,8 +17,19 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 - [19.md](19.md): front-page pulse-link N+1 fix; pytest run leaves the kept test DB broken.
 - [20.md](20.md): `Vehicle.lastSpottedAt` tiebreaker.
 - [21.md](21.md): docs squash to current state; `updateUser` null guard, Telegram settings coercion, `argparse.ArgumentError`, `report_spotting_today` date fix; daily digest sends again (DISTINCT ON crash, per-loop PTB app); lines may share a Telegram channel. Frontend audit fix pass, backend side: `media(id)`, anonymous-spotting privacy, GPS strip, GROUP BY year counts, review follow-ups; every image accepted again, HEIC included.
+- [22.md](22.md): feature pass, backend side of the rosak_firebase 2026-10-21 audit: `calendarIncidents` filters (`activeNow`, `upcomingWithinDays`, `lines`, `stations`, `status`), `Asset.status` enum, `daysAgo` and `lineStatusWeekProfile`, web push subscriptions and MAJOR-incident alerts, per-month severity aggregate, medias paging tie-break, `Asset.station`.
 
 ## By Module/Feature
+
+### Feature pass (Oct 22, backend side of the rosak_firebase 2026-10-21 audit feature pass)
+
+- **699126d**, **4d30b6b**, **07c8289** `[feat](incident)`: `CalendarIncidentFilter` gains `activeNow`, `upcomingWithinDays` (1 to 60), nested `lines` / `stations` (pk-IN subqueries over the through tables, one row per incident) and `status` (F077, F293). **b8a56ab** `[fix](operation)`: `StationFilter.stationLine` resolves the `stationline` relation. The root `calendarIncidents` field still has no status gate; public readers send `status: LIVE`.
+- **7e9fc20**, **3b2b949** `[feat](operation)`: `Asset.status` is a `TextChoicesField` enum (`IN_OPERATION`, `UNDER_MAINTENANCE`) with an `AssetFilter.status`; migration `0019` refuses rows outside the enum before the no-op `AlterField` (F597 phase 1).
+- **19db35f**, **0755450**, **5f94ae8** `[feat](incident)`: `daysAgo` (0 to 56) on `lineStatusHistory`, `networkStatusHistory` and `linesStatusHistory`; `lineStatusWeekProfile(lineId, weeks, dayStartHour)` returns 168 service-day weekday-hour buckets (F213 slice 2).
+- **ce3d947**, **4d66938** `[feat](incident)`: `PushSubscription` (token, user, lines), `registerPushToken` / `unregisterPushToken` / `pushSubscription` (login required, 2048-character tokens, 20 per user), Celery `notify_push_subscribers` sent through `firebase_admin.messaging` on a MAJOR approval, one push per line per 30 minutes via `cache.add`, transient FCM errors re-raised so `autoretry_for` fires, stale tokens pruned (F294).
+- **9832a3d** `[fix](incident)`: `calendarIncidentsBySeverityCount(groupBy: MONTH)` counts LIVE incidents once per (year, month) instead of a running total that reset each January. **7a02ef4** `[fix](common)`: the medias feed appends the primary key to every order, so paging neither repeats nor skips. **6ac24b8** `[fix](operation)`: `Asset.station` replaces the always-failing `Asset.stations` (breaking change recorded in the snapshot allowlist).
+- Docs: **880ec5b**, **82c2f28**, **ea05787**, **45891e3** (progress entry, 12 MISTAKES traps, APPS.md defect rows), **13e8ddb**.
+- Full serial suite 601 → 686 tests, OK; ruff, `manage.py check` and `makemigrations --check` clean. ([22.md](22.md))
 
 ### Audit fix pass (Oct 21, backend side of the rosak_firebase 2026-10-21 audit)
 

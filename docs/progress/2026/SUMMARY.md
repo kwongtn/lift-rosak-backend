@@ -11,7 +11,8 @@ Total commits: 187 non-merge to Oct 20 (Aug 72, Sep 100, Oct 1–20 15; `git log
 - Front-page pulse N+1 fixed; `lastSpottedAt` tiebreaker; `/spot` exact matching.
 - Docs squash to current state; `updateUser` null guard, Telegram settings coercion, `report_spotting_today` digest date fixed and the digest sends again after a nightly DISTINCT ON crash; lines may share a Telegram channel (Oct 21).
 - Frontend audit fix pass, backend side (Oct 21): `media(id)` query; anonymous spottings hide their location, profile rows, counts and photo uploader from everyone but the reporter and admins; lossless EXIF GPS strip from JPEG, with every image accepted (HEIC and other formats are stored as received, by the owner's choice); one-GROUP-BY year counts; per-viewer cache Vary on GraphQL GETs. Suite at 601 tests.
-- Logged days: [01](10/01.md), [03](10/03.md), [08](10/08.md), [19](10/19.md), [20](10/20.md), [21](10/21.md).
+- Frontend audit feature pass, backend side (Oct 22): `calendarIncidents` filters (`activeNow`, `upcomingWithinDays`, `lines`, `stations`, `status`); `Asset.status` enum; `daysAgo` on the status-history queries and `lineStatusWeekProfile`; web push subscriptions with MAJOR-incident alerts through Firebase Cloud Messaging; per-month LIVE severity aggregate, medias paging tie-break, `Asset.station`. Suite at 686 tests.
+- Logged days: [01](10/01.md), [03](10/03.md), [08](10/08.md), [19](10/19.md), [20](10/20.md), [21](10/21.md), [22](10/22.md).
 
 ### 2026-09 - [September summary](09/SUMMARY.md) (100 commits)
 
@@ -48,3 +49,4 @@ Total commits: 187 non-merge to Oct 20 (Aug 72, Sep 100, Oct 1–20 15; `git log
 - 2026-10-03: network and multi-line status history. ([03](10/03.md))
 - 2026-10-08: official posts auto-publish. ([08](10/08.md))
 - 2026-10-20: `Vehicle.lastSpottedAt` tiebreaker. ([20](10/20.md))
+- 2026-10-22: web push subscriptions and MAJOR-incident alerts; incident window, line and station filters; `Asset.status`; typical-week status profile. ([22](10/22.md))
