@@ -39,7 +39,7 @@
 
 ### [2026-10-22] rosak: a schema change fails the full suite until the SDL snapshot is regenerated in the same commit
 
-**Problem**: All five packages changed the GraphQL schema, and no brief mentioned `rosak/tests/snapshots/schema.graphql`. `test_schema_snapshot_matches_committed_baseline` fails until the file equals `str(schema)`. Two cases surprise people:
+**Problem**: All five packages changed the GraphQL schema. The coupling to `rosak/tests/snapshots/schema.graphql` is easy to miss, and one work-package brief did not mention it. `test_schema_snapshot_matches_committed_baseline` fails until the file equals `str(schema)`. Two cases surprise people:
 
 - Turning a declarative filter field into a `filter_field` moves it after `AND`, `OR`, `NOT` and `DISTINCT` in the printed SDL. The name and type are unchanged, but the snapshot differs (`stationLine`, `b8a56ab`). A pure reorder is not a breaking change.
 - A removed or retyped field is breaking by graphql-core's definition. `test_no_breaking_changes_detected` compares the live schema with the SDL committed at `HEAD` and fails until the change is named in `EXPECTED_ACCEPTED_BREAKING_CHANGES` and the pinned count is raised (16 entries now). An added input field needs no entry.
@@ -96,7 +96,7 @@
 
 **Problem**: Two defects in one resolver:
 
-- `MONTH` compared month numbers with no year bound, so every row was a running total that reset each January. It also counted every status, and it left out incidents that start in the window and end after it, and months after today. A test with one incident per status saw `5` for a February where only the `LIVE` one, `1`, should count.
+- `MONTH` compared month numbers with no year bound, so every row was a running total that reset each January. It counted every status. It also left out incidents that start in the window and end after it, and months after today. A test with one incident per status saw `5` for a February where only the `LIVE` one, `1`, should count.
 - `DAY` builds six conditional aggregates per day (three severities, long and short term). Postgres refuses more than 1,664 select-list entries, so a window of 278 days or more with at least one matching incident fails with a `GraphQLError` (`target lists can have at most 1664 entries`). `DAY` also leaves out an incident that ends after `endDate`.
 
 **Root Cause**: `MONTH` compared per-month numbers instead of grouping. `DAY` pays one aggregate per bucket, so the statement grows with the range.
