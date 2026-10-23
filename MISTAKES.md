@@ -10,6 +10,13 @@
 
 ## Traps
 
+### [2026-10-24] tests: rows made "minutes ago" fall outside the current service day for a few minutes after 03:00
+
+**Problem**: A new test of `publicSocialMediaLinks(currentServiceDayOnly: true)` failed when the suite ran at 03:01 and would pass at any other time. Its two "today" rows were created one and two minutes before `now`, and the older one sat before the 03:00 service-day start, so the window dropped it (`1 != 2`).
+**Root Cause**: `service_day_start(now)` rolls over at 03:00, not at midnight, so for the first minutes after 03:00 "a minute ago" is still the previous service day. A fixture built from `now - timedelta(minutes=n)` lies inside the window only when `n` is smaller than the minutes since the rollover.
+**Fix**: The "today" rows of `PublicFeedAutomatedOnlyTests.test_it_composes_with_the_current_service_day_window` sit at the test's own clock reading (`17a23fb`).
+**Prevention**: In a test of `currentServiceDayOnly`, `service_day_start` or any other 03:00 rollover, create "today" rows at `now` (or pin `timezone.now`), never at `now - timedelta(...)`. If a window test fails only between 03:00 and 03:05, suspect the fixture before the code.
+
 ### [2026-10-22] operation: a declarative nested filter field looks up its relation by the Python field name
 
 **Problem**: `StationFilter.stationLine` failed on every query that used it, with `Unsupported lookup 'station_line__display_name__icontains'`. That covered the root `stations(filters: {stationLine: ...})` and `calendarIncidents(filters: {stations: {stationLine: ...}})`. The input type was in the schema, so a client could send it. No test did.

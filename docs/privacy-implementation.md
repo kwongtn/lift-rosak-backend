@@ -12,8 +12,9 @@
 - **`publicUser(id: ID!): UserScalar`** — no permission class (public). `id` is the
   user's **Firebase UID** (`User.firebase_id`), not the database pk. Returns `null` when
   not found.
-- **`UserScalar.spottings: [EventScalar!]`** — enforced in the resolver
-  (`common/schema/scalars.py`):
+- **`UserScalar.spottings(limit: Int, offset: Int! = 0): [EventScalar!]`** — enforced in
+  the resolver (`common/schema/scalars.py`), identically with and without a `limit` (a
+  `limit` returns one newest-first page of the same rows):
   - owner (authenticated user viewing own profile): full list
   - non-owner + `spotting_data_public=True`: the list **without anonymous spottings**
     (admins keep them)
@@ -74,5 +75,6 @@ request wherever `viewer_is_owner_or_admin` needs it (see `MISTAKES.md`).
 - Privacy is field-level, in the resolver; the per-user DataLoader
   (`spottings_from_user_loader`) is preserved. The caller comes from `info.context.user`.
 - Tests in `common/tests.py`: `UserPrivacyTests` (default private; owner / public /
-  private access), `SpottingDataPublicMigrationTests`, `TestUserInput` and
+  private access), `UserSpottingsPagingTests` (the paged field agrees with the full list
+  for every viewer), `SpottingDataPublicMigrationTests`, `TestUserInput` and
   `TestUpdateUserMutation` (omitted / true / false; null is refused).

@@ -46,6 +46,7 @@ Root fields come from `IncidentScalars` (`incident/schema/schema.py`): `vehicleI
 | `displayTodayInLastWeek` | false | Drops the upper bound, so the window becomes the inclusive seven days. Inert unless `lastWeekOnly`. Combined with `currentServiceDayOnly` it is an intersection, empty from 03:00 until midnight. |
 | `alignPageToDay` | false | Never ends a page mid-day. If the lookahead row shares the last row's local day, append that whole day. The page may exceed `first`, with no cap. |
 | `collapseThreads` | false | Narrows to roots (`parent IS NULL`) before the count and the cursor. Each root carries its subtree (`sublinks`, `sublinkCount`). |
+| `automatedOnly` | false | Keeps only automatically ingested official posts (`is_automated=True`). It narrows before the collapse, the windows, the count and the cursor, so `totalCount` and `hasNextPage` follow it. It adds to the moderation gates and never lifts them: `HIDDEN` rows and automated `PENDING_APPROVAL` rows stay out whatever `status` asks for. With `collapseThreads` it narrows the roots, so a conversation rooted in a community link is not listed even when an official post replies inside it; a listed card still shows all of its visible sublinks. |
 
 `totalCount` is the full filtered size, independent of cursor and `alignPageToDay`. It comes from a separate `acount()`. Moderation gates (automated-pending and `HIDDEN` exclusions) are described under Internal State.
 
