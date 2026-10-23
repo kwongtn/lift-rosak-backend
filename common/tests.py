@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+from cachalot.api import cachalot_disabled
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.postgres.aggregates import ArrayAgg
@@ -997,6 +998,233 @@ class UserPrivacyTests(TestCase):
             result.data["publicUser"]["spottings"],
             "Owner always sees own spottings",
         )
+
+
+class UserSpottingsPagingTests(TestCase):
+    """`publicUser.spottings(limit:, offset:)` pages a history newest first, under the
+    privacy rules of the full list (F252)."""
+
+    QUERY = """
+        query ($id: ID!, $limit: Int, $offset: Int! = 0) {
+            publicUser(id: $id) {
+                spottings(limit: $limit, offset: $offset) { id }
+            }
+        }
+    """
+
+    # (minute after the base time, anonymous). Ties on the minute are on purpose.
+    OWNER_SPOTS = [
+        (0, False),
+        (1, False),
+        (1, True),
+        (2, False),
+        (3, False),
+        (3, False),
+        (3, False),
+        (4, True),
+        (5, False),
+    ]
+    PRIVATE_SPOTS = [(0, False), (1, True), (2, False)]
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create(
+            firebase_id="paging-owner", spotting_data_public=True
+        )
+        cls.private_owner = User.objects.create(
+            firebase_id="paging-private", spotting_data_public=False
+        )
+        cls.visitor = User.objects.create(firebase_id="paging-visitor")
+        cls.admin = User.objects.create(firebase_id="paging-admin")
+        cls.vehicle = Vehicle.objects.create(
+            identification_no="Set 95",
+            vehicle_type=VehicleType.objects.create(
+                internal_name="PAGING_TYPE", display_name="Paging type"
+            ),
+        )
+        VehicleLine.objects.create(
+            vehicle=cls.vehicle,
+            line=Line.objects.create(
+                code="PGL", display_name="Paging line", display_color="#123456"
+            ),
+        )
+        cls.owner_events = cls._spot(cls.owner, cls.OWNER_SPOTS)
+        cls.private_events = cls._spot(cls.private_owner, cls.PRIVATE_SPOTS)
+
+    @classmethod
+    def _spot(cls, reporter, spots):
+        """The (id, minute, anonymous) of one event per spot."""
+        base = datetime(2026, 10, 1, 12, 0, 0)
+        events = []
+        for minute, anonymous in spots:
+            event = Event.objects.create(
+                reporter=reporter,
+                vehicle=cls.vehicle,
+                type=SpottingEventType.JUST_SPOTTING,
+                status=SpottingVehicleStatus.IN_SERVICE,
+                spotting_date=date(2026, 10, 1),
+                is_anonymous=anonymous,
+            )
+            # `created` comes from the clock, so the order is written by an update.
+            Event.objects.filter(pk=event.pk).update(
+                created=base + timedelta(minutes=minute)
+            )
+            events.append((event.pk, minute, anonymous))
+        return events
+
+    @staticmethod
+    def _newest_first(events, *, anonymous: bool) -> list[str]:
+        """The ids in the order a page must give them: `created` then `id`, descending."""
+        shown = [e for e in events if anonymous or not e[2]]
+        return [
+            str(pk)
+            for pk, _, _ in sorted(shown, key=lambda e: (e[1], e[0]), reverse=True)
+        ]
+
+    async def _spottings(self, profile, viewer, **variables):
+        """The ids `viewer` gets, or None when the history is hidden from them.
+
+        `self.admin` is the only admin.
+        """
+        claim = AsyncMock(side_effect=lambda candidate: candidate.id == self.admin.id)
+        with patch("common.schema.loaders.has_admin_claim", new=claim):
+            result = await execute_graphql_async(
+                self.QUERY, {"id": profile.firebase_id, **variables}, user=viewer
+            )
+        self.assertIsNone(result.errors)
+        rows = result.data["publicUser"]["spottings"]
+        return None if rows is None else [row["id"] for row in rows]
+
+    async def _walk(self, profile, viewer, page_size):
+        """Every page in turn, until one comes back short."""
+        ids, offset = [], 0
+        while True:
+            page = await self._spottings(
+                profile, viewer, limit=page_size, offset=offset
+            )
+            if page is None:
+                return None
+            self.assertLessEqual(len(page), page_size)
+            ids += page
+            if len(page) < page_size:
+                return ids
+            offset += page_size
+
+    async def test_the_owner_pages_everything_newest_first_anonymous_included(self):
+        expected = self._newest_first(self.owner_events, anonymous=True)
+
+        # Page sizes that put a boundary inside the three-way tie, on the last row
+        # (9) and past it.
+        for page_size in (1, 2, 4, 9, 10, 200):
+            with self.subTest(page_size=page_size):
+                self.assertEqual(
+                    await self._walk(self.owner, self.owner, page_size), expected
+                )
+
+    async def test_a_visitor_pages_a_public_profile_without_anonymous_spottings(self):
+        expected = self._newest_first(self.owner_events, anonymous=False)
+        anonymous = {str(pk) for pk, _, hidden in self.owner_events if hidden}
+
+        for viewer in (None, self.visitor):
+            for page_size in (1, 3, 7):
+                with self.subTest(
+                    viewer=getattr(viewer, "firebase_id", None), page_size=page_size
+                ):
+                    ids = await self._walk(self.owner, viewer, page_size)
+
+                    self.assertEqual(ids, expected)
+                    self.assertFalse(anonymous & set(ids))
+
+    async def test_an_admin_pages_the_anonymous_spottings_of_a_public_profile_too(self):
+        self.assertEqual(
+            await self._walk(self.owner, self.admin, 4),
+            self._newest_first(self.owner_events, anonymous=True),
+        )
+
+    async def test_a_visitor_on_a_private_profile_gets_null_and_the_owner_pages(self):
+        for viewer in (None, self.visitor):
+            with self.subTest(viewer=getattr(viewer, "firebase_id", None)):
+                self.assertIsNone(
+                    await self._spottings(self.private_owner, viewer, limit=5)
+                )
+
+        self.assertEqual(
+            await self._walk(self.private_owner, self.private_owner, 2),
+            self._newest_first(self.private_events, anonymous=True),
+        )
+
+    async def test_a_page_agrees_with_the_full_list_for_every_viewer(self):
+        for profile in (self.owner, self.private_owner):
+            for viewer in (None, self.visitor, self.admin, profile):
+                with self.subTest(
+                    profile=profile.firebase_id,
+                    viewer=getattr(viewer, "firebase_id", None),
+                ):
+                    full = await self._spottings(profile, viewer)
+                    paged = await self._walk(profile, viewer, 4)
+
+                    if full is None:
+                        self.assertIsNone(paged)
+                    else:
+                        self.assertCountEqual(paged, full)
+
+    async def test_a_bad_limit_or_offset_is_rejected(self):
+        for variables in (
+            {"limit": 0},
+            {"limit": -1},
+            {"limit": 201},
+            {"limit": 5, "offset": -1},
+            {"offset": 5},
+        ):
+            with (
+                self.subTest(variables=variables),
+                self.assertLogs("strawberry.execution", "ERROR"),
+            ):
+                result = await execute_graphql_async(
+                    self.QUERY,
+                    {"id": self.owner.firebase_id, **variables},
+                    user=self.owner,
+                )
+
+                self.assertEqual(len(result.errors), 1)
+                self.assertIsNone(result.data["publicUser"]["spottings"])
+
+        for limit in (1, 200):
+            with self.subTest(limit=limit):
+                self.assertIsNotNone(
+                    await self._spottings(self.owner, self.owner, limit=limit)
+                )
+
+    def test_a_page_costs_the_same_queries_however_many_rows_it_has(self):
+        query = """
+            query ($id: ID!, $limit: Int) {
+                publicUser(id: $id) {
+                    spottings(limit: $limit) {
+                        id
+                        isMine
+                        vehicle {
+                            identificationNo
+                            vehicleType { internalName }
+                            lines { code }
+                        }
+                    }
+                }
+            }
+        """
+        counts = {}
+        for limit in (1, 9):
+            # cachalot would serve the second run's repeated queries from cache.
+            with cachalot_disabled(), CaptureQueriesContext(connection) as queries:
+                result = execute_graphql(
+                    query,
+                    {"id": self.owner.firebase_id, "limit": limit},
+                    user=self.owner,
+                )
+            self.assertIsNone(result.errors)
+            self.assertEqual(len(result.data["publicUser"]["spottings"]), limit)
+            counts[limit] = len(queries)
+
+        self.assertEqual(counts[1], counts[9])
 
 
 class SpottingDataPublicMigrationTests(TestCase):

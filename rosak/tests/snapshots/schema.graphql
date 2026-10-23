@@ -1056,7 +1056,7 @@ type UserScalar {
   spottingDataPublic: Boolean!
   favouriteVehicles(count: Int = 1): [FavouriteVehicleData!]!
   withMostEntries(type: DateGroupings!): WithMostEntriesData
-  spottings: [EventScalar!]
+  spottings(limit: Int = null, offset: Int! = 0): [EventScalar!]
   spottingsCount: Int!
   mediaCount: Int!
   spottingTrends(start: Date, end: Date, dateGroup: DateGroupings = DAY, typeGroup: Boolean = false, freeRange: Boolean = false): [UserSpottingTrend!]!

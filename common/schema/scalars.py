@@ -5,6 +5,7 @@ import strawberry
 import strawberry_django
 from asgiref.sync import sync_to_async
 from django.db.models import Count, F, Q
+from graphql import GraphQLError
 from strawberry.permission import BasePermission, PermissionExtension
 from strawberry.types import Info
 
@@ -100,6 +101,10 @@ class MediaType(strawberry.relay.Node):
     @strawberry_django.field(only=["created"])
     def created_date(self) -> str:
         return self.created.date()
+
+
+# The most spottings one `UserScalar.spottings` page may ask for.
+MAX_SPOTTINGS_PAGE = 200
 
 
 async def _events_shown_to_viewer(info: Info, user_id) -> Q:
@@ -204,10 +209,41 @@ class UserScalar:
 
     @strawberry_django.field
     async def spottings(
-        self, info: Info
+        self, info: Info, limit: Optional[int] = None, offset: int = 0
     ) -> Optional[
         List[Annotated["EventScalar", strawberry.lazy("spotting.schema.scalars")]]
     ]:
+        """The user's spottings, or null when the viewer may not see the history.
+
+        No `limit`: every spotting, in no promised order, as one dataloader batch.
+        A `limit` (1 to 200): one page after the first `offset` rows, newest
+        submission first (`created`, then `id`, so rows that tie never skip or
+        repeat between pages). `offset` without a `limit` is rejected, not ignored.
+        """
+        if limit is not None and not 1 <= limit <= MAX_SPOTTINGS_PAGE:
+            raise GraphQLError(f"limit must be from 1 to {MAX_SPOTTINGS_PAGE}.")
+        if offset < 0 or (offset and limit is None):
+            raise GraphQLError("offset must be 0 or more, and needs a limit.")
+
+        if limit is not None:
+            # Who may see the history is the rule of the full list below: the owner
+            # always, anyone else only on a public one. `_events_shown_to_viewer`
+            # then hides the anonymous spottings from all but the owner and admins.
+            is_owner = bool(info.context.user) and info.context.user.id == self.id
+            if not (is_owner or self.spotting_data_public):
+                return None
+
+            # A queryset, not a list, so the optimizer joins `vehicle` and prefetches
+            # `lines` (a page of 30 is 4 queries, not 93). `reporter` is joined by
+            # hand, as the loader does, because it cannot see that `isMine` reads it.
+            return (
+                spotting_models.Event.objects.filter(
+                    await _events_shown_to_viewer(info, self.id)
+                )
+                .select_related("reporter")
+                .order_by("-created", "-id")[offset : offset + limit]
+            )
+
         # Owner always sees their own spottings
         if info.context.user and info.context.user.id == self.id:
             return await info.context.loaders["common"][
