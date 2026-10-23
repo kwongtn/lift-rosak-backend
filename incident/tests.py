@@ -4901,6 +4901,198 @@ class PublicFeedHiddenGateTests(TestCase):
         self.assertIs(rows[str(hidden.id)]["isAutomated"], True)
 
 
+class PublicFeedAutomatedOnlyTests(TestCase):
+    """``automatedOnly`` narrows the public feed to the operators' official posts, so
+    a surface that wants only those need not page past the community's links (F539)."""
+
+    feed_query = """
+        query Feed(
+            $first: Int! = 20
+            $after: String
+            $status: SocialMediaLinkStatus
+            $automated: Boolean! = false
+            $collapse: Boolean! = false
+            $today: Boolean! = false
+        ) {
+            publicSocialMediaLinks(
+                first: $first
+                after: $after
+                status: $status
+                automatedOnly: $automated
+                collapseThreads: $collapse
+                currentServiceDayOnly: $today
+            ) {
+                totalCount
+                pageInfo { hasNextPage endCursor }
+                edges { node { id sublinkCount } }
+            }
+        }
+    """
+
+    def setUp(self):
+        self.community_author = User.objects.create(firebase_id="automated-only-user")
+        self.system_author = get_system_author()
+        self.now = timezone.now()
+
+    def _link(
+        self,
+        slug,
+        *,
+        official=False,
+        minutes_ago=0,
+        parent=None,
+        status=SocialMediaLinkStatus.LIVE,
+    ):
+        return SocialMediaLink.objects.create(
+            url=f"https://example.com/{slug}",
+            title=slug,
+            user=self.system_author if official else self.community_author,
+            is_automated=official,
+            status=status,
+            parent=parent,
+            occurred_at=self.now - timedelta(minutes=minutes_ago),
+        )
+
+    def _feed(self, **variables):
+        result = execute_graphql(self.feed_query, variables=variables)
+        self.assertIsNone(result.errors, msg=f"errors: {result.errors}")
+        return result.data["publicSocialMediaLinks"]
+
+    @staticmethod
+    def _ids(feed):
+        return [edge["node"]["id"] for edge in feed["edges"]]
+
+    @staticmethod
+    def _gid(*links):
+        return [str(link.id) for link in links]
+
+    def test_it_lists_the_official_posts_and_none_of_the_community_links(self):
+        official_new = self._link("official-new", official=True, minutes_ago=5)
+        official_old = self._link("official-old", official=True, minutes_ago=10)
+        community = self._link("community", minutes_ago=3)
+        pending = self._link(
+            "community-pending",
+            minutes_ago=4,
+            status=SocialMediaLinkStatus.PENDING_APPROVAL,
+        )
+
+        everything = self._feed()
+        official_only = self._feed(automated=True)
+
+        # Off is the feed as it was: both community links are on it.
+        self.assertEqual(
+            self._ids(everything),
+            self._gid(community, pending, official_new, official_old),
+        )
+        self.assertEqual(self._ids(self._feed(automated=False)), self._ids(everything))
+        self.assertEqual(
+            self._ids(official_only), self._gid(official_new, official_old)
+        )
+        self.assertEqual(official_only["totalCount"], 2)
+
+    def test_the_count_and_the_next_page_follow_the_filter(self):
+        officials = [
+            self._link(f"official-{i}", official=True, minutes_ago=minutes)
+            for i, minutes in enumerate((1, 2, 30))
+        ]
+        for i, minutes in enumerate((3, 4, 5, 60)):
+            self._link(f"community-{i}", minutes_ago=minutes)
+
+        self.assertEqual(self._feed()["totalCount"], 7)
+        first_two = self._feed(automated=True, first=2)
+        # A third official post is left, with community links between and after.
+        self.assertEqual(self._ids(first_two), self._gid(*officials[:2]))
+        self.assertTrue(first_two["pageInfo"]["hasNextPage"])
+        self.assertEqual(first_two["totalCount"], 3)
+
+        # Older community links exist, but no older official post does.
+        everything_official = self._feed(automated=True, first=3)
+        self.assertEqual(self._ids(everything_official), self._gid(*officials))
+        self.assertFalse(everything_official["pageInfo"]["hasNextPage"])
+
+        seen, after = [], None
+        while True:
+            page = self._feed(automated=True, first=1, after=after)
+            seen += self._ids(page)
+            self.assertEqual(page["totalCount"], 3)
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            after = page["pageInfo"]["endCursor"]
+        self.assertEqual(seen, self._gid(*officials))
+
+    def test_hidden_and_pending_official_rows_stay_out(self):
+        live = self._link("official-live", official=True)
+        self._link(
+            "official-hidden", official=True, status=SocialMediaLinkStatus.HIDDEN
+        )
+        self._link(
+            "official-pending",
+            official=True,
+            status=SocialMediaLinkStatus.PENDING_APPROVAL,
+        )
+
+        feed = self._feed(automated=True)
+
+        self.assertEqual(self._ids(feed), self._gid(live))
+        self.assertEqual(feed["totalCount"], 1)
+        # Asking for the gated status by name cannot lift a gate either.
+        for status in ("HIDDEN", "PENDING_APPROVAL"):
+            with self.subTest(status=status):
+                gated = self._feed(automated=True, status=status)
+
+                self.assertEqual(gated["edges"], [])
+                self.assertEqual(gated["totalCount"], 0)
+
+    def test_it_composes_with_collapse_threads_over_the_roots(self):
+        official_root = self._link("official-root", official=True, minutes_ago=10)
+        community_reply = self._link(
+            "community-reply", minutes_ago=9, parent=official_root
+        )
+        official_reply = self._link(
+            "official-reply", official=True, minutes_ago=8, parent=official_root
+        )
+        community_root = self._link("community-root", minutes_ago=7)
+        self._link(
+            "official-reply-to-community",
+            official=True,
+            minutes_ago=6,
+            parent=community_root,
+        )
+        lone_official = self._link("lone-official", official=True, minutes_ago=5)
+
+        flat = self._feed(automated=True)
+        cards = self._feed(automated=True, collapse=True)
+        control = self._feed(collapse=True)
+
+        # Flat, every official post is a row, wherever it sits in a tree.
+        self.assertEqual(flat["totalCount"], 4)
+        self.assertIn(str(official_reply.id), self._ids(flat))
+        # Collapsed, the official ROOTS are the cards: a reply is not one, and a
+        # community root is not listed for the official reply inside it.
+        self.assertEqual(self._ids(cards), self._gid(lone_official, official_root))
+        self.assertEqual(cards["totalCount"], 2)
+        # The filter picks the cards, not what a card carries.
+        self.assertEqual(cards["edges"][1]["node"]["sublinkCount"], 2)
+        self.assertEqual(
+            self._ids(control), self._gid(lone_official, community_root, official_root)
+        )
+        self.assertNotIn(str(community_reply.id), self._ids(cards))
+
+    def test_it_composes_with_the_current_service_day_window(self):
+        # Both "today" rows sit at the test's own clock reading, not minutes
+        # before it: a few minutes back would fall before the 03:00 service-day
+        # start whenever the suite runs just after the rollover.
+        today = self._link("official-today", official=True)
+        self._link("official-old", official=True, minutes_ago=3 * 24 * 60)
+        self._link("community-today")
+
+        feed = self._feed(automated=True, today=True)
+
+        self.assertEqual(self._ids(feed), self._gid(today))
+        self.assertEqual(feed["totalCount"], 1)
+        self.assertEqual(self._feed(today=True)["totalCount"], 2)
+
+
 class OfficialPostAutoPublicationTests(TestCase):
     """Ingestion auto-publishes: a new official row is LIVE and on the feed.
 

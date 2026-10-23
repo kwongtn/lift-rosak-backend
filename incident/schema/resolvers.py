@@ -590,6 +590,7 @@ async def get_public_social_media_links(
     align_page_to_day: bool = False,
     display_today_in_last_week: bool = False,
     collapse_threads: bool = False,
+    automated_only: bool = False,
 ) -> SocialMediaLinkConnection:
     """Public social-media-link feed, cursor-paginated.
 
@@ -665,6 +666,17 @@ async def get_public_social_media_links(
     ``hasNextPage`` probes for any row after it. A lookahead on a different day
     leaves the page exactly as it would be without alignment. Both flags default
     to ``False``.
+
+    ``automated_only`` (default ``False``) keeps only automatically ingested
+    official posts (``is_automated=True``), so the operators' notices can be listed
+    without paging past the community's links. It narrows the queryset before the
+    collapse, the windows, the count and the cursor, so ``totalCount`` and
+    ``hasNextPage`` follow it. It adds to the moderation gates and never lifts them:
+    ``HIDDEN`` rows and automated ``PENDING_APPROVAL`` rows stay out whatever
+    ``status`` asks for. With ``collapse_threads`` it narrows the ROOTS, so a
+    conversation rooted in a community link is not listed even when an official post
+    replies inside it; it decides which cards are listed, not what a card carries,
+    so a listed card still shows every visible sublink.
 
     ``collapse_threads`` — conversation-root pages over the link tree.
 
@@ -810,6 +822,13 @@ async def get_public_social_media_links(
     queryset = queryset.exclude(
         is_automated=True, status=SocialMediaLinkStatus.PENDING_APPROVAL
     )
+
+    # Official posts only. A plain narrowing, placed before the collapse, the
+    # windows, the count and the cursor so totalCount and hasNextPage describe the
+    # narrowed feed. It cannot lift the gates above: they are excludes on the same
+    # queryset.
+    if automated_only:
+        queryset = queryset.filter(is_automated=True)
 
     # Thread collapse, before both the count and the cursor: a collapsed page
     # paginates over roots and nests the subtree on each root, so "M of M" must
