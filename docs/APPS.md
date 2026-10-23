@@ -109,7 +109,7 @@ graph TD
     BEAT --> CH
     BEAT --> TP
     BEAT --> INC
-    SP -->|nightly digest 00:00| TG
+    SP -->|nightly digest 03:01| TG
     CM --> PG
     OP --> PG
 ```
@@ -120,17 +120,17 @@ graph TD
 
 **Ingress surface** — GraphQL `POST /graphql/` (introspection disabled when `DEBUG=False`); `POST /upload/` (multipart, authenticated by the `Firebase-Auth-Key` header rather than GraphQL context); three DRF chart feeds under `/operation/` (one returns CSV built with `polars`); `POST /telegram_provider/` (self-registering webhook, polling disabled); `GET/POST /webhooks/x-api` (X Activity API receiver — GET answers the CRC registration challenge, POST ingests a signed `post.create` delivery into `SocialMediaLink`; `csrf_exempt` because it authenticates by HMAC over the raw body, must ack within 10 s, and Telegram-notifies off a Celery task; registered in `rosak/urls.py` inside an `apps.is_installed("incident")` block); `/admin/`, `/hijack/`, `/advanced_filters/`, `/mdeditor/`, `/health-check/`; a Sentry tunnel at `/sentry/` and `/version/`. In production, every unmatched path is caught by `custom_view.redirect_view` — a rickroll.
 
-**Celery beat — 9 entries, all declared centrally in [rosak/celery.py](../rosak/celery.py), none locally: 8 unconditional plus the official-post poll, which is **opt-in** (`OFFICIAL_POST_POLLING_ENABLED`, default off).** Crontab times are local `TIME_ZONE` (Asia/Kuala_Lumpur): `CELERY_TIMEZONE` is set only `if USE_TZ` (and `USE_TZ = False`), but Celery's `Settings.timezone` falls back to Django's `TIME_ZONE` (`app.timezone` checked in the `app` container). 03:00 is also the spotting _service-day cutoff_ (`telegram_provider.utils.DEFAULT_SPOTTING_CUTOFF`, used by `/spotting_today` and `report_spotting_today`); it is unrelated to the beat times.
+**Celery beat — 9 entries, all declared centrally in [rosak/celery.py](../rosak/celery.py), none locally: 8 unconditional plus the official-post poll, which is **opt-in** (`OFFICIAL_POST_POLLING_ENABLED`, default off).** Crontab times are local `TIME_ZONE` (Asia/Kuala_Lumpur): `CELERY_TIMEZONE` is set only `if USE_TZ` (and `USE_TZ = False`), but Celery's `Settings.timezone` falls back to Django's `TIME_ZONE` (`app.timezone` checked in the `app` container). 03:00 is also the spotting _service-day cutoff_ (`telegram_provider.utils.DEFAULT_SPOTTING_CUTOFF`, used by `/spotting_today` and by `report_spotting_today` to pick the closed day). The digest beat sits at 03:01, one minute later, and its window starts there (`spotting.tasks.DIGEST_DAY_START`).
 
 | Schedule     | Task                                                                          | Owner               |
 | ------------ | ----------------------------------------------------------------------------- | ------------------- |
 | every 1 min  | `cleanup_temporary_media_task` — re-drive stalled uploads, purge `TO_DELETE`  | `common`            |
 | every 5 min  | `ingest_official_posts` — pull tracked X accounts into `SocialMediaLink` + Telegram the admin per new post. **Opt-in**: not scheduled unless `OFFICIAL_POST_POLLING_ENABLED=true` (webhooks are the primary path). The schedule is built at import, so toggling needs a `celerybeat` restart; the task also no-ops unless the master flag + token are set, and skips the notification when `TELEGRAM_ADMIN_CHAT_ID` is blank | `incident` |
 | every 10 min | `cleanup_expired_verification_codes`                                          | `common`            |
-| 00:00        | `report_spotting_today` — per-channel Telegram digest via `send_message`, for the service day that just ended (`effective_spotting_date`) | `spotting`  |
 | 01:00        | `aggregate_line_vehicle_status_mtrec_task` — external scrape                  | `chartography`      |
 | 03:00        | `cleanup_telegram_logs` — 30-day retention                                    | `telegram_provider` |
 | 03:00        | `purge_soft_deleted_incidents` — hard-delete soft-deleted incidents past 90 days | `incident`       |
+| 03:01        | `report_spotting_today` — per-channel Telegram digest via `send_message`, for the 27-hour service day that closed at 03:01: submissions in `[D 03:01, D+1 03:01)` (`Event.created`), headed `D` | `spotting`  |
 | 03:30        | `purge_rejected_incidents` — hard-delete `REJECTED` incidents unchanged for 30 days | `incident`    |
 | 05:00        | `aggregate_line_vehicle_status_mlptf_task` — internal aggregation             | `chartography`      |
 
@@ -241,7 +241,7 @@ Three apps each hold one third of "what is broken at this station right now" and
 
 **2. Per-user subscriptions instead of one blanket channel dump** _(spotting + common + telegram_provider)_
 
-`report_spotting_today` posts one digest per channel at 00:00 with no per-user concept, yet the per-user machinery already exists: `EventRead`, `EventScalar.is_read`, `EventFilter.is_read` and the `markAsRead` mutation are all user-scoped and `IsLoggedIn`. `common.User.telegram_id` gives the delivery address and `common.Clearance` gives the capability model.
+`report_spotting_today` posts one digest per channel at 03:01 with no per-user concept, yet the per-user machinery already exists: `EventRead`, `EventScalar.is_read`, `EventFilter.is_read` and the `markAsRead` mutation are all user-scoped and `IsLoggedIn`. `common.User.telegram_id` gives the delivery address and `common.Clearance` gives the capability model.
 **Readiness:** A preferences model (which lines, which vehicle types, what hour) is `Not ready` — new model plus migration.
 
 **3. Shared geo primitives give three apps "near me" at once** _(generic + operation + spotting + incident)_

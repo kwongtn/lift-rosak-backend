@@ -77,7 +77,7 @@ from this feature.
   `infinite_retry_on_error` is gone.
 - **`spotting.tasks.report_spotting_today`**: Nightly digest task. Now calls
   `telegram_provider.utils.send_message` via `async_to_sync`. Scheduled in
-  `rosak/celery.py`'s `beat_schedule` at `crontab(hour="0", minute="0")`.
+  `rosak/celery.py`'s `beat_schedule` at `crontab(hour="3", minute="1")`.
 - **`common.tasks`**: General Celery work (NSFW moderation, media conversion,
   verification-code cleanup). Does **not** contain `infinite_retry_on_error` —
   that lives in `telegram_provider.utils`.

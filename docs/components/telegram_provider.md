@@ -80,7 +80,7 @@
 ### Celery tasks (`tasks.py`)
 
 - `cleanup_telegram_logs` deletes `TelegramLogs` older than `TELEGRAM_CLEANUP_DAYS`. Beat: `crontab(hour="3", minute="0")` in `rosak/celery.py`. Both join tables CASCADE from `TelegramLogs`, so expiry removes the Event-to-message join rows. The `Event` survives (`spotting_event` is SET_NULL). `/delete` therefore only works within retention, and `auser_deletion` refuses after 3 days in any case.
-- The 00:00 daily digest is owned by `spotting`: `spotting.tasks.report_spotting_today` calls `utils.get_daily_updates` and sends through `utils.send_message`, once per distinct non-empty `telegram_channel_id`, rendered for the channel's first line by `code`. See the spotting doc.
+- The 03:01 daily digest is owned by `spotting`: `spotting.tasks.report_spotting_today` calls `utils.get_daily_updates` with its submission window (`created_between`) and sends through `utils.send_message`, once per distinct non-empty `telegram_channel_id`, rendered for the channel's first line by `code`. See the spotting doc.
 
 ### Settings consumed
 
@@ -106,14 +106,13 @@
   - `send_message(chat_id, text, *, return_log=False, **kwargs)`: the single chokepoint for bot sends. It writes the OUTBOUND row before the first attempt, then applies a per-chat sliding-window limiter (`PerChatRateLimiter`, 30 sends per second). It makes up to `MAX_RETRIES=3` attempts with `2 ** attempt` second backoff, honouring PTB `RetryAfter`. Success sets `sent_at`. Final failure leaves `sent_at=None`, sends a best-effort direct ping to the admin chat (no recursion), and returns `None`.
   - `return_log=True` (keyword-only) returns `(message, log)` and stamps the outbound payload. Use it when a human will act on the message by replying. The default returns the bare `Message`, so existing callers are unchanged.
   - `get_ptb_application()`: returns the lifespan-started app, else the lazy app for the current event loop, else builds one (`initialize()` and `start()`, no webhook) so Celery workers can send. The lazy app is cached per event loop because `async_to_sync` closes each loop it creates, and a reused app then fails with `Event loop is closed`. Raises `TelegramBotNotReady` when no token is set. It uses a function-local import so it reads the current global.
-- **Digest logic:** `utils.get_daily_updates(line_id, spotting_date=None, include_not_in_service=False)` is sync ORM code; callers wrap it. The spotted set is `Event.spotting_date == (spotting_date or today)`. The line's `VehicleLine` roster is bucketed into "Not Spotted", "Spotted Today" (status `IN_SERVICE`), and "Spotted Today, to review" (any other status). `MARRIED` and `DECOMMISSIONED` are always excluded; `OUT_OF_SERVICE` is excluded unless `include_not_in_service`.
-  - **Trap:** the header is always `date.today()`, whatever the argument. The 00:00 digest, which asks for yesterday's date, is therefore labelled with today's date.
+- **Digest logic:** `utils.get_daily_updates(line_id, spotting_date=None, include_not_in_service=False, *, created_between=None)` is sync ORM code; callers wrap it. The spotted set is `Event.spotting_date == (spotting_date or today)`, or, when `created_between=(start, end)` is given (the 03:01 digest), `Event.created` in `[start, end)`. The line's `VehicleLine` roster is bucketed into "Not Spotted", "Spotted Today" (status `IN_SERVICE`), and "Spotted Today, to review" (any other status). `MARRIED` and `DECOMMISSIONED` are always excluded; `OUT_OF_SERVICE` is excluded unless `include_not_in_service`.
+  - The header is the spotting date, or `date.today()` when the argument is omitted. The 03:01 digest passes `D`, so it is headed `D`, the day whose submissions it covers.
 - **Known defects:**
   - `dad_joke` blocks the event loop. `app_config.httpx_client` is the managed client to replace it with.
   - The `views.py` import-time binding (see Entry point).
   - Env-provided numeric settings are strings (see Settings).
   - Provenance lookup in `spot` has no chat filter (see write path).
-  - The digest header ignores its date argument (see above).
 
 ## 🧩 Extension Points & Hooks
 
