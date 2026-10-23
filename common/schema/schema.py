@@ -10,6 +10,7 @@ from strawberry.types import Info
 from strawberry_django.relay import DjangoListConnection
 
 from common.models import Media, User, UserVerificationCode, Vote
+from common.schema.filters import MediaFilter
 from common.schema.inputs import UserInput
 from common.schema.loaders import FILELESS_MEDIA
 from common.schema.scalars import (
@@ -25,7 +26,9 @@ from rosak.permissions import IsLoggedIn
 
 @strawberry.type
 class CommonScalars:
-    medias: DjangoListConnection[MediaType] = strawberry_django.connection()
+    medias: DjangoListConnection[MediaType] = strawberry_django.connection(
+        filters=MediaFilter
+    )
 
     @strawberry.field
     async def media(self, info: Info, id: strawberry.ID) -> Optional[MediaType]:

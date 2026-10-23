@@ -1874,6 +1874,179 @@ class MediasFeedPagingTests(TestCase):
                 )
 
 
+class MediasCreatedYearFilterTests(TestCase):
+    """`medias(filters: {createdYear:})` serves one year of photos directly, so the
+    gallery can jump to an old year without paging through every newer photo (F533)."""
+
+    QUERY = """
+        query ($year: Int, $first: Int!, $after: String) {
+            medias(
+                first: $first
+                after: $after
+                filters: {createdYear: $year}
+                order: {created: DESC}
+            ) {
+                totalCount
+                pageInfo { hasNextPage endCursor }
+                edges { node { id } }
+            }
+        }
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        user = User.objects.create(firebase_id="year-filter-uid", nickname="YearNick")
+
+        def make(name: str, created: datetime, *, has_file: bool = True) -> Media:
+            media = Media.objects.create(
+                uploader=user,
+                file=f"{name}.jpeg" if has_file else "",
+                width=1,
+                height=1,
+            )
+            # `created` comes from the clock, so the year is written by an update.
+            Media.objects.filter(pk=media.pk).update(created=created, modified=created)
+            media.created = created
+            return media
+
+        tie = datetime(2023, 6, 15, 9, 0, 0)
+        cls.y2022 = [make("old", datetime(2022, 6, 1, 12, 0, 0))]
+        cls.y2023 = [
+            make("new_years_day", datetime(2023, 1, 1, 0, 0, 0)),
+            make("tied_a", tie),
+            make("tied_b", tie),
+            make("new_years_eve", datetime(2023, 12, 31, 23, 59, 59, 999999)),
+        ]
+        cls.y2024 = [
+            make("next_new_years_day", datetime(2024, 1, 1, 0, 0, 0)),
+            make("late", datetime(2024, 11, 30, 10, 0, 0)),
+        ]
+        # Rows the feed hides: an empty file name, and a NULL one (which only an
+        # update can store).
+        make("empty", datetime(2024, 5, 5, 8, 0, 0), has_file=False)
+        null_file = make("null", datetime(2024, 5, 6, 8, 0, 0), has_file=False)
+        Media.objects.filter(pk=null_file.pk).update(file=None)
+        cls.visible = [*cls.y2022, *cls.y2023, *cls.y2024]
+
+    @staticmethod
+    def _newest_first(medias: list[Media]) -> list[str]:
+        """The ids a page must give: `created` descending, ties by primary key."""
+        by_pk = sorted(medias, key=lambda m: m.pk)
+        return [
+            str(GlobalID("MediaType", str(m.pk)))
+            for m in sorted(by_pk, key=lambda m: m.created, reverse=True)
+        ]
+
+    async def _page(self, year, first=100, after=None) -> dict:
+        variables = {"first": first, "after": after}
+        if year != "omitted":
+            variables["year"] = year
+        result = await execute_graphql_async(self.QUERY, variables)
+        self.assertIsNone(result.errors)
+        return result.data["medias"]
+
+    @staticmethod
+    def _ids(page: dict) -> list[str]:
+        return [edge["node"]["id"] for edge in page["edges"]]
+
+    async def test_a_filtered_page_holds_only_that_year_and_counts_only_it(self):
+        for year, medias in (
+            (2022, self.y2022),
+            (2023, self.y2023),
+            (2024, self.y2024),
+            (2021, []),
+        ):
+            with self.subTest(year=year):
+                page = await self._page(year)
+
+                self.assertEqual(self._ids(page), self._newest_first(medias))
+                self.assertEqual(page["totalCount"], len(medias))
+                self.assertFalse(page["pageInfo"]["hasNextPage"])
+
+    async def test_the_first_and_last_instants_of_a_year_belong_to_it(self):
+        # 2023-12-31 23:59:59.999999 and 2024-01-01 00:00:00 are one tick apart.
+        self.assertIn(
+            str(GlobalID("MediaType", str(self.y2023[-1].pk))),
+            self._ids(await self._page(2023)),
+        )
+        self.assertEqual(
+            self._ids(await self._page(2024))[-1],
+            str(GlobalID("MediaType", str(self.y2024[0].pk))),
+        )
+
+    async def test_paging_a_year_is_complete_and_the_count_does_not_move(self):
+        expected = self._newest_first(self.y2023)
+
+        for first in (1, 2, 3):
+            with self.subTest(first=first):
+                seen, after = [], None
+                while True:
+                    page = await self._page(2023, first=first, after=after)
+                    seen += self._ids(page)
+                    self.assertEqual(page["totalCount"], len(expected))
+                    if not page["pageInfo"]["hasNextPage"]:
+                        break
+                    after = page["pageInfo"]["endCursor"]
+
+                self.assertEqual(seen, expected)
+
+    async def test_rows_the_feed_hides_stay_hidden_and_uncounted(self):
+        page = await self._page(2024)
+
+        # Four 2024 rows exist; the two with no file are neither listed nor counted.
+        self.assertEqual(self._ids(page), self._newest_first(self.y2024))
+        self.assertEqual(page["totalCount"], 2)
+
+    async def test_each_year_counts_what_the_year_slider_counts(self):
+        result = await execute_graphql_async(
+            "{ mediasGroupByPeriod(type: YEAR) { year count } }"
+        )
+        self.assertIsNone(result.errors)
+
+        for row in result.data["mediasGroupByPeriod"]:
+            with self.subTest(year=row["year"]):
+                self.assertEqual(
+                    (await self._page(row["year"]))["totalCount"], row["count"]
+                )
+
+    async def test_the_type_visibility_rule_applies_under_the_filter(self):
+        hidden = self.y2023[1]
+
+        def hide(cls, queryset, info, **kwargs):
+            return queryset.exclude(pk=hidden.pk)
+
+        with patch.object(MediaType, "get_queryset", classmethod(hide)):
+            page = await self._page(2023)
+
+        self.assertEqual(
+            self._ids(page), self._newest_first([m for m in self.y2023 if m != hidden])
+        )
+        self.assertEqual(page["totalCount"], 3)
+
+    async def test_no_year_or_a_null_year_is_the_unfiltered_feed(self):
+        for year in ("omitted", None):
+            with self.subTest(year=year):
+                page = await self._page(year)
+
+                self.assertEqual(self._ids(page), self._newest_first(self.visible))
+                self.assertEqual(page["totalCount"], len(self.visible))
+
+    async def test_a_year_outside_the_calendar_is_rejected(self):
+        for year in (0, 10000, -1):
+            with (
+                self.subTest(year=year),
+                self.assertLogs("strawberry.execution", "ERROR"),
+            ):
+                result = await execute_graphql_async(
+                    self.QUERY, {"first": 1, "year": year}
+                )
+
+                self.assertEqual(
+                    [error.message for error in result.errors],
+                    ["createdYear must be a year from 1 to 9999."],
+                )
+
+
 class TemporaryMediaConversionTaskTests(TestCase):
     """Video skips PIL; image path still verifies + links EventMedia."""
 

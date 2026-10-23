@@ -606,6 +606,14 @@ input MarkEventAsReadInput {
   eventIds: [ID!]!
 }
 
+input MediaFilter {
+  AND: MediaFilter
+  OR: MediaFilter
+  NOT: MediaFilter
+  DISTINCT: Boolean
+  createdYear: Int
+}
+
 input MediaOrder {
   created: Ordering
   modified: Ordering
@@ -777,6 +785,7 @@ type Query {
   vehicles(filters: VehicleFilter, order: VehicleOrder): [Vehicle!]!
   vehicleTypes(filters: VehicleTypeFilter): [VehicleType!]!
   medias(
+    filters: MediaFilter
     order: MediaOrder
 
     """Returns the items in the list that come before the specified cursor."""
