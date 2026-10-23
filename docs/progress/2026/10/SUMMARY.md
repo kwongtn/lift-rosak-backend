@@ -18,8 +18,15 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 - [20.md](20.md): `Vehicle.lastSpottedAt` tiebreaker.
 - [21.md](21.md): docs squash to current state; `updateUser` null guard, Telegram settings coercion, `argparse.ArgumentError`, `report_spotting_today` date fix; daily digest sends again (DISTINCT ON crash, per-loop PTB app); lines may share a Telegram channel. Frontend audit fix pass, backend side: `media(id)`, anonymous-spotting privacy, GPS strip, GROUP BY year counts, review follow-ups; every image accepted again, HEIC included.
 - [22.md](22.md): feature pass, backend side of the rosak_firebase 2026-10-21 audit: `calendarIncidents` filters (`activeNow`, `upcomingWithinDays`, `lines`, `stations`, `status`), `Asset.status` enum, `daysAgo` and `lineStatusWeekProfile`, web push subscriptions and MAJOR-incident alerts, per-month severity aggregate, medias paging tie-break, `Asset.station`.
+- [24.md](24.md): daily digest moves to 03:01 and covers the 27-hour service day by submission time; `/spotting_today` unchanged; component docs follow.
 
 ## By Module/Feature
+
+### Digest window (Oct 24, spotting)
+
+- **f03d8d8** `[feat](spotting)`: `report_spotting_today` fires at 03:01 (was 00:00) and digests the 27-hour service day `[D 03:01, D+1 03:01)` by `Event.created`, headed D. `get_daily_updates` gains a keyword-only `created_between`; `/spotting_today` keeps its `spotting_date` and 03:00 cutoff.
+- Docs: **f46024a** (progress entry, APPS.md beat row, component docs, MISTAKES pin).
+- Full serial suite 686 → 692 tests, OK; ruff, `manage.py check` and `makemigrations --check` clean. ([24.md](24.md))
 
 ### Feature pass (Oct 22, backend side of the rosak_firebase 2026-10-21 audit feature pass)
 
