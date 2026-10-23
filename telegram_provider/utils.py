@@ -283,10 +283,18 @@ def get_daily_updates(
     line_id: int,
     spotting_date: date | None = None,
     include_not_in_service: bool = False,
+    *,
+    created_between: tuple[datetime, datetime] | None = None,
 ) -> str:
     spotting_date = spotting_date or date.today()
+    # A window selects by submission time, [start, end), instead of spotting_date.
+    spotted_in = (
+        Q(created__gte=created_between[0], created__lt=created_between[1])
+        if created_between
+        else Q(spotting_date=spotting_date)
+    )
     spotted_today_vehicle_ids = (
-        Event.objects.filter(spotting_date=spotting_date)
+        Event.objects.filter(spotted_in)
         .distinct("vehicle")
         .values_list("vehicle_id", flat=True)
     )

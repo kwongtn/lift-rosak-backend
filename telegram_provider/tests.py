@@ -19,11 +19,14 @@ from telegram.constants import ReactionEmoji
 from telegram.error import BadRequest
 
 from common.enums import TemporaryMediaStatus, TemporaryMediaType
+from common.models import User
 from common.tests import HEIC_STUB, jpeg_with_gps
 from incident.enums import SocialMediaLinkStatus
 from incident.services import IncidentServiceError, SocialMediaLinkWrite
 from operation.enums import VehicleStatus
 from operation.models import Line, Vehicle, VehicleLine, VehicleType
+from spotting.enums import SpottingEventType, SpottingVehicleStatus
+from spotting.models import Event
 from telegram_provider.enums import MessageDirection
 from telegram_provider.handlers import (
     approve,
@@ -498,6 +501,31 @@ class GetDailyUpdatesTests(TestCase):
         )
 
         self.assertTrue(output.startswith("<b><u>2026-08-17</u></b>"))
+
+    def test_without_a_window_events_are_picked_by_spotting_date(self):
+        # /spotting_today relies on this: when it was submitted must not matter.
+        event = Event.objects.create(
+            reporter=User.objects.create(firebase_id="digest-spotter"),
+            vehicle=self.vehicle,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=date(2026, 8, 17),
+        )
+        Event.objects.filter(pk=event.pk).update(created=datetime(2026, 8, 20, 12, 0))
+
+        on_spotting_date = get_daily_updates(
+            line_id=self.line.id,
+            spotting_date=date(2026, 8, 17),
+            include_not_in_service=True,
+        )
+        on_created_date = get_daily_updates(
+            line_id=self.line.id,
+            spotting_date=date(2026, 8, 20),
+            include_not_in_service=True,
+        )
+
+        self.assertIn("<u>Spotted Today, to review</u>\nSet 40\n", on_spotting_date)
+        self.assertIn("<u>Not Spotted</u>\nSet 40\n", on_created_date)
 
 
 class PerChatRateLimiterTests(TestCase):

@@ -50,7 +50,8 @@ if "chartography" in settings.INSTALLED_APPS:
 if "spotting" in settings.INSTALLED_APPS:
     beat_schedule["report_spotting_today"] = {
         "task": "spotting.tasks.report_spotting_today",
-        "schedule": crontab(hour="0", minute="0"),
+        # Closes the 03:01-03:00 digest window built in spotting/tasks.py.
+        "schedule": crontab(hour="3", minute="1"),
     }
 
 

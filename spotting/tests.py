@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from asgiref.sync import sync_to_async
+from celery.schedules import crontab
 from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.db import IntegrityError, transaction
@@ -24,6 +25,8 @@ from operation.models import (
     VehicleLine,
     VehicleType,
 )
+from rosak.celery import app as celery_app
+from rosak.celery import beat_schedule
 from rosak.tests import execute_graphql_async
 from rosak.tests.test_schema import assert_maybe_field_behavior
 from spotting.enums import (
@@ -1699,6 +1702,8 @@ class ReportSpottingTodayTaskTests(TestCase):
             display_color="#FF7700",
             telegram_channel_id="234567",
         )
+        self.reporter = User.objects.create(firebase_id="digest-spotter")
+        self.vehicle_type = VehicleType.objects.create(display_name="Innovia Metro 300")
 
     @staticmethod
     def _recording_send_stub(calls):
@@ -1772,45 +1777,111 @@ class ReportSpottingTodayTaskTests(TestCase):
             {line_brt.id, self.line_agl.id},
         )
 
+    def _spotted_kjl_vehicle(
+        self,
+        identification_no: str,
+        created: datetime,
+        spotting_date: date | None = None,
+    ) -> None:
+        vehicle = Vehicle.objects.create(
+            identification_no=identification_no,
+            vehicle_type=self.vehicle_type,
+            status=VehicleStatus.IN_SERVICE,
+        )
+        VehicleLine.objects.create(vehicle=vehicle, line=self.line_kjl)
+        event = Event.objects.create(
+            reporter=self.reporter,
+            vehicle=vehicle,
+            type=SpottingEventType.JUST_SPOTTING,
+            status=SpottingVehicleStatus.IN_SERVICE,
+            spotting_date=spotting_date or created.date(),
+        )
+        # `created` is stamped on insert; update() sets it without save() touching it.
+        Event.objects.filter(pk=event.pk).update(created=created)
+
     def _digest_for_kjl_run_at(self, moment: datetime) -> str:
-        # Pin only the task's own clock. Patching django.utils.timezone.now would
-        # not move auto_now_add (see MISTAKES.md), and the dates under test are
-        # explicit Event.spotting_date values, so nothing else depends on it.
+        # `moment` is naive local time, like Event.created. Pin only the task's own
+        # clock: patching django.utils.timezone.now would not move auto_now_add (see
+        # MISTAKES.md), and every `created` under test is set explicitly. wraps keeps
+        # datetime.combine real.
+        now = moment.replace(tzinfo=ZoneInfo(settings.TIME_ZONE))
         calls = []
         with (
             patch("spotting.tasks.send_message", new=self._recording_send_stub(calls)),
-            patch("spotting.tasks.datetime", **{"now.return_value": moment}),
+            patch(
+                "spotting.tasks.datetime", wraps=datetime, **{"now.return_value": now}
+            ),
         ):
             report_spotting_today.apply()
         return next(c["text"] for c in calls if c["chat_id"] == "123456")
 
-    def test_midnight_run_reports_the_day_that_just_ended(self):
-        # Regression: date.today() - timedelta(hours=12) is date.today(), so a
-        # 00:00 run used to digest the day that had only just begun.
-        vehicle = Vehicle.objects.create(
-            identification_no="Set 40",
-            vehicle_type=VehicleType.objects.create(display_name="Innovia Metro 300"),
-            status=VehicleStatus.IN_SERVICE,
+    def test_beat_fires_daily_at_0301(self):
+        self.assertEqual(
+            beat_schedule["report_spotting_today"]["schedule"],
+            crontab(hour="3", minute="1"),
         )
-        VehicleLine.objects.create(vehicle=vehicle, line=self.line_kjl)
-        Event.objects.create(
-            reporter=User.objects.create(firebase_id="digest-spotter"),
-            vehicle=vehicle,
-            type=SpottingEventType.JUST_SPOTTING,
-            status=SpottingVehicleStatus.IN_SERVICE,
-            spotting_date=date(2026, 10, 20),
-        )
-        kl = ZoneInfo(settings.TIME_ZONE)
+        # Local only because Celery falls back to TIME_ZONE (CELERY_TIMEZONE is unset
+        # while USE_TZ is False); otherwise beat would tick in UTC.
+        self.assertEqual(str(celery_app.timezone), settings.TIME_ZONE)
 
-        midnight = self._digest_for_kjl_run_at(
-            datetime(2026, 10, 21, 0, 0, 5, tzinfo=kl)
-        )
-        self.assertIn("2026-10-20", midnight)
-        self.assertIn("<u>Spotted Today</u>\nSet 40", midnight)
+    def test_digest_covers_0301_yesterday_up_to_0300_today(self):
+        # The Tue 03:01 run covers the half-open [Mon 03:01:00, Tue 03:01:00).
+        self._spotted_kjl_vehicle("Set 41", datetime(2026, 10, 19, 3, 0, 59))
+        self._spotted_kjl_vehicle("Set 42", datetime(2026, 10, 19, 3, 1, 0))
+        self._spotted_kjl_vehicle("Set 43", datetime(2026, 10, 20, 3, 0, 59))
+        self._spotted_kjl_vehicle("Set 44", datetime(2026, 10, 20, 3, 1, 0))
 
-        # From the 03:00 service-day cutoff on, the new day is the reported one.
-        after_cutoff = self._digest_for_kjl_run_at(
-            datetime(2026, 10, 21, 3, 0, 5, tzinfo=kl)
+        digest = self._digest_for_kjl_run_at(datetime(2026, 10, 20, 3, 1, 5))
+
+        self.assertIn("<u>Spotted Today</u>\nSet 42, Set 43\n", digest)
+        self.assertIn("<u>Not Spotted</u>\nSet 41, Set 44\n", digest)
+
+    def test_submission_time_decides_not_spotting_date(self):
+        # spotting_date is user-entered; only when the event was submitted counts.
+        self._spotted_kjl_vehicle(
+            "Set 41", datetime(2026, 10, 19, 12, 0), spotting_date=date(2026, 10, 18)
         )
-        self.assertIn("2026-10-21", after_cutoff)
-        self.assertIn("<u>Spotted Today</u>\n<i>None</i>", after_cutoff)
+        self._spotted_kjl_vehicle(
+            "Set 42", datetime(2026, 10, 20, 5, 0), spotting_date=date(2026, 10, 19)
+        )
+
+        # Picked up at 10:00, so the Tue 05:00 submission already exists.
+        digest = self._digest_for_kjl_run_at(datetime(2026, 10, 20, 10, 0))
+
+        self.assertIn("<u>Spotted Today</u>\nSet 41\n", digest)
+        self.assertIn("<u>Not Spotted</u>\nSet 42\n", digest)
+
+    def test_on_time_and_late_runs_report_the_day_that_closed(self):
+        # Regression: date.today() - timedelta(hours=12) is date.today(), so the
+        # digest used to cover the day that had only just begun.
+        self._spotted_kjl_vehicle("Set 41", datetime(2026, 10, 19, 12, 0))
+
+        on_time = self._digest_for_kjl_run_at(datetime(2026, 10, 20, 3, 1, 5))
+        late = self._digest_for_kjl_run_at(datetime(2026, 10, 20, 10, 0))
+
+        self.assertTrue(on_time.startswith("<b><u>2026-10-19</u></b>"))
+        self.assertIn("<u>Spotted Today</u>\nSet 41\n", on_time)
+        self.assertEqual(late, on_time)
+
+    def test_runs_before_0301_split_at_the_0300_service_day_cutoff(self):
+        self._spotted_kjl_vehicle("Set 41", datetime(2026, 10, 18, 12, 0))
+        self._spotted_kjl_vehicle("Set 42", datetime(2026, 10, 19, 12, 0))
+
+        # Beat's catch-up after a restart: the Mon 03:01 window is still open, so the
+        # last one that closed (Sun 03:01 to Mon 03:01) is reported.
+        early = self._digest_for_kjl_run_at(datetime(2026, 10, 20, 1, 20, 51))
+        # A worker clock a hair behind beat's must not fall back to that window.
+        skewed = self._digest_for_kjl_run_at(datetime(2026, 10, 20, 3, 0, 59, 900000))
+
+        self.assertTrue(early.startswith("<b><u>2026-10-18</u></b>"))
+        self.assertIn("<u>Spotted Today</u>\nSet 41\n", early)
+        self.assertTrue(skewed.startswith("<b><u>2026-10-19</u></b>"))
+        self.assertIn("<u>Spotted Today</u>\nSet 42\n", skewed)
+
+    def test_a_window_without_submissions_renders_none(self):
+        self._spotted_kjl_vehicle("Set 41", datetime(2026, 10, 20, 3, 1, 0))
+
+        digest = self._digest_for_kjl_run_at(datetime(2026, 10, 20, 3, 1, 5))
+
+        self.assertIn("<u>Spotted Today</u>\n<i>None</i>", digest)
+        self.assertIn("<u>Not Spotted</u>\nSet 41\n", digest)
