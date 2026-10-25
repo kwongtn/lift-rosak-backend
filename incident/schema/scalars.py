@@ -616,7 +616,9 @@ class CalendarIncidentScalar:
 class CalendarIncidentHistoryEntryScalar:
     """One diffed history entry for a CalendarIncident (django-simple-history).
 
-    ``timestamp`` is the history record's ``history_date`` (UTC).
+    ``timestamp`` is the history record's ``history_date``: naive Asia/Kuala_Lumpur
+    wall time (``USE_TZ = False``), serialised with no offset. Never
+    make_aware/astimezone it.
     ``actor`` is the changing user's display identity — nickname, or the first 8
     chars of firebase_id when nickname is blank — and ``None`` when the change was
     made by the system or an anonymous actor (no ``history_user``).
