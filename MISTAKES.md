@@ -10,6 +10,19 @@
 
 ## Traps
 
+### [2026-10-24] incident / common: an aware client datetime never equals a stored naive one, and the operator CLI read UTC days
+
+**Problem**: A sweep that anchors every timing to Kuala Lumpur time (`USE_TZ = False`, `TIME_ZONE = "Asia/Kuala_Lumpur"`) found four backend defects:
+
+- `replace_chronologies` silently dropped `PENDING_DELETION` and `PENDING_APPROVAL` from every chronology that had a time. The web console posted chronology times as `...Z` (aware UTC) until rosak_firebase `f853bb67` (stale bundles and other clients still can) and the DB reads back naive KL, so the identity key `(indicator, datetime, source_url, content)` never matched and the recreated row took the parent's status. An admin re-saving a LIVE incident cancelled a pending deletion request without a word. The existing test passed because its chronology had `datetime=None`.
+- `ingest_official_posts` and `export_official_posts` read `--since` / `--until` as UTC days (documented and test-pinned). `--since 2026-09-01` started at 08:00 KL, so a post at 03:00 KL that day was left out, and `--until D` ran into the next KL morning.
+- `get_trends(end=date.today())` evaluated its default once at import, so a process that outlived midnight kept ending on the old day. Latent: every caller passes `end`.
+- The `CalendarIncidentHistoryEntryScalar.timestamp` docstring said UTC. The value is naive KL, and the docstring invited a second +08:00 shift.
+
+**Root Cause**: `USE_TZ = False` makes naive KL the storage frame by convention, while Strawberry's `DateTime` scalar parses `...Z` to aware UTC. Python raises nothing for `naive == aware`: it is `False` and the hashes differ, so a key built from one never finds the other. The CLI bounds were written as UTC calendar days as if the project had no zone. A default argument is evaluated when the function is defined.
+**Fix**: `shared.naive_kl` converts an aware value to naive KL once, at the resolver boundary (`write_from_input`, `chronology_write_from_input`), so both sides of the key share one frame. The stored instant is unchanged. The command bounds are `ZoneInfo(settings.TIME_ZONE)` days, and `fetch_user_posts` converts them to UTC for the X API. `get_trends` resolves `end` per call. The docstring says naive KL. Tests: `incident/tests_datetime_frame.py` (a `Z`, `+08:00` and naive resave of both pending states), the KL window tests in `incident/tests.py`, and `TestDateUtilities.test_get_trends_end_defaults_to_today_at_call_time`.
+**Prevention**: Never compare, hash or key a client datetime against a stored one before both are in one frame. Convert once at the boundary, and test with a `...Z` input, because a fixture with naive values or `None` hides the bug. A date typed by an operator is a KL calendar day, sent to a UTC-only API as UTC. Never put `date.today()` or `datetime.now()` in a default argument. Found but not changed: `/spot` files the KL calendar date while `/spotting_today` defaults to the 03:00 service day (a policy question), and `EventFilter.spotted` (`spotting/schema/filters.py`) names no `Event` field, so that filter always fails.
+
 ### [2026-10-24] tests: rows made "minutes ago" fall outside the current service day for a few minutes after 03:00
 
 **Problem**: A new test of `publicSocialMediaLinks(currentServiceDayOnly: true)` failed when the suite ran at 03:01 and would pass at any other time. Its two "today" rows were created one and two minutes before `now`, and the older one sat before the 03:00 service-day start, so the window dropped it (`1 != 2`).
