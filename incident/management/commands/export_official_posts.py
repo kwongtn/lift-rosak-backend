@@ -15,9 +15,9 @@ Semantics worth knowing before running it:
 * Only automatically ingested rows (``is_automated=True``) are exported. A
   community-submitted link is never part of the operator's archive, however
   much it may look like one.
-* ``--since`` / ``--until`` are **inclusive calendar dates in UTC** over
-  ``posted_at`` (the post time, not the ingest time) and use the same window
-  semantics as the ingest command: ``--since D`` is ``D 00:00:00Z`` and
+* ``--since`` / ``--until`` are **inclusive calendar dates in Kuala Lumpur time**
+  over ``posted_at`` (the post time, not the ingest time) and use the same window
+  semantics as the ingest command: ``--since D`` is ``D 00:00:00+08:00`` and
   ``--until D`` is the whole of D. A row with no known post time falls inside no
   window.
 * The columns are the HuggingFace dataset schema — ``post_id``, ``posted_at``,
@@ -59,10 +59,12 @@ import csv
 import json
 import os
 from collections.abc import Iterable, Iterator
-from datetime import UTC, date, datetime, time
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import F
 
@@ -208,14 +210,14 @@ class Command(BaseCommand):
         parser.add_argument(
             "--since",
             metavar="YYYY-MM-DD",
-            help="Inclusive UTC start date over posted_at (00:00:00Z).",
+            help="Inclusive Kuala Lumpur start date over posted_at (00:00:00+08:00).",
         )
         parser.add_argument(
             "--until",
             metavar="YYYY-MM-DD",
             help=(
-                "Inclusive UTC end date over posted_at — the whole day, up to "
-                "23:59:59.999999Z."
+                "Inclusive Kuala Lumpur end date over posted_at — the whole day, "
+                "up to 23:59:59.999999+08:00."
             ),
         )
         parser.add_argument(
@@ -339,13 +341,13 @@ class Command(BaseCommand):
     def _parse_date(
         self, raw: str | None, flag: str, *, end_of_day: bool = False
     ) -> datetime | None:
-        """Parse ``YYYY-MM-DD`` into an aware UTC bound.
+        """Parse ``YYYY-MM-DD`` into an aware Kuala Lumpur bound.
 
         ``end_of_day`` takes the last microsecond of the day, so ``--until D``
         covers the whole of D. The bound stays aware on purpose: the project
-        runs ``USE_TZ = False``, and Django's adapter converts the aware value
-        into the storage frame when it builds the query, so a UTC calendar day
-        is what gets compared either way.
+        runs ``USE_TZ = False``, and an aware value reaches PostgreSQL as a
+        ``timestamptz`` that is compared by instant with the stored column, so a
+        KL calendar day is what gets compared (no UTC step is needed).
         """
         if not raw:
             return None
@@ -354,7 +356,7 @@ class Command(BaseCommand):
         except ValueError:
             raise CommandError(f"{flag} must be YYYY-MM-DD (got {raw!r})") from None
         moment = time(23, 59, 59, 999999) if end_of_day else time(0, 0)
-        return datetime.combine(parsed, moment, tzinfo=UTC)
+        return datetime.combine(parsed, moment, tzinfo=ZoneInfo(settings.TIME_ZONE))
 
     # --- query ----------------------------------------------------------
 

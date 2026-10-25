@@ -40,7 +40,7 @@ import html
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -407,6 +407,8 @@ def fetch_user_posts(
     billed); ``start_time`` / ``end_time`` are the backfill window. Both are
     applied inside the endpoint's ~3,200-post window, so an older ``start_time``
     cannot be honoured — the manual command says so rather than pretending.
+    The API takes UTC, so the bounds are converted on the way out (the manual
+    command passes aware Kuala Lumpur days).
 
     Raises ``OfficialPostFetchError`` on any transport, status or decode
     failure, with a sanitized reason.
@@ -431,9 +433,9 @@ def fetch_user_posts(
         if since_id:
             params["since_id"] = since_id
         if start_time is not None:
-            params["start_time"] = start_time.isoformat()
+            params["start_time"] = start_time.astimezone(UTC).isoformat()
         if end_time is not None:
-            params["end_time"] = end_time.isoformat()
+            params["end_time"] = end_time.astimezone(UTC).isoformat()
         if exclude_retweets:
             params["exclude"] = "retweets"
         if pagination_token:

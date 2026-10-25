@@ -16,11 +16,14 @@ Semantics worth knowing before running it:
   tracked. A ``--handle`` is resolved through the shared ``resolve_account``
   (auto-registering an unknown handle under the ``Unassigned`` agency), so a
   manual run can ingest an account the registry does not know yet.
-* ``--since`` / ``--until`` are **inclusive calendar dates in UTC** and become
-  the X API's ``start_time`` / ``end_time``. ``--since D`` is ``D 00:00:00Z``;
-  ``--until D`` is ``D 23:59:59.999999Z``, i.e. the whole of that day (the
-  alternative — a midnight bound — would silently drop the final day of a
+* ``--since`` / ``--until`` are **inclusive calendar dates in Kuala Lumpur time**
+  (``settings.TIME_ZONE``, the project's one frame) and become the X API's
+  ``start_time`` / ``end_time``. ``--since D`` is ``D 00:00:00+08:00``;
+  ``--until D`` is ``D 23:59:59.999999+08:00``, i.e. the whole of that KL day
+  (the alternative — a midnight bound — would silently drop the final day of a
   backfill, which is the shape of bug this command exists to avoid).
+  ``fetch_user_posts`` converts the aware bounds to UTC on the wire, so
+  ``--since 2026-09-01`` asks for ``2026-08-31T16:00:00+00:00`` onwards.
 * They are mutually exclusive with ``since_id``: a windowed run fetches by date
   only, and an unwindowed run uses ``since_id`` (the cheap incremental filter).
   Passing both is refused rather than silently resolved.
@@ -48,8 +51,9 @@ Semantics worth knowing before running it:
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time
+from datetime import date, datetime, time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -100,14 +104,17 @@ class Command(BaseCommand):
         parser.add_argument(
             "--since",
             metavar="YYYY-MM-DD",
-            help="Inclusive UTC start date (API start_time). Mutually exclusive with --fixture.",
+            help=(
+                "Inclusive Kuala Lumpur start date (API start_time). Mutually "
+                "exclusive with --fixture."
+            ),
         )
         parser.add_argument(
             "--until",
             metavar="YYYY-MM-DD",
             help=(
-                "Inclusive UTC end date (API end_time) — the whole day, up to "
-                "23:59:59.999999Z."
+                "Inclusive Kuala Lumpur end date (API end_time) — the whole day, "
+                "up to 23:59:59.999999+08:00."
             ),
         )
         parser.add_argument(
@@ -209,7 +216,7 @@ class Command(BaseCommand):
     def _parse_date(
         self, raw: str | None, flag: str, *, end_of_day: bool = False
     ) -> datetime | None:
-        """Parse ``YYYY-MM-DD`` into an aware UTC bound.
+        """Parse ``YYYY-MM-DD`` into an aware Kuala Lumpur bound.
 
         ``end_of_day`` takes the last microsecond of the day so ``--until D``
         covers the whole of D.
@@ -221,7 +228,7 @@ class Command(BaseCommand):
         except ValueError:
             raise CommandError(f"{flag} must be YYYY-MM-DD (got {raw!r})") from None
         moment = time(23, 59, 59, 999999) if end_of_day else time(0, 0)
-        return datetime.combine(parsed, moment, tzinfo=UTC)
+        return datetime.combine(parsed, moment, tzinfo=ZoneInfo(settings.TIME_ZONE))
 
     def _author(self) -> User:
         try:

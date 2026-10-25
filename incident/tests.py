@@ -14,6 +14,7 @@ from pathlib import Path
 from types import GeneratorType, SimpleNamespace
 from unittest import mock
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 from asgiref.sync import async_to_sync
 from celery.schedules import crontab
@@ -4108,6 +4109,28 @@ class OfficialPostBoundedFetchTests(TestCase):
         self.assertEqual(params["max_results"], 5)
         self.assertEqual(headers["Authorization"], "Bearer test-bearer-token")
 
+    @override_settings(X_API_BEARER_TOKEN="test-bearer-token")
+    def test_kl_aware_window_bounds_reach_the_api_as_utc(self):
+        # The manual command bounds are Kuala Lumpur days. The X API takes UTC,
+        # so the offset must be converted, not forwarded as ``+08:00``.
+        kl = ZoneInfo(settings.TIME_ZONE)
+        captured = []
+
+        def fake_get_json(url, *, params, headers, context):
+            captured.append(dict(params))
+            return {"data": []}
+
+        with mock.patch.object(official_posts, "_get_json", side_effect=fake_get_json):
+            fetch_user_posts(
+                self.account,
+                start_time=datetime(2026, 9, 1, tzinfo=kl),
+                end_time=datetime(2026, 9, 2, 23, 59, 59, 999999, tzinfo=kl),
+                limit=5,
+            )
+
+        self.assertEqual(captured[-1]["start_time"], "2026-08-31T16:00:00+00:00")
+        self.assertEqual(captured[-1]["end_time"], "2026-09-02T15:59:59.999999+00:00")
+
     def test_a_missing_user_id_is_resolved_once_and_persisted(self):
         # Not a seeded row: ``user_id`` stays empty, which is the only state
         # that triggers the profile lookup. The registry is the source of
@@ -5452,17 +5475,18 @@ class IngestOfficialPostsCommandTests(TestCase):
 
         self.assertIn("YYYY-MM-DD", str(caught.exception))
 
-    def test_window_bounds_are_whole_utc_days(self):
+    def test_window_bounds_are_whole_kl_days(self):
         command = self._call_command_class()
+        kl = ZoneInfo(settings.TIME_ZONE)
 
-        self.assertEqual(
-            command._parse_date("2026-09-01", "--since"),
-            datetime(2026, 9, 1, 0, 0, tzinfo=UTC),
-        )
-        self.assertEqual(
-            command._parse_date("2026-09-02", "--until", end_of_day=True),
-            datetime(2026, 9, 2, 23, 59, 59, 999999, tzinfo=UTC),
-        )
+        since = command._parse_date("2026-09-01", "--since")
+        until = command._parse_date("2026-09-02", "--until", end_of_day=True)
+
+        self.assertEqual(since, datetime(2026, 9, 1, 0, 0, tzinfo=kl))
+        self.assertEqual(until, datetime(2026, 9, 2, 23, 59, 59, 999999, tzinfo=kl))
+        # A KL midnight is 16:00Z the day before: not the UTC day it used to be.
+        self.assertEqual(since, datetime(2026, 8, 31, 16, 0, tzinfo=UTC))
+        self.assertEqual(until, datetime(2026, 9, 2, 15, 59, 59, 999999, tzinfo=UTC))
 
     def test_until_before_since_is_refused(self):
         with self.assertRaises(CommandError) as caught:
@@ -5504,17 +5528,20 @@ class IngestOfficialPostsCommandTests(TestCase):
 
         # A windowed run must not also pass since_id: the API window is the
         # limit, and asking for both is how a backfill silently under-fetches.
+        kl = ZoneInfo(settings.TIME_ZONE)
         self.assertEqual(
-            fetch.call_args.kwargs["start_time"], datetime(2020, 1, 1, tzinfo=UTC)
+            fetch.call_args.kwargs["start_time"], datetime(2020, 1, 1, tzinfo=kl)
         )
         self.assertEqual(
             fetch.call_args.kwargs["end_time"],
-            datetime(2020, 1, 31, 23, 59, 59, 999999, tzinfo=UTC),
+            datetime(2020, 1, 31, 23, 59, 59, 999999, tzinfo=kl),
         )
         self.assertNotIn("since_id", fetch.call_args.kwargs)
         self.assertIn("created=2", out)
         # The oldest post the endpoint returned is still newer than --since.
         self.assertIn("3,200 posts", err)
+        # The warning names the KL day the operator typed, not a UTC day.
+        self.assertIn("nothing older than 2020-01-01", err)
 
     def test_reachable_window_prints_no_limit_warning(self):
         posts = load_fixture_posts(str(SAMPLE_FIXTURE))
@@ -5774,15 +5801,15 @@ class ExportOfficialPostsCommandTests(TestCase):
             len(self._records("--since", "2026-09-01", "--until", "2026-09-30")), 3
         )
 
-    def test_date_bounds_are_whole_utc_days_not_local_ones(self):
+    def test_date_bounds_are_whole_kl_days_not_utc_ones(self):
         # 16:30Z is already 27 Sep in Asia/Kuala_Lumpur, and the project stores
-        # naive local time (USE_TZ = False). A local-day reading of the window
-        # would file this post under the 27th; the UTC-day reading keeps it on
+        # naive KL time (USE_TZ = False). The window is a KL calendar day, so
+        # this post belongs to the 27th; a UTC-day reading would file it under
         # the 26th.
         self._store(
             url="https://x.com/askrapidkl/status/1791552600000000009",
             title="late utc",
-            description="26 Sep 16:30Z",
+            description="26 Sep 16:30Z = 27 Sep 00:30 KL",
             post_id="1791552600000000009",
             posted_at=datetime(2026, 9, 26, 16, 30, tzinfo=UTC),
         )
@@ -5790,8 +5817,43 @@ class ExportOfficialPostsCommandTests(TestCase):
         on_the_26th = [r["post_id"] for r in self._records("--until", "2026-09-26")]
         on_the_27th = [r["post_id"] for r in self._records("--since", "2026-09-27")]
 
-        self.assertIn("1791552600000000009", on_the_26th)
-        self.assertEqual(on_the_27th, [])
+        self.assertNotIn("1791552600000000009", on_the_26th)
+        self.assertEqual(on_the_27th, ["1791552600000000009"])
+
+    def test_the_small_hours_of_a_kl_day_fall_inside_that_day(self):
+        # 03:00 KL on 1 Sep is 19:00Z on 31 Aug: the UTC-day bound used to drop
+        # it from ``--since 2026-09-01`` and file it under 31 Aug.
+        self._store(
+            url="https://x.com/askrapidkl/status/1791552600000000010",
+            title="small hours",
+            description="1 Sep 03:00 KL",
+            post_id="1791552600000000010",
+            posted_at=datetime(2026, 8, 31, 19, 0, tzinfo=UTC),
+        )
+
+        since = [r["post_id"] for r in self._records("--since", "2026-09-01")]
+        until_the_31st = [r["post_id"] for r in self._records("--until", "2026-08-31")]
+        on_the_1st = [
+            r["post_id"]
+            for r in self._records("--since", "2026-09-01", "--until", "2026-09-01")
+        ]
+
+        self.assertIn("1791552600000000010", since)
+        self.assertNotIn("1791552600000000010", until_the_31st)
+        self.assertEqual(on_the_1st, ["1791552600000000010"])
+
+    def test_date_bounds_parse_to_aware_kl_datetimes(self):
+        command = self._command()
+        kl = ZoneInfo(settings.TIME_ZONE)
+
+        self.assertEqual(
+            command._parse_date("2026-09-01", "--since"),
+            datetime(2026, 9, 1, 0, 0, tzinfo=kl),
+        )
+        self.assertEqual(
+            command._parse_date("2026-09-01", "--until", end_of_day=True),
+            datetime(2026, 9, 1, 23, 59, 59, 999999, tzinfo=kl),
+        )
 
     def test_community_rows_are_never_exported(self):
         records = self._records()
