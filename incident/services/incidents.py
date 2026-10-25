@@ -75,6 +75,11 @@ async def replace_chronologies(
     deletion request. Only approve/rejectChronologyDeletion mutations may
     resolve a PENDING_DELETION state.
 
+    The key's ``datetime`` is naive KL on both sides: rows read back from the DB
+    that way (``USE_TZ = False``), and callers must hand ``writes`` over in the
+    same frame (the resolvers do, via ``shared.naive_kl``). An aware value would
+    never equal a stored one, so the pending state would be silently lost.
+
     Caveat: if a user edits BOTH a chronology's content and expects the
     deletion-preservation for that same row, the flag is lost — the content
     change means no old row matches, so inherit_status applies. Acceptable:
