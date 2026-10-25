@@ -18,9 +18,16 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 - [20.md](20.md): `Vehicle.lastSpottedAt` tiebreaker.
 - [21.md](21.md): docs squash to current state; `updateUser` null guard, Telegram settings coercion, `argparse.ArgumentError`, `report_spotting_today` date fix; daily digest sends again (DISTINCT ON crash, per-loop PTB app); lines may share a Telegram channel. Frontend audit fix pass, backend side: `media(id)`, anonymous-spotting privacy, GPS strip, GROUP BY year counts, review follow-ups; every image accepted again, HEIC included.
 - [22.md](22.md): feature pass, backend side of the rosak_firebase 2026-10-21 audit: `calendarIncidents` filters (`activeNow`, `upcomingWithinDays`, `lines`, `stations`, `status`), `Asset.status` enum, `daysAgo` and `lineStatusWeekProfile`, web push subscriptions and MAJOR-incident alerts, per-month severity aggregate, medias paging tie-break, `Asset.station`.
-- [24.md](24.md): daily digest moves to 03:01 and covers the 27-hour service day by submission time; `/spotting_today` unchanged; component docs follow.
+- [24.md](24.md): daily digest moves to 03:01 and covers the 27-hour service day by submission time; `/spotting_today` unchanged; component docs follow. Kuala Lumpur time sweep: aware client datetimes normalised to naive KL, official-post CLI days in KL, `get_trends` end resolved per call.
 
 ## By Module/Feature
+
+### Kuala Lumpur time sweep (Oct 24, incident / common)
+
+- **decc83f** `[fix](incident)`: incident and chronology datetimes pass through `shared.naive_kl`, so an aware client value (`...Z`) no longer misses the stored naive one in `replace_chronologies`, and a pending deletion or approval survives an admin resave.
+- **1298dd5** `[fix](incident)`: `ingest_official_posts` and `export_official_posts` read `--since` / `--until` as Kuala Lumpur days (they were UTC days); `fetch_user_posts` still sends UTC to the X API. **8086023** `[docs](incident)`: the history entry timestamp is naive KL, not UTC. **0551419** `[fix](common)`: `get_trends` resolves `end` at call time.
+- Docs: **0e47d9e** (progress entry, MISTAKES trap, APPS.md row, incident and common component docs).
+- Full serial suite 712 → 725 tests, OK; ruff, `manage.py check` and `makemigrations --check` clean. ([24.md](24.md))
 
 ### Digest window (Oct 24, spotting)
 
