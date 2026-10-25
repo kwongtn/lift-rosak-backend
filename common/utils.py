@@ -211,13 +211,17 @@ def get_trends(
     filters: Q = Q(),
     additional_groupby={},
     start: date = None,
-    end: date = date.today(),
+    end: date | None = None,
     date_group: DateGroupings = DateGroupings.DAY,
     free_range: bool = False,
     add_zero: bool = False,
 ):
     if start is None:
         start = get_default_start_time(type=date_group)
+
+    # Resolved per call: a default argument would freeze the clock at import.
+    if end is None:
+        end = date.today()
 
     display_year = date_group in [
         DateGroupings.DAY,

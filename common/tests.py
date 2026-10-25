@@ -48,7 +48,7 @@ from common.tasks import (
     cleanup_temporary_media_task,
     convert_temporary_media_to_media_task,
 )
-from common.utils import get_date_key, get_default_start_time
+from common.utils import get_date_key, get_default_start_time, get_trends
 from common.views import GenericUpload
 from generic.schema.enums import DateGroupings
 from incident.enums import PassengerStatus
@@ -208,6 +208,25 @@ class TestDateUtilities(TestCase):
         today = date.today()
         expected = (today - timedelta(days=today.weekday())) - timedelta(days=56)
         self.assertEqual(get_default_start_time(DateGroupings.WEEK), expected)
+
+    def _last_trend_key(self, today):
+        with patch("common.utils.date") as frozen_date:
+            frozen_date.today.return_value = today
+            results = get_trends(
+                groupby_field="spotting_date",
+                count_model=Event,
+                start=date(2031, 3, 1),
+                date_group=DateGroupings.DAY,
+                add_zero=True,
+            )
+        return results[-1]["date_key"]
+
+    def test_get_trends_end_defaults_to_today_at_call_time(self):
+        # `end` used to be a `date.today()` default argument, evaluated once at
+        # import: a worker that outlived midnight kept ending on the old day.
+        self.assertEqual(self._last_trend_key(date(2031, 3, 3)), "2031-03-03")
+        # The same process, a day later: the end must follow the clock.
+        self.assertEqual(self._last_trend_key(date(2031, 3, 4)), "2031-03-04")
 
 
 class CleanupExpiredVerificationCodesTaskTests(TestCase):
