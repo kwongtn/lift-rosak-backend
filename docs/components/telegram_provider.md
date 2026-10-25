@@ -68,7 +68,7 @@
 1. Look up the verified user by `telegram_id`. Parse argv.
 2. Get the lines bound to the channel, then every `Vehicle` on those lines, excluding `MARRIED` and `DECOMMISSIONED`.
 3. Match in Python on the exact, case-insensitive **match key** (`handlers.vehicle_number_match_key`). Spaces are stripped when they are the number's only special characters; otherwise the text before the first space is kept. Examples: `EMU 03` becomes `EMU03`; `03 (40 renum)` becomes `03`. The first match wins, in `Vehicle.Meta.ordering` (`identification_no`). Two vehicles with the same key are ambiguous, and the reporter gets only 👍.
-4. Build `spotting.Event`: `spotting_date` is the message timestamp converted UTC to `settings.TIME_ZONE`; `type=JUST_SPOTTING`; `data_source` is the `EventSource` named `TELEGRAM`. Save it, and in parallel fetch the newest `TelegramLogs` row whose `payload.message.message_id` matches. Create the `TelegramSpottingEventLog` join row.
+4. Build `spotting.Event`: `spotting_date` is the message timestamp converted UTC to `settings.TIME_ZONE`, as the calendar date with no 03:00 cutoff (intended: `/spot` files the calendar day while `/spotting_today` reads the 27:00 working day; owner, 2026-10-25); `type=JUST_SPOTTING`; `data_source` is the `EventSource` named `TELEGRAM`. Save it, and in parallel fetch the newest `TelegramLogs` row whose `payload.message.message_id` matches. Create the `TelegramSpottingEventLog` join row.
 5. Success: 👍. Any failure: 👎, then re-raise.
 
 **Trap:** step 4's provenance lookup has no chat filter (`/delete` has one). Telegram message ids are unique only per chat, so a collision can bind the Event to another chat's message.
