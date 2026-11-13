@@ -18,7 +18,7 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 - [20.md](20.md): `Vehicle.lastSpottedAt` tiebreaker.
 - [21.md](21.md): docs squash to current state; `updateUser` null guard, Telegram settings coercion, `argparse.ArgumentError`, `report_spotting_today` date fix; daily digest sends again (DISTINCT ON crash, per-loop PTB app); lines may share a Telegram channel. Frontend audit fix pass, backend side: `media(id)`, anonymous-spotting privacy, GPS strip, GROUP BY year counts, review follow-ups; every image accepted again, HEIC included.
 - [22.md](22.md): feature pass, backend side of the rosak_firebase 2026-10-21 audit: `calendarIncidents` filters (`activeNow`, `upcomingWithinDays`, `lines`, `stations`, `status`), `Asset.status` enum, `daysAgo` and `lineStatusWeekProfile`, web push subscriptions and MAJOR-incident alerts, per-month severity aggregate, medias paging tie-break, `Asset.station`.
-- [24.md](24.md): daily digest moves to 03:01 and covers the 27-hour service day by submission time; `/spotting_today` unchanged; component docs follow. Kuala Lumpur time sweep: aware client datetimes normalised to naive KL, official-post CLI days in KL, `get_trends` end resolved per call.
+- [24.md](24.md): daily digest moves to 03:01 and covers the 27-hour service day by submission time; `/spotting_today` unchanged; component docs follow. Kuala Lumpur time sweep: aware client datetimes normalised to naive KL, official-post CLI days in KL, `get_trends` end resolved per call. Performance pass, backend side of the rosak_firebase audit: `UserScalar.spottings` pages with `limit` and `offset`, `medias` filters by `createdYear`, `publicSocialMediaLinks` takes `automatedOnly`.
 
 ## By Module/Feature
 
@@ -28,6 +28,14 @@ Total commits: 15 non-merge Oct 1–20 (`git log --no-merges`, counted 2026-10-2
 - **1298dd5** `[fix](incident)`: `ingest_official_posts` and `export_official_posts` read `--since` / `--until` as Kuala Lumpur days (they were UTC days); `fetch_user_posts` still sends UTC to the X API. **8086023** `[docs](incident)`: the history entry timestamp is naive KL, not UTC. **0551419** `[fix](common)`: `get_trends` resolves `end` at call time.
 - Docs: **0e47d9e** (progress entry, MISTAKES trap, APPS.md row, incident and common component docs).
 - Full serial suite 712 → 725 tests, OK; ruff, `manage.py check` and `makemigrations --check` clean. ([24.md](24.md))
+
+### Performance pass (Oct 24, backend side of the rosak_firebase 2026-10-21 audit performance theme)
+
+- **939f1a5** `[feat](common)`: `UserScalar.spottings(limit: Int = null, offset: Int! = 0)` pages a profile's history, newest submission first (`created DESC, id DESC`), 1 to 200 rows per page. With no limit it is unchanged (the batched loader). The privacy rules are unchanged, and `offset` without `limit` raises a `GraphQLError` (F252). A 30-row page costs 4 queries; offset 20,000 of the largest dev history takes 34 ms.
+- **675af64** `[feat](common)`: `medias(filters: MediaFilter)` with `createdYear`. Fileless rows stay hidden and `totalCount` follows the filter; a year outside 1 to 9999 is a `GraphQLError` (F533).
+- **17a23fb** `[feat](incident)`: `publicSocialMediaLinks(automatedOnly: Boolean! = false)` narrows to official posts after the moderation gates and before the collapse, the windows, the count and the cursor (F539).
+- Docs: **a8f4d1c** (progress entry, MISTAKES test trap, common and incident component docs, privacy doc).
+- Full serial suite 692 → 712 tests, OK; ruff, `manage.py check` and `makemigrations --check` clean. All three changes are additive. The frontend reads them on the profile, gallery and home pages (rosak_firebase progress, 2026-11-14). ([24.md](24.md))
 
 ### Digest window (Oct 24, spotting)
 
